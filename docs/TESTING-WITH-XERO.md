@@ -57,15 +57,22 @@ Generate a secret. You now have a client id and secret **that have nothing to do
 with WazzOCR** — authorising this app cannot supersede WazzOCR's token, because
 the supersede rule is per Xero user *and app*.
 
-Scopes Bills Hub asks for:
+Scopes Bills Hub asks for — one per endpoint it actually calls:
 
 ```
 openid profile email offline_access
-accounting.transactions          read + write invoices, batch payments
-accounting.contacts.read
-accounting.settings.read
-accounting.attachments.read
+accounting.invoices          GET/POST /Invoices     bills, submit/approve, recharge
+accounting.payments          POST /BatchPayments    paying a bank-file batch
+accounting.contacts          GET/POST /Contacts     payees, and recharge CREATES
+                                                    the counterparty contact
+accounting.settings.read     GET /Accounts          bank accounts to pay from
 ```
+
+> **These must be the granular scopes.** Xero has assigned granular scopes to
+> every Web app created since March 2026, and rejects the old broad
+> `accounting.transactions` on them with `invalid_scope` — the consent screen
+> never even appears. `XERO_SCOPES` can override the default if your app is
+> older and still on broad scopes.
 
 ## 2. Deploy, pointed at its own database
 
@@ -174,6 +181,18 @@ reason is shown on the recharge.
 ## 6. Stage 2 — switching to WazzOCR's grant
 
 Only once everything above is proven.
+
+> **Add `accounting.payments` to WazzOCR first.** WazzOCR's `XERO_SCOPES` is
+> currently
+> `openid profile email offline_access accounting.invoices accounting.contacts accounting.settings accounting.attachments`
+> — no payments scope, because WazzOCR never creates one. Bills Hub's batch
+> payments would fail on the borrowed grant.
+>
+> Add `accounting.payments` to `XERO_SCOPES` in WazzOCR's `server.js` (or its
+> env), deploy, and **reconnect Xero in WazzOCR** so the grant is re-consented
+> with the wider scope. Scopes are additive, so nothing WazzOCR already has is
+> lost. Bills, recharge and the digest would work without this; only bank-file
+> posting needs it.
 
 1. Add the cross-database grants:
    ```sql

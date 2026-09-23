@@ -145,6 +145,26 @@ Every variable is documented in `.env.example`. The ones that need care:
 `XERO_REDIRECT_URI` is needed in `own` mode and must match one registered on
 that Xero app. In `wazzocr` mode there is no consent, so no redirect URI.
 
+### Scopes
+
+Bills Hub requests one granular scope per endpoint it calls:
+
+| Scope | For |
+| --- | --- |
+| `accounting.invoices` | `/Invoices` — bills, submit/approve, both sides of a recharge |
+| `accounting.payments` | `/BatchPayments` — paying a bank-file batch |
+| `accounting.contacts` | `/Contacts` — payee details, and recharge **creates** the counterparty, so not `.read` |
+| `accounting.settings.read` | `/Accounts` — the bank accounts to pay from |
+
+Xero assigns **granular** scopes to every Web app created since March 2026 and
+rejects the old broad `accounting.transactions` on them with `invalid_scope` —
+the consent screen never appears. Override with `XERO_SCOPES` if your app is
+older and still on broad scopes.
+
+In `wazzocr` mode the borrowed grant must already carry these. WazzOCR's own
+scope list has no `accounting.payments`, so add it there and reconnect before
+expecting bank-file posting to work.
+
 ## Xero
 
 ### Two ways to hold the grant
