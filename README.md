@@ -1,14 +1,14 @@
 # Bills Hub
 
 Multi-entity bill management on top of Xero, for groups running many
-organisations in one Xero account. Built module by module:
+organisations in one Xero account. All four modules are live:
 
 | Module | State |
 | --- | --- |
 | **Bills** — sync, list, filter, submit, approve | **Done** |
 | **Bank files** — payment batches, bank-format files, Xero batch payments | **Done** |
 | **Notifications** — the scheduled WhatsApp draft digest | **Done** |
-| Recharge — intercompany splits and recharge runs | To do |
+| **Recharge** — intercompany splits, AR/AP pairs, settlement | **Done** |
 
 The stack mirrors [WazzOCR](https://github.com/FusionETA/WazzOCR): Node + Express,
 CommonJS, `mysql2` against a DigitalOcean MySQL, models in `models/`, routers
@@ -58,6 +58,7 @@ models/
   payees.js            Supplier bank details
   batches.js           Payment batches and their lines
   digest.js            Digest settings, recipients and the send log
+  recharge.js          Recharge settings, rules, runs and their lines
 billhub/
   router.js            /api/bills — list, actions, sync
   xeroRouter.js        /api/xero  — status, verify, and the connect guard
@@ -65,6 +66,8 @@ billhub/
   payments.js          Batch validation, file rendering, Xero batch payments
   digestRouter.js      /api/digest — settings, recipients, preview, send
   digest.js            Builds the message, sends it, and runs the schedule
+  rechargeRouter.js    /api/recharge — rules, runs, settlement
+  recharge.js          Splits a paid bill and posts both sides into Xero
   sync.js              Pulls ACCPAY invoices from every connected org
   viewModel.js         Formats rows exactly as the UI renders them
 public/
@@ -384,6 +387,54 @@ on. Every attempt is recorded in `digest_runs` **with the exact text**, so
 Phone numbers are stored and sent as digits with the country code
 (`60123456789`); a number typed as `012-345 6789` gains the `60` automatically.
 
+## Recharge
+
+When one entity pays a bill on behalf of another, the cost is pushed across as a
+matched pair of documents per subsidiary:
+
+| Where | Document | Status |
+| --- | --- | --- |
+| The payer | AR invoice (`ACCREC`) addressed to the subsidiary | `AUTHORISED` |
+| The subsidiary | Mirror bill (`ACCPAY`) from the payer | `DRAFT` |
+
+They carry the same amount and the same reference, so the group nets to zero and
+each side reconciles its own ledger. The subsidiary's bill is left as a draft on
+purpose — it then goes through the normal Bills approval flow rather than a
+payable appearing already authorised.
+
+### Rules only suggest
+
+A rule says *"bills from this supplier, paid by this entity, belong to those
+entities"* — matched on the supplier name, optionally narrowed to references
+containing some text. Shares must add up to 100%, checked when the rule is saved
+rather than when a recharge is posted.
+
+Rules never post anything. They surface **paid bills a rule covers that have not
+been recharged**, with the split already worked out; a person drafts and posts.
+
+### Nothing reaches Xero until you post
+
+`POST /api/recharge/runs` works the split out locally and stops. `…/post`
+creates the documents. Each id is saved the moment Xero returns it, so a failure
+halfway leaves an exact record: the run stays `draft`, the line records which
+side succeeded and why the other did not, and **a retry creates only what is
+missing** — never a duplicate of what already exists. A run that has reached
+Xero cannot be cancelled here; voiding real accounting documents belongs in Xero.
+
+### The arithmetic
+
+Percentage splits go through `splitAmount`, which works in cents and gives the
+rounding difference to the last share, so the parts always sum to the whole —
+1,276.40 split three ways is 425.47 / 425.47 / 425.46, never 425.46 × 3.
+
+### Account codes
+
+A recharge needs a receivable code in the payer and an expense code in the
+subsidiary. Those differ per chart of accounts, so they are configuration and a
+recharge is refused until they are set — the same reasoning as the bank file
+layouts. Counterparty contacts are found by name in each Xero and created if
+missing.
+
 ## Status mapping
 
 Xero's statuses map to the four tabs the UI shows. `AUTHORISED` splits on the
@@ -443,6 +494,15 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `POST` | `/api/digest/send` | Send the real digest now |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/digest/recipients[/:id]` | Recipients and their entities |
 | `GET` | `/api/digest/runs` | The send log |
+| `GET` | `/api/recharge` | The Recharge view model |
+| `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
+| `PATCH` | `/api/recharge/settings` | Account codes, tax type, reference prefix |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Rules and their splits |
+| `POST` | `/api/recharge/plan` | Dry-run a recharge |
+| `POST` | `/api/recharge/runs` | Create one (nothing in Xero yet) |
+| `POST` | `/api/recharge/runs/:id/post` | Create the AR/AP pairs in Xero |
+| `POST` | `/api/recharge/runs/:id/cancel` | Abandon an unposted recharge |
+| `POST` | `/api/recharge/runs/:id/lines/:lineId/settle` | Record the intercompany transfer |
 | `GET` | `/api/health` | Liveness + database check |
 
 `GET /api/bills` accepts `status`, `entities` (comma-separated tenant ids),
@@ -493,6 +553,10 @@ server, no sign-in):
   month-end, the double-send and missed-window guards), phone normalising,
   per-recipient scoping, the message itself, and sending — including that one
   bad number does not stop the rest and the key is never returned.
+- `recharge.test.js` — intercompany: the split arithmetic, every validation
+  refusal, both sides of the posting with their account codes and statuses
+  asserted, idempotent re-posting, a half-failed line retrying only what is
+  missing, settlement, rules and suggestions.
 - `openaccess.test.js` — `AUTH_DISABLED`: requests work with no cookie, `/me`
   reports the mode, login is refused rather than issuing a dead session, and no
   stray user row is created.
@@ -510,9 +574,9 @@ ignored when `NODE_ENV=production`, so it cannot downgrade the live connection.
 
 `public/index.html` is a single file: React 18 and Babel standalone from a CDN,
 with the design tokens as CSS custom properties. The Bills view reads everything
-from `/api/bills`, Bank files from `/api/payments` and Notifications from
-`/api/digest`; only Recharge is still the original prototype, driven by the
-`window.VM` object at the top of the file.
+entirely from the API — `/api/bills`, `/api/payments`, `/api/digest` and
+`/api/recharge`. The prototype's static `window.VM` object is gone; the original
+mock-up is kept at `docs/bills-hub-prototype.html` for reference.
 
 Formatting (money, dates, status colours, the summary strings) lives in
 `billhub/viewModel.js` on the server, so the figures on screen, in the coming

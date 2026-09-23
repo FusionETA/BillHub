@@ -8,7 +8,8 @@
 // Module 2 (Bank files): payment batches, bank-format files, and recording the
 // payment in Xero as a batch payment.
 // Module 3 (Notifications): the scheduled WhatsApp digest of draft bills.
-// Recharge mounts here when it lands.
+// Module 4 (Recharge): intercompany recharges — an AR invoice in the payer and
+// a mirror bill in the subsidiary, settled by intercompany transfer.
 require('dotenv').config();
 
 const path = require('path');
@@ -34,6 +35,7 @@ app.use('/api/xero', require('./billhub/xeroRouter'));
 app.use('/api/bills', require('./billhub/router'));
 app.use('/api/payments', require('./billhub/paymentsRouter'));
 app.use('/api/digest', require('./billhub/digestRouter'));
+app.use('/api/recharge', require('./billhub/rechargeRouter'));
 
 app.get('/api/health', async (req, res) => {
   try {

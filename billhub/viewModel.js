@@ -351,8 +351,148 @@ function digestRunRow(r) {
   };
 }
 
+// ── Recharge ────────────────────────────────────────────────────────────────
+
+const RUN_STATUS = {
+  draft:     { label: 'Not posted yet',  bg: 'var(--neutral-100)', fg: 'var(--neutral-600)' },
+  posted:    { label: 'Awaiting settlement', bg: 'var(--amber-100)', fg: '#8a6300' },
+  settled:   { label: 'Fully settled',   bg: 'var(--green-100)',   fg: '#126b42' },
+  cancelled: { label: 'Cancelled',       bg: 'var(--neutral-100)', fg: 'var(--neutral-600)' }
+};
+
+function rechargeRunCard(r, currency = 'RM') {
+  const status = RUN_STATUS[r.status] || RUN_STATUS.draft;
+  const lines = r.lines || [];
+  const posted = lines.filter((l) => l.ar_invoice_id).length;
+  return {
+    id: r.id,
+    supplier: r.supplier_name || '—',
+    billRef: r.bill_reference || '—',
+    payerCode: r.payer_code || '—',
+    payerShort: r.payer_short || '—',
+    paidFmt: r.paid_on ? shortDate(r.paid_on) : 'not recorded',
+    totalFmt: money(r.recharge_total),
+    billTotalFmt: money(r.bill_total),
+    // The AR document, when there is only one. With several subsidiaries each
+    // gets its own invoice, so a single number would be a lie.
+    arDoc: lines.length === 1
+      ? (lines[0].ar_invoice_number || '—')
+      : `${posted} of ${lines.length} invoices`,
+    statusLabel: status.label,
+    statusBg: status.bg,
+    statusFg: status.fg,
+    status: r.status,
+    canPost: r.status === 'draft' && lines.length > 0,
+    canCancel: r.status === 'draft' && !lines.some((l) => l.ar_invoice_id || l.ap_invoice_id),
+    hasOpen: lines.some((l) => l.ar_invoice_id && !l.settled),
+    postError: r.post_error || null,
+    currency,
+    lines: lines.map((l) => ({
+      id: l.id,
+      code: l.code || '—',
+      short: l.short_name || '—',
+      amountFmt: money(l.amount),
+      sharePercent: l.share_percent == null ? null : Number(l.share_percent),
+      doc: l.ap_invoice_number || l.reference || '—',
+      arDoc: l.ar_invoice_number || null,
+      posted: Boolean(l.ar_invoice_id && l.ap_invoice_id),
+      partial: Boolean(l.ar_invoice_id) !== Boolean(l.ap_invoice_id),
+      error: l.line_error || null,
+      settled: Boolean(l.settled),
+      canSettle: Boolean(l.ar_invoice_id) && !l.settled,
+      settledNote: l.settled
+        ? [l.settled_reference, l.settled_on ? shortDate(l.settled_on) : null].filter(Boolean).join(' · ')
+        : null
+    }))
+  };
+}
+
+function rechargeRuleCard(r) {
+  if (!r) return null;
+  const targets = r.targets || [];
+  return {
+    id: r.id,
+    supplier: r.supplier_name,
+    payerTenantId: r.payer_tenant_id,
+    payerCode: r.payer_code || '—',
+    payerShort: r.payer_short || '—',
+    on: Boolean(r.enabled),
+    matchType: r.match_type,
+    matchValue: r.match_value || null,
+    splitLabel: r.match_type === 'reference_contains'
+      ? `Reference contains "${r.match_value}"`
+      : 'Any bill from this supplier',
+    targets: targets.map((t) => ({
+      tenantId: t.tenantId, code: t.code || '—', shortName: t.shortName || '—',
+      sharePercent: t.sharePercent
+    })),
+    // The single-target case reads as one chip, which is the common shape.
+    targetCode: targets.length === 1 ? (targets[0].code || '—') : null,
+    targetShort: targets.length === 1 ? (targets[0].shortName || '—') : null,
+    splitCount: targets.length
+  };
+}
+
+function rechargeSettings(s) {
+  return {
+    arAccountCode: s.ar_account_code || null,
+    apAccountCode: s.ap_account_code || null,
+    taxType: s.tax_type || 'NONE',
+    referencePrefix: s.reference_prefix || 'IC-',
+    dueDays: Number(s.due_days || 30),
+    // Nothing can be posted until both codes are set.
+    configured: Boolean(s.ar_account_code && s.ap_account_code)
+  };
+}
+
+function rechargeSuggestion(p, currency = 'RM') {
+  return {
+    billId: p.bill.id,
+    supplier: p.bill.contact_name,
+    reference: p.bill.reference || p.bill.invoice_number,
+    totalFmt: money(p.bill.total),
+    paidFmt: p.bill.fully_paid_on ? shortDate(p.bill.fully_paid_on) : shortDate(p.bill.bill_date),
+    ruleId: p.rule.id,
+    currency,
+    lines: p.lines.map((l) => ({
+      tenantId: l.tenantId, code: l.code || '—', shortName: l.shortName || '—',
+      sharePercent: l.sharePercent, amountFmt: money(l.amount)
+    }))
+  };
+}
+
+function rechargeStatCards(stats, currency = 'RM') {
+  return [
+    {
+      label: 'Recharged to date',
+      amount: `${currency} ${money(stats.recharged)}`,
+      sub: `${stats.runs} run${stats.runs === 1 ? '' : 's'}`,
+      color: 'var(--blue-500)'
+    },
+    {
+      label: 'Awaiting settlement',
+      amount: `${currency} ${money(stats.openAmount)}`,
+      sub: `${stats.openLines} intercompany bill${stats.openLines === 1 ? '' : 's'}`,
+      color: 'var(--amber-500)'
+    },
+    {
+      label: 'Settled',
+      amount: `${currency} ${money(stats.settledAmount)}`,
+      sub: `${stats.settledLines} transfer${stats.settledLines === 1 ? '' : 's'} recorded`,
+      color: 'var(--green-500)'
+    },
+    {
+      label: 'Active rules',
+      amount: String(stats.rulesActive),
+      sub: `of ${stats.rulesTotal} configured`,
+      color: 'var(--neutral-400)'
+    }
+  ];
+}
+
 module.exports = {
   billRow, statCards, statusTabs, metaText, banner, money, shortDate,
   batchCard, bankStatCards, bankAccountRow, bankFormatRow, payeeRow,
-  digestSettings, nextRunLabel, recipientRow, digestRunRow
+  digestSettings, nextRunLabel, recipientRow, digestRunRow,
+  rechargeRunCard, rechargeRuleCard, rechargeSettings, rechargeSuggestion, rechargeStatCards
 };

@@ -340,3 +340,103 @@ CREATE TABLE IF NOT EXISTS digest_runs (
   INDEX idx_run_account (account_id, created_at),
   CONSTRAINT fk_run_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Recharge module ─────────────────────────────────────────────────────────
+
+-- Which ledger accounts a recharge posts to. Codes differ per chart of
+-- accounts, so they are configuration, not constants — the same reasoning as
+-- the bank file layouts. A recharge cannot be posted until they are set.
+CREATE TABLE IF NOT EXISTS recharge_settings (
+  account_id       BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  -- On the AR invoice raised in the paying entity.
+  ar_account_code  VARCHAR(32),
+  -- On the draft bill raised in the subsidiary.
+  ap_account_code  VARCHAR(32),
+  tax_type         VARCHAR(32) DEFAULT 'NONE',
+  -- Prefix for the reference written on both sides, e.g. IC- -> IC-TNB-0726-KJ
+  reference_prefix VARCHAR(16) NOT NULL DEFAULT 'IC-',
+  -- Days until the intercompany bill falls due.
+  due_days         INT NOT NULL DEFAULT 30,
+  updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_rcs_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- "Bills from this supplier, paid by this entity, belong to those entities."
+-- Rules only ever suggest a recharge; nothing is posted without a person.
+CREATE TABLE IF NOT EXISTS recharge_rules (
+  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id        BIGINT UNSIGNED NOT NULL,
+  payer_tenant_id   VARCHAR(64) NOT NULL,
+  supplier_name     VARCHAR(255) NOT NULL,
+  -- 'any'                every bill from this supplier in the payer
+  -- 'reference_contains' only when the reference contains match_value
+  match_type        ENUM('any','reference_contains') NOT NULL DEFAULT 'any',
+  match_value       VARCHAR(255),
+  enabled           TINYINT(1) NOT NULL DEFAULT 1,
+  position          INT DEFAULT 0,
+  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_rule_lookup (account_id, payer_tenant_id, enabled),
+  CONSTRAINT fk_rule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Who a rule recharges to, and in what proportion. One row at 100% is the
+-- common case; several rows split a shared cost.
+CREATE TABLE IF NOT EXISTS recharge_rule_targets (
+  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rule_id          BIGINT UNSIGNED NOT NULL,
+  target_tenant_id VARCHAR(64) NOT NULL,
+  share_percent    DECIMAL(9,4) NOT NULL DEFAULT 100.0000,
+  UNIQUE KEY uq_rule_target (rule_id, target_tenant_id),
+  CONSTRAINT fk_rt_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One recharge of one paid bill out to one or more subsidiaries.
+CREATE TABLE IF NOT EXISTS recharge_runs (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id      BIGINT UNSIGNED NOT NULL,
+  rule_id         BIGINT UNSIGNED NULL,      -- NULL = raised by hand
+  bill_id         BIGINT UNSIGNED NOT NULL,
+  payer_tenant_id VARCHAR(64) NOT NULL,
+  xero_invoice_id CHAR(36) NOT NULL,         -- the original supplier bill
+  supplier_name   VARCHAR(255),
+  bill_reference  VARCHAR(255),
+  bill_total      DECIMAL(16,2) NOT NULL,
+  recharge_total  DECIMAL(16,2) NOT NULL,
+  currency_code   VARCHAR(8),
+  paid_on         DATE NULL,
+  -- draft     → worked out locally, nothing in Xero yet
+  -- posted    → AR invoices and subsidiary bills exist in Xero
+  -- settled   → every line settled by intercompany transfer
+  -- cancelled → abandoned before reaching Xero
+  status          ENUM('draft','posted','settled','cancelled') NOT NULL DEFAULT 'draft',
+  post_error      VARCHAR(512),
+  posted_at       DATETIME NULL,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  -- A bill is recharged once. A cancelled run releases it.
+  UNIQUE KEY uq_run_bill (account_id, bill_id),
+  INDEX idx_run_list (account_id, status, created_at),
+  CONSTRAINT fk_run_account2 FOREIGN KEY (account_id) REFERENCES accounts(id),
+  CONSTRAINT fk_run_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One subsidiary's share. Each line becomes two documents in Xero: an AR
+-- invoice in the payer and a draft bill in the subsidiary. Their ids are what
+-- stop a line being posted twice.
+CREATE TABLE IF NOT EXISTS recharge_run_lines (
+  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  run_id            BIGINT UNSIGNED NOT NULL,
+  target_tenant_id  VARCHAR(64) NOT NULL,
+  share_percent     DECIMAL(9,4),
+  amount            DECIMAL(16,2) NOT NULL,
+  reference         VARCHAR(255),
+  ar_invoice_id     CHAR(36) NULL,           -- ACCREC in the payer
+  ar_invoice_number VARCHAR(255),
+  ap_invoice_id     CHAR(36) NULL,           -- ACCPAY in the subsidiary
+  ap_invoice_number VARCHAR(255),
+  line_error        VARCHAR(512),
+  settled           TINYINT(1) NOT NULL DEFAULT 0,
+  settled_reference VARCHAR(255),
+  settled_on        DATE NULL,
+  UNIQUE KEY uq_run_target (run_id, target_tenant_id),
+  CONSTRAINT fk_rl_run FOREIGN KEY (run_id) REFERENCES recharge_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

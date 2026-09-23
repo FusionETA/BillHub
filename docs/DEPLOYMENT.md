@@ -219,6 +219,12 @@ schedule.
 `digest_settings.timezone`, not the server clock. Check the timezone before the
 time.
 
+**A recharge will not post** — check the account codes first
+(`GET /api/recharge`, `settings.configured`). Both must exist in *every*
+organisation the recharge touches; Xero rejects the line otherwise and the
+reason is shown on the recharge. Fix the code and post again — only the missing
+documents are created.
+
 **Bills missing after a sync** — check `GET /api/bills/sync/status` for that
 organisation's `last_error`. A failed run leaves the cursor untouched, so the
 next run retries the same window; a full re-read is

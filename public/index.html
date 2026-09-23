@@ -163,111 +163,8 @@
 
 <body>
   <div id="root"></div>
-  <script>
-  /* Static data for the one module still to be built: Recharge. Bills, Bank
-     files and Notifications all read from the API. */
-  window.VM = {
-  "ruleCards": [
-    {
-      "supplier": "Tenaga Nasional Berhad",
-      "payerShort": "Ayu Borneo Management",
-      "on": true,
-      "splitLabel": "Reference contains \"TNB-KK\"",
-      "targetCode": "ABKK",
-      "targetShort": "Ayu Borneo (KK)"
-    },
-    {
-      "supplier": "Tenaga Nasional Berhad",
-      "payerShort": "Ayu Borneo Management",
-      "on": true,
-      "splitLabel": "Reference contains \"TNB-GRP\"",
-      "targetCode": "ABKJ",
-      "targetShort": "Ayu Borneo (KJ)"
-    },
-    {
-      "supplier": "Maxis Broadband Sdn Bhd",
-      "payerShort": "Ayu Borneo Management",
-      "on": true,
-      "splitLabel": "Any bill from this supplier",
-      "targetCode": "ABKK",
-      "targetShort": "Ayu Borneo (KK)"
-    },
-    {
-      "supplier": "Zurich General Insurance",
-      "payerShort": "Ayu Borneo Management",
-      "on": false,
-      "splitLabel": "Any bill from this supplier",
-      "targetCode": "ABSH",
-      "targetShort": "Ayu Borneo (SH)"
-    }
-  ],
-  "runCards": [
-    {
-      "supplier": "Tenaga Nasional Berhad",
-      "billRef": "TNB-GRP-0726",
-      "arDoc": "AR-IC-1038",
-      "payerShort": "Ayu Borneo Management",
-      "paidFmt": "8 Aug 2026",
-      "totalFmt": "17,980.00",
-      "statusLabel": "Fully settled",
-      "statusBg": "var(--green-100)",
-      "statusFg": "var(--green-500)",
-      "hasOpen": false,
-      "lines": [
-        {
-          "code": "ABKJ",
-          "short": "Ayu Borneo (KJ)",
-          "amountFmt": "17,980.00",
-          "doc": "IC-TNB-GRP-0726-KJ",
-          "settled": true,
-          "settledNote": "MBB-FT-20260812-08 · 12 Aug 2026"
-        }
-      ]
-    }
-  ],
-  "rechargeStats": [
-    {
-      "label": "Recharged to date",
-      "amount": "RM 17,980.00",
-      "sub": "1 run",
-      "color": "var(--blue-500)"
-    },
-    {
-      "label": "Awaiting settlement",
-      "amount": "RM 0.00",
-      "sub": "0 intercompany bills",
-      "color": "var(--amber-500)"
-    },
-    {
-      "label": "Settled",
-      "amount": "RM 17,980.00",
-      "sub": "1 transfer recorded",
-      "color": "var(--green-500)"
-    },
-    {
-      "label": "Active rules",
-      "amount": "3",
-      "sub": "of 4 configured",
-      "color": "var(--neutral-400)"
-    }
-  ],
-  "rechargeTabs": [
-    {
-      "value": "runs",
-      "label": "Recharge runs",
-      "count": 1
-    },
-    {
-      "value": "rules",
-      "label": "Rules",
-      "count": 4
-    }
-  ]
-};
-  </script>
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useRef, useCallback } = React;
-    const VM = window.VM;
 
     /* ---------- API client ---------- */
     // Every call is same-origin and cookie-authenticated. A 401 means the
@@ -967,67 +864,428 @@
     }
 
     /* ---------- Recharge view ---------- */
-    function RechargeView() {
-      const [rv, setRv] = useState('runs');
-      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+
+    function RechargeView({ entities, onToast }) {
+      const [tab, setTab] = useState('runs');
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [nonce, setNonce] = useState(0);
+      const [ruleFor, setRuleFor] = useState(null);     // rule being edited, or {} for new
+      const [settleFor, setSettleFor] = useState(null); // { run, line }
+      const [showSettings, setShowSettings] = useState(false);
+      const reload = () => setNonce(n => n + 1);
+
+      useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        api.get('/api/recharge')
+          .then(d => { if (!cancelled) { setData(d); setError(null); } })
+          .catch(e => { if (!cancelled) setError(e.message); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [nonce]);
+
+      function toastError(e, title) {
+        onToast({
+          title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : title,
+          message: e.message, tone: 'error'
+        });
+      }
+
+      async function postRun(run) {
+        setBusy(run.id);
+        try {
+          const r = await api.post('/api/recharge/runs/' + run.id + '/post');
+          onToast({
+            title: r.failed ? `${r.posted} of ${r.posted + r.failed} lines posted` : 'Recharge posted to Xero',
+            message: r.failed
+              ? r.results.filter(x => !x.ok)[0].error
+              : `${r.posted * 2} documents created — an invoice in ${run.payerShort} and a draft bill in each subsidiary.`,
+            tone: r.failed ? 'error' : 'success'
+          });
+          reload();
+        } catch (e) { toastError(e, 'Could not post the recharge'); reload(); }
+        finally { setBusy(null); }
+      }
+
+      async function cancelRun(run) {
+        setBusy(run.id);
+        try {
+          await api.post('/api/recharge/runs/' + run.id + '/cancel');
+          onToast({ title: 'Recharge cancelled', message: 'The bill is free to be recharged again.' });
+          reload();
+        } catch (e) { toastError(e, 'Could not cancel'); }
+        finally { setBusy(null); }
+      }
+
+      async function createFromSuggestion(s) {
+        setBusy('sugg-' + s.billId);
+        try {
+          await api.post('/api/recharge/runs', {
+            billId: s.billId, ruleId: s.ruleId,
+            targets: s.lines.map(l => ({ tenantId: l.tenantId, sharePercent: l.sharePercent }))
+          });
+          onToast({ title: 'Recharge drafted', message: 'Check it, then post it to Xero.' });
+          reload();
+        } catch (e) { toastError(e, 'Could not draft the recharge'); }
+        finally { setBusy(null); }
+      }
+
+      async function deleteRule(rule) {
+        try {
+          await request('/api/recharge/rules/' + rule.id, { method: 'DELETE' });
+          onToast({ title: 'Rule deleted', message: rule.supplier + ' will no longer be suggested.' });
+          reload();
+        } catch (e) { toastError(e, 'Could not delete the rule'); }
+      }
+
+      async function toggleRule(rule, on) {
+        try {
+          await request('/api/recharge/rules/' + rule.id, { method: 'PATCH', body: { enabled: on } });
+          reload();
+        } catch (e) { toastError(e, 'Could not update the rule'); }
+      }
+
+      if (error) {
+        return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+          <Placeholder tone="error" title="Could not load recharges" message={error}
+            action={<Button variant="outline" size="md" onClick={reload}>Try again</Button>} />
+        </div>;
+      }
+      if (!data) {
+        return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+          <Placeholder title="Loading…" message="Fetching intercompany recharges." />
+        </div>;
+      }
+
+      const cur = data.currency;
+
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px', opacity: loading ? .6 : 1, transition: 'opacity var(--dur-fast)' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginBottom: 18, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Intercompany recharge</span></div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Intercompany recharge</h1>
-            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>When a paying entity settles a bill on behalf of a subsidiary, the full amount is recharged to that subsidiary. Each recharge raises an AR invoice in the payer and a draft bill in the subsidiary, cleared by intercompany transfer.</p>
+            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>
+              When a paying entity settles a bill on behalf of a subsidiary, the cost is recharged across. Each recharge raises an invoice in the payer and a matching draft bill in the subsidiary, cleared later by intercompany transfer.
+            </p>
           </div>
           <span style={{ flex: 1 }} />
-          <Button variant="primary" size="sm">New rule</Button>
+          <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>Account codes</Button>
+          <Button variant="primary" size="sm" onClick={() => setRuleFor({})}>New rule</Button>
         </div>
-        <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}><Tabs tabs={VM.rechargeTabs} value={rv} onChange={setRv} variant="line" /></div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>{VM.rechargeStats.map((s, i) => <StatCard key={i} s={s} />)}</div>
-        {rv === 'runs' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {VM.runCards.map((r, i) => (
-            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
-                <div style={{ minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{r.supplier}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.billRef} · paid {r.paidFmt} by {r.payerShort}</div></div>
-                <span style={{ flex: 1 }} />
-                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-heading)' }}>RM {r.totalFmt}</div></div>
-                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>AR invoice</div><div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-body)' }}>{r.arDoc}</div></div>
-                <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 150px', gap: 10, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
-                <div>Subsidiary</div><div style={{ textAlign: 'right' }}>Amount</div><div>Bill created</div><div style={{ textAlign: 'right' }}>Settlement</div>
-              </div>
-              {r.lines.map((l, j) => (
-                <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 150px', gap: 10, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{l.code}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{l.short}</span></div>
-                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{l.amountFmt}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', ...Ellip }}>{l.doc}</div>
-                  <div style={{ textAlign: 'right' }}>{l.settled
-                    ? <span><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'var(--green-100)', color: 'var(--green-500)' }}>Settled</span><div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 3 }}>{l.settledNote}</div></span>
-                    : <button className="feta-hover" style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>Mark settled</button>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
+
+        {!data.settings.configured && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--amber-500)', borderRadius: 10, padding: '14px 18px', marginBottom: 16 }}>
+          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}>
+            <strong style={{ color: 'var(--text-heading)' }}>Set the recharge account codes first.</strong> A recharge posts to a receivable account in the payer and an expense account in the subsidiary, and those differ per chart of accounts.
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>Set them</Button>
         </div>}
-        {rv === 'rules' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {VM.ruleCards.map((r, i) => (
-            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 18 }}>
+
+        <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}>
+          <Tabs tabs={data.rechargeTabs} value={tab} onChange={setTab} variant="line" />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>
+          {data.rechargeStats.map((s, i) => <StatCard key={i} s={s} />)}
+        </div>
+
+        {tab === 'runs' && <React.Fragment>
+          {data.suggestions.length > 0 && <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--color-primary)', borderRadius: 16, padding: 18, marginBottom: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 2 }}>
+              {data.suggestions.length} paid bill{data.suggestions.length === 1 ? '' : 's'} a rule covers, not recharged yet
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>Drafting one works out the split; nothing reaches Xero until you post it.</div>
+            {data.suggestions.map(s => (
+              <div key={s.billId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{s.supplier}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.reference} · paid {s.paidFmt} · {cur} {s.totalFmt}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {s.lines.map((l, i) => <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '3px 10px', fontSize: 12 }}><Code>{l.code}</Code>{cur} {l.amountFmt}</span>)}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => createFromSuggestion(s)}
+                  style={busy === 'sugg-' + s.billId ? { opacity: .6, pointerEvents: 'none' } : null}>Draft recharge</Button>
+              </div>
+            ))}
+          </div>}
+
+          {data.runCards.length === 0
+            ? <Placeholder title="No recharges yet"
+                message="Add a rule for a supplier one entity pays on behalf of the others, and paid bills will be suggested here." />
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {data.runCards.map(r => (
+              <div key={r.id} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.supplier}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.billRef} · paid {r.paidFmt} by {r.payerShort}</div>
+                  </div>
+                  <span style={{ flex: 1 }} />
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-heading)' }}>{cur} {r.totalFmt}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>AR invoice</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-body)' }}>{r.arDoc}</div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span>
+                  {r.canPost && <Button variant="primary" size="sm" onClick={() => postRun(r)} style={busy === r.id ? { opacity: .6, pointerEvents: 'none' } : null}>Post to Xero</Button>}
+                  {r.canCancel && <button onClick={() => cancelRun(r)} title="Cancel this recharge"
+                    style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, display: 'flex', borderRadius: 6 }}><Icon name="trash-2" size={16} /></button>}
+                </div>
+
+                {r.postError && <div style={{ padding: '10px 18px', background: 'var(--red-100)', color: '#8d1f17', fontSize: 13 }}>
+                  <strong>Xero rejected part of this recharge:</strong> {r.postError}
+                </div>}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 170px', gap: 10, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
+                  <div>Subsidiary</div><div style={{ textAlign: 'right' }}>Amount</div><div>Bill created</div><div style={{ textAlign: 'right' }}>Settlement</div>
+                </div>
+                {r.lines.map(l => (
+                  <div key={l.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 170px', gap: 10, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                      <Code>{l.code}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{l.short}</span>
+                      {l.sharePercent != null && l.sharePercent !== 100 && <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{l.sharePercent}%</span>}
+                    </div>
+                    <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{l.amountFmt}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', ...Ellip }}>{l.doc}</div>
+                      {l.partial && <div style={{ fontSize: 11, color: 'var(--color-danger)' }}>only one side posted — post again to finish</div>}
+                      {l.error && !l.posted && <div style={{ fontSize: 11, color: 'var(--color-danger)', ...Ellip }}>{l.error}</div>}
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      {l.settled
+                        ? <span><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'var(--green-100)', color: '#126b42' }}>Settled</span>
+                            <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 3 }}>{l.settledNote}</div></span>
+                        : l.canSettle
+                          ? <button className="feta-hover" onClick={() => setSettleFor({ run: r, line: l })}
+                              style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>Mark settled</button>
+                          : <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>not posted yet</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>}
+        </React.Fragment>}
+
+        {tab === 'rules' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {data.ruleCards.length === 0
+            ? <Placeholder title="No rules yet"
+                message="A rule says which subsidiary a supplier's bills belong to, so paid bills get suggested for recharge automatically."
+                action={<Button variant="primary" size="md" onClick={() => setRuleFor({})}>New rule</Button>} />
+            : data.ruleCards.map(r => (
+            <div key={r.id} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-                <div style={{ minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{r.supplier}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Paid by {r.payerShort} · {r.splitLabel}</div></div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.supplier}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Paid by {r.payerShort} · {r.splitLabel}</div>
+                </div>
                 <span style={{ flex: 1 }} />
-                <Switch checked={r.on} />
-                <Button variant="outline" size="sm">Edit rule</Button>
-                <button aria-label="Delete rule" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={16} /></button>
+                <Switch checked={r.on} onChange={v => toggleRule(r, v)} />
+                <Button variant="outline" size="sm" onClick={() => setRuleFor(r)}>Edit rule</Button>
+                <button aria-label="Delete rule" onClick={() => deleteRule(r)} className="feta-hover"
+                  style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={16} /></button>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged in full to</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)' }}>{r.targetCode}</span><span>{r.targetShort}</span><span style={{ fontWeight: 700, color: 'var(--text-heading)' }}>100%</span>
+                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  Recharged to
                 </span>
+                {r.targets.map((t, i) => (
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>
+                    <Code>{t.code}</Code><span>{t.shortName}</span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-heading)' }}>{t.sharePercent}%</span>
+                  </span>
+                ))}
               </div>
             </div>
           ))}
         </div>}
+
+        <RuleDialog open={Boolean(ruleFor)} rule={ruleFor} entities={entities}
+          onClose={() => setRuleFor(null)} onToast={onToast}
+          onSaved={() => { setRuleFor(null); reload(); }} />
+
+        <SettleDialog open={Boolean(settleFor)} target={settleFor} currency={cur}
+          onClose={() => setSettleFor(null)} onToast={onToast}
+          onSaved={() => { setSettleFor(null); reload(); }} />
+
+        <RechargeSettingsDialog open={showSettings} settings={data.settings}
+          onClose={() => setShowSettings(false)} onToast={onToast}
+          onSaved={() => { setShowSettings(false); reload(); }} />
       </div>;
+    }
+
+    function RuleDialog({ open, rule, entities, onClose, onSaved, onToast }) {
+      const [form, setForm] = useState({ payerTenantId: '', supplierName: '', matchType: 'any', matchValue: '', targets: [] });
+      const [busy, setBusy] = useState(false);
+
+      useEffect(() => {
+        if (!rule) return;
+        setForm({
+          payerTenantId: rule.payerTenantId || (entities[0] && entities[0].tenantId) || '',
+          supplierName: rule.supplier || '',
+          matchType: rule.matchType || 'any',
+          matchValue: rule.matchValue || '',
+          targets: (rule.targets || []).map(t => ({ tenantId: t.tenantId, sharePercent: t.sharePercent }))
+        });
+      }, [rule, entities]);
+
+      const set = (patch) => setForm(f => ({ ...f, ...patch }));
+      const total = form.targets.reduce((n, t) => n + Number(t.sharePercent || 0), 0);
+      const balanced = Math.abs(total - 100) < 0.01;
+
+      function addTarget() {
+        const used = new Set(form.targets.map(t => t.tenantId));
+        const next = entities.find(e => !used.has(e.tenantId) && e.tenantId !== form.payerTenantId);
+        if (!next) return;
+        // Splitting evenly is almost always what is wanted, and it keeps the
+        // total at 100 without the user doing arithmetic.
+        const n = form.targets.length + 1;
+        const even = Math.floor((100 / n) * 100) / 100;
+        const targets = form.targets.map(t => ({ ...t, sharePercent: even }))
+          .concat([{ tenantId: next.tenantId, sharePercent: Number((100 - even * (n - 1)).toFixed(2)) }]);
+        set({ targets });
+      }
+
+      async function save() {
+        setBusy(true);
+        try {
+          const body = { ...form, matchValue: form.matchType === 'any' ? null : form.matchValue };
+          if (rule && rule.id) await request('/api/recharge/rules/' + rule.id, { method: 'PATCH', body });
+          else await api.post('/api/recharge/rules', body);
+          onToast({ title: rule && rule.id ? 'Rule updated' : 'Rule created', message: form.supplierName + ' will be suggested for recharge.' });
+          onSaved();
+        } catch (e) {
+          onToast({ title: 'Could not save the rule', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      return <Dialog open={open} onClose={onClose} title={rule && rule.id ? 'Edit recharge rule' : 'New recharge rule'}
+        description="Which subsidiary a supplier's bills belong to, when one entity pays them." size="md">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Select label="Paid by" value={form.payerTenantId} onChange={v => set({ payerTenantId: v })}
+            options={entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId }))} />
+          <Input label="Supplier name" placeholder="Tenaga Nasional Berhad" value={form.supplierName}
+            onChange={v => set({ supplierName: v })} hint="Must match the Xero contact name exactly." />
+
+          <Select label="Applies to" value={form.matchType} onChange={v => set({ matchType: v })}
+            options={[{ label: 'Any bill from this supplier', value: 'any' }, { label: 'Only when the reference contains…', value: 'reference_contains' }]} />
+          {form.matchType === 'reference_contains'
+            ? <Input label="Reference contains" placeholder="TNB-KK" value={form.matchValue} onChange={v => set({ matchValue: v })} />
+            : <div />}
+
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)' }}>Recharged to</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: balanced ? 'var(--green-500)' : 'var(--color-danger)' }}>{total.toFixed(2)}%</span>
+              <button onClick={addTarget} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Add entity</button>
+            </div>
+            {form.targets.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 0' }}>No entities yet — add at least one.</div>}
+            {form.targets.map((t, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                <div style={{ flex: 1 }}>
+                  <Select value={t.tenantId} onChange={v => set({ targets: form.targets.map((x, j) => j === i ? { ...x, tenantId: v } : x) })}
+                    options={entities.filter(e => e.tenantId !== form.payerTenantId).map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId }))} />
+                </div>
+                <div style={{ width: 110 }}>
+                  <Input type="number" value={String(t.sharePercent)} onChange={v => set({ targets: form.targets.map((x, j) => j === i ? { ...x, sharePercent: Number(v) } : x) })} />
+                </div>
+                <button aria-label="Remove" onClick={() => set({ targets: form.targets.filter((_, j) => j !== i) })}
+                  style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'flex' }}><Icon name="x" size={16} /></button>
+              </div>
+            ))}
+            {!balanced && form.targets.length > 0 && <div style={{ fontSize: 12.5, color: 'var(--color-danger)', marginTop: 4 }}>
+              The shares must add up to 100% — otherwise a recharge would under- or over-bill.
+            </div>}
+          </div>
+
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="md" onClick={save}
+              style={busy || !balanced || !form.supplierName.trim() ? { opacity: .5, pointerEvents: 'none' } : null}>
+              {busy ? 'Saving…' : 'Save rule'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>;
+    }
+
+    function SettleDialog({ open, target, currency, onClose, onSaved, onToast }) {
+      const [reference, setReference] = useState('');
+      const [settledOn, setSettledOn] = useState(() => new Date().toISOString().slice(0, 10));
+      const [busy, setBusy] = useState(false);
+
+      useEffect(() => { if (target) { setReference(''); setSettledOn(new Date().toISOString().slice(0, 10)); } }, [target]);
+
+      async function save() {
+        setBusy(true);
+        try {
+          await api.post(`/api/recharge/runs/${target.run.id}/lines/${target.line.id}/settle`, { reference, settledOn });
+          onToast({ title: 'Settlement recorded', message: `${target.line.short} is marked settled.` });
+          onSaved();
+        } catch (e) {
+          onToast({ title: 'Could not record it', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      return <Dialog open={open} onClose={onClose} title="Mark settled"
+        description={target ? `${target.line.short} · ${currency} ${target.line.amountFmt}` : ''} size="sm">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Input label="Date settled" type="date" value={settledOn} onChange={setSettledOn} />
+          <Input label="Transfer reference" placeholder="MBB-FT-20260912-04" value={reference} onChange={setReference} />
+          <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+            This records that the intercompany transfer happened. It does not move money or change the invoices in Xero — reconcile those against the transfer as usual.
+          </div>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="md" onClick={save} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Mark settled</Button>
+          </div>
+        </div>
+      </Dialog>;
+    }
+
+    function RechargeSettingsDialog({ open, settings, onClose, onSaved, onToast }) {
+      const [form, setForm] = useState(settings);
+      const [busy, setBusy] = useState(false);
+      useEffect(() => { if (open) setForm(settings); }, [open, settings]);
+      const set = (patch) => setForm(f => ({ ...f, ...patch }));
+
+      async function save() {
+        setBusy(true);
+        try {
+          await request('/api/recharge/settings', { method: 'PATCH', body: form });
+          onToast({ title: 'Account codes saved', message: 'Recharges will post to these accounts.' });
+          onSaved();
+        } catch (e) {
+          onToast({ title: 'Could not save', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      return <Dialog open={open} onClose={onClose} title="Recharge account codes"
+        description="Where the two sides of a recharge post in Xero." size="md">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Input label="Payer — receivable account" placeholder="260" value={form.arAccountCode || ''}
+            onChange={v => set({ arAccountCode: v })} hint="On the invoice raised in the paying entity." />
+          <Input label="Subsidiary — expense account" placeholder="429" value={form.apAccountCode || ''}
+            onChange={v => set({ apAccountCode: v })} hint="On the mirror bill in the subsidiary." />
+          <Input label="Tax type" placeholder="NONE" value={form.taxType || ''} onChange={v => set({ taxType: v })}
+            hint="Xero tax type code, e.g. NONE or ZERORATED." />
+          <Input label="Reference prefix" placeholder="IC-" value={form.referencePrefix || ''} onChange={v => set({ referencePrefix: v })} />
+          <Input label="Payment terms (days)" type="number" value={String(form.dueDays || 30)} onChange={v => set({ dueDays: Number(v) })} />
+          <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+            These codes must exist in every organisation a recharge touches. If one does not, Xero rejects that line and it is reported against the recharge — nothing is left half-posted.
+          </div>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="md" onClick={save} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Save</Button>
+          </div>
+        </div>
+      </Dialog>;
     }
 
     /* ---------- Bank files view ---------- */
@@ -1655,7 +1913,7 @@
         </div>}
 
         {view === 'bills' && <BillsView entities={entities} xero={xero} onToast={pushToast} onSynced={loadContext} onPaid={() => setView('bank')} />}
-        {view === 'recharge' && <RechargeView />}
+        {view === 'recharge' && <RechargeView entities={entities} onToast={pushToast} />}
         {view === 'bank' && <BankView onToast={pushToast} />}
         {view === 'settings' && <SettingsView entities={entities} onToast={pushToast} />}
 
