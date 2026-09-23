@@ -4,6 +4,14 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 // Pin the auth mode: these suites exercise the real sign-in path, whatever
 // the local .env happens to be set to. Must precede any require of server.js.
 process.env.AUTH_DISABLED = 'false';
+// Pin the grant source too: these suites exercise borrowed mode, the riskier
+// of the two, whatever the local .env is set to. test/ownmode.test.js covers
+// the other. Must precede any require of lib/grantSource.
+process.env.XERO_GRANT_SOURCE = 'wazzocr';
+// Xero is stubbed in these suites, so the credentials only need to exist —
+// but they must exist, or ensureConfig refuses before the stub is reached.
+process.env.XERO_CLIENT_ID = 'test-client-id';
+process.env.XERO_CLIENT_SECRET = 'test-client-secret';
 const xero = require('../lib/xero');
 const db = require('../db');
 const sync = require('../billhub/sync');

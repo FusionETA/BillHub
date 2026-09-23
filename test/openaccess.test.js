@@ -1,6 +1,11 @@
 // AUTH_DISABLED=true: no sign-in, every request runs as the default account.
 // Must set the flag before anything pulls in auth/middleware.
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+process.env.XERO_GRANT_SOURCE = 'wazzocr';
+// Xero is stubbed in these suites, so the credentials only need to exist —
+// but they must exist, or ensureConfig refuses before the stub is reached.
+process.env.XERO_CLIENT_ID = 'test-client-id';
+process.env.XERO_CLIENT_SECRET = 'test-client-secret';
 process.env.AUTH_DISABLED = 'true';
 process.env.DEFAULT_ACCOUNT_ID = '1';
 

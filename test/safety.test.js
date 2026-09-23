@@ -6,6 +6,14 @@
 // The allowlist is read when lib/xero loads, so it is set before the require.
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 process.env.AUTH_DISABLED = 'false';
+// Pin the grant source too: these suites exercise borrowed mode, the riskier
+// of the two, whatever the local .env is set to. test/ownmode.test.js covers
+// the other. Must precede any require of lib/grantSource.
+process.env.XERO_GRANT_SOURCE = 'wazzocr';
+// Xero is stubbed in these suites, so the credentials only need to exist —
+// but they must exist, or ensureConfig refuses before the stub is reached.
+process.env.XERO_CLIENT_ID = 'test-client-id';
+process.env.XERO_CLIENT_SECRET = 'test-client-secret';
 process.env.XERO_TENANT_ALLOWLIST = 'tenant-abkk, tenant-demo';
 
 const db = require('../db');
