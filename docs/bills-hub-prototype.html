@@ -1,0 +1,1698 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bills Hub — FusionETA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
+    rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+  <style>
+    :root {
+      --brand-orange: #FE5000;
+      --brand-blue: #1E22AA;
+      --brand-gray: #999999;
+      --orange-50: #FFF3EC;
+      --orange-100: #FFE1D2;
+      --orange-200: #FFC1A3;
+      --orange-300: #FF9B6E;
+      --orange-400: #FF7333;
+      --orange-500: #FE5000;
+      --orange-600: #DB3F00;
+      --orange-700: #AE3100;
+      --orange-800: #802400;
+      --orange-900: #521700;
+      --blue-50: #ECEDFA;
+      --blue-100: #D6D7F3;
+      --blue-200: #ABADE7;
+      --blue-300: #7E81D9;
+      --blue-400: #4D51C7;
+      --blue-500: #1E22AA;
+      --blue-600: #191C8C;
+      --blue-700: #13166B;
+      --blue-800: #0D0F49;
+      --blue-900: #08092A;
+      --neutral-0: #FFFFFF;
+      --neutral-50: #F6F7F9;
+      --neutral-100: #ECEEF2;
+      --neutral-200: #DEE1E7;
+      --neutral-300: #C7CCD5;
+      --neutral-400: #9AA1AD;
+      --neutral-500: #6C7480;
+      --neutral-600: #4C525D;
+      --neutral-700: #363B44;
+      --neutral-800: #22262D;
+      --neutral-900: #14161B;
+      --ink-900: #101235;
+      --ink-800: #1B1E4A;
+      --green-500: #1E9E62;
+      --green-100: #DDF3E8;
+      --amber-500: #E8A400;
+      --amber-100: #FBEECB;
+      --red-500: #E23A2E;
+      --red-100: #FBDEDB;
+      --info-500: #2F6BFF;
+      --info-100: #DEE9FF;
+      --color-primary: var(--brand-orange);
+      --color-primary-hover: var(--orange-600);
+      --color-primary-active: var(--orange-700);
+      --color-primary-soft: var(--orange-50);
+      --color-on-primary: #fff;
+      --color-secondary: var(--brand-blue);
+      --color-secondary-hover: var(--blue-600);
+      --color-secondary-active: var(--blue-700);
+      --color-secondary-soft: var(--blue-50);
+      --color-on-secondary: #fff;
+      --text-heading: var(--ink-900);
+      --text-body: var(--neutral-700);
+      --text-muted: var(--neutral-500);
+      --text-subtle: var(--neutral-400);
+      --text-inverse: #fff;
+      --text-link: var(--brand-blue);
+      --text-link-hover: var(--orange-600);
+      --surface-page: var(--neutral-50);
+      --surface-card: var(--neutral-0);
+      --surface-sunken: var(--neutral-100);
+      --surface-inverse: var(--ink-900);
+      --surface-brand: var(--brand-blue);
+      --border-subtle: var(--neutral-200);
+      --border-default: var(--neutral-300);
+      --border-strong: var(--neutral-400);
+      --border-focus: var(--brand-orange);
+      --color-success: var(--green-500);
+      --color-warning: var(--amber-500);
+      --color-danger: var(--red-500);
+      --color-info: var(--info-500);
+      --ring: 0 0 0 3px rgba(254, 80, 0, .35);
+      --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+      --font-body: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+      --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
+      --shadow-sm: 0 1px 3px rgba(16, 18, 53, .08), 0 1px 2px rgba(16, 18, 53, .04);
+      --shadow-md: 0 4px 12px rgba(16, 18, 53, .08), 0 2px 4px rgba(16, 18, 53, .05);
+      --shadow-lg: 0 12px 28px rgba(16, 18, 53, .12), 0 4px 10px rgba(16, 18, 53, .06);
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+      --dur-fast: 120ms;
+      --dur-base: 200ms;
+      --dur-slow: 320ms;
+      --ease-standard: cubic-bezier(.2, 0, 0, 1);
+      --ease-out: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--surface-page);
+      color: var(--text-body);
+      -webkit-font-smoothing: antialiased
+    }
+
+    a {
+      color: var(--text-link);
+      text-decoration: none
+    }
+
+    a:hover {
+      color: var(--text-link-hover)
+    }
+
+    button {
+      font-family: var(--font-body)
+    }
+
+    @keyframes feta-rise {
+      from {
+        transform: translateY(14px);
+        opacity: 0
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1
+      }
+    }
+
+    .feta-hover {
+      transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard)
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--neutral-300);
+      border-radius: 8px;
+      border: 2px solid var(--surface-card)
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script>window.VM = {
+      "stats": [
+        {
+          "label": "Draft",
+          "amount": "37,480.40",
+          "sub": "11 bills \u00b7 7 entities",
+          "color": "var(--neutral-400)"
+        },
+        {
+          "label": "Awaiting approval",
+          "amount": "47,870.40",
+          "sub": "5 bills",
+          "color": "var(--amber-500)"
+        },
+        {
+          "label": "Awaiting payment",
+          "amount": "30,048.55",
+          "sub": "7 bills",
+          "color": "var(--blue-500)"
+        },
+        {
+          "label": "Overdue",
+          "amount": "612.40",
+          "sub": "1 bills past due date",
+          "color": "var(--red-500)"
+        }
+      ],
+      "statusTabs": [
+        {
+          "value": "all",
+          "label": "All",
+          "count": 28
+        },
+        {
+          "value": "draft",
+          "label": "Draft",
+          "count": 11
+        },
+        {
+          "value": "approval",
+          "label": "Awaiting approval",
+          "count": 5
+        },
+        {
+          "value": "payment",
+          "label": "Awaiting payment",
+          "count": 7
+        },
+        {
+          "value": "paid",
+          "label": "Paid",
+          "count": 5
+        }
+      ],
+      "rows": [
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Simon Chim",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "Expense Claim",
+          "refNote": "",
+          "dateFmt": "4 Sep 2026",
+          "dueFmt": "11 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "1,276.40",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKJ",
+          "entityShort": "Ayu Borneo (KJ)",
+          "contact": "Setia Awan Supplies Sdn Bhd",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "SAS-2026-0912",
+          "refNote": "",
+          "dateFmt": "3 Sep 2026",
+          "dueFmt": "3 Oct 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "8,740.00",
+          "filesFmt": "\u2014",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABMYY",
+          "entityShort": "Ayu Borneo (MYY)",
+          "contact": "Shell Malaysia Trading",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "SHL-MYY-0826",
+          "refNote": "",
+          "dateFmt": "3 Sep 2026",
+          "dueFmt": "18 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "742.55",
+          "filesFmt": "\u2014",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABSH",
+          "entityShort": "Ayu Borneo (SH)",
+          "contact": "Simon Chim",
+          "statusLabel": "Awaiting approval",
+          "statusBg": "var(--amber-100)",
+          "statusFg": "#8a6300",
+          "reference": "Expense Claim",
+          "refNote": "",
+          "dateFmt": "3 Sep 2026",
+          "dueFmt": "4 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "358.00",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Approve",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKJ",
+          "entityShort": "Ayu Borneo (KJ)",
+          "contact": "Ayu Borneo (LBU) Sdn Bhd",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "INTERCO-KJ-0826",
+          "refNote": " Intercompany",
+          "dateFmt": "2 Sep 2026",
+          "dueFmt": "30 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "14,500.00",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKK",
+          "entityShort": "Ayu Borneo (KK)",
+          "contact": "Grab Malaysia",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "GRB-INV-77120",
+          "refNote": " Forwarded Bill",
+          "dateFmt": "2 Sep 2026",
+          "dueFmt": "16 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "388.90",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKJ",
+          "entityShort": "Ayu Borneo (KJ)",
+          "contact": "Harvey Norman Malaysia",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "HN-KJ-55210",
+          "refNote": "",
+          "dateFmt": "1 Sep 2026",
+          "dueFmt": "30 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "5,299.00",
+          "filesFmt": "2",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKK",
+          "entityShort": "Ayu Borneo (KK)",
+          "contact": "Simon Chim",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "MYIN26-283331",
+          "refNote": " Forwarded Bill",
+          "dateFmt": "1 Sep 2026",
+          "dueFmt": "15 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "246.15",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKK",
+          "entityShort": "Ayu Borneo (KK)",
+          "contact": "MYEG Services Berhad",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "MYEG-INV-33218",
+          "refNote": "",
+          "dateFmt": "31 Aug 2026",
+          "dueFmt": "30 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "480.00",
+          "filesFmt": "\u2014",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABSH",
+          "entityShort": "Ayu Borneo (SH)",
+          "contact": "Sabah Electricity Sdn Bhd",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "SESB-SH-0826",
+          "refNote": "",
+          "dateFmt": "30 Aug 2026",
+          "dueFmt": "14 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "1,902.35",
+          "filesFmt": "2",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKCH",
+          "entityShort": "Ayu Borneo (KCH)",
+          "contact": "Sarawak Energy Berhad",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "SEB-KCH-0826",
+          "refNote": "",
+          "dateFmt": "29 Aug 2026",
+          "dueFmt": "13 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "2,216.80",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABSDK",
+          "entityShort": "Ayu Borneo (SDK)",
+          "contact": "Tenaga Nasional Berhad",
+          "statusLabel": "Draft",
+          "statusBg": "var(--neutral-100)",
+          "statusFg": "var(--neutral-600)",
+          "reference": "TNB-SDK-0826",
+          "refNote": "",
+          "dateFmt": "28 Aug 2026",
+          "dueFmt": "12 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "1,688.25",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Submit",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Lembaga Hasil Dalam Negeri",
+          "statusLabel": "Awaiting approval",
+          "statusBg": "var(--amber-100)",
+          "statusFg": "#8a6300",
+          "reference": "CP204-Q3/2026",
+          "refNote": "",
+          "dateFmt": "27 Aug 2026",
+          "dueFmt": "31 Dec 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "12,480.00",
+          "filesFmt": "3",
+          "hasAction": true,
+          "actionLabel": "Approve",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Tenaga Nasional Berhad",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "TNB-GRP-0826",
+          "refNote": " Paid on behalf",
+          "dateFmt": "26 Aug 2026",
+          "dueFmt": "10 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "18,420.60",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABBKI",
+          "entityShort": "Ayu Borneo (BKI)",
+          "contact": "Petronas Dagangan Berhad",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "PDB-FLEET-0826",
+          "refNote": "",
+          "dateFmt": "26 Aug 2026",
+          "dueFmt": "10 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "2,760.45",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKK",
+          "entityShort": "Ayu Borneo (KK)",
+          "contact": "Kota Kinabalu City Hall",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "DBKK-LIC-2026",
+          "refNote": "",
+          "dateFmt": "25 Aug 2026",
+          "dueFmt": "24 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "1,500.00",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABKJ",
+          "entityShort": "Ayu Borneo (KJ)",
+          "contact": "Tenaga Nasional Berhad",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "TNB-KJ-0826",
+          "refNote": "",
+          "dateFmt": "24 Aug 2026",
+          "dueFmt": "8 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "3,184.60",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABSH",
+          "entityShort": "Ayu Borneo (SH)",
+          "contact": "Ninja Van Malaysia",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "NJV-SH-88410",
+          "refNote": "",
+          "dateFmt": "23 Aug 2026",
+          "dueFmt": "7 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "2,038.90",
+          "filesFmt": "2",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABTWU",
+          "entityShort": "Ayu Borneo (TWU)",
+          "contact": "Celcom Axiata Berhad",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "CEL-TWU-0826",
+          "refNote": "",
+          "dateFmt": "22 Aug 2026",
+          "dueFmt": "6 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "899.00",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Maxis Broadband Sdn Bhd",
+          "statusLabel": "Awaiting payment",
+          "statusBg": "var(--blue-50)",
+          "statusFg": "var(--blue-600)",
+          "reference": "MX-9920417",
+          "refNote": "",
+          "dateFmt": "21 Aug 2026",
+          "dueFmt": "5 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "1,245.00",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Mark paid",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Deloitte Malaysia",
+          "statusLabel": "Awaiting approval",
+          "statusBg": "var(--amber-100)",
+          "statusFg": "#8a6300",
+          "reference": "DEL-AUD-2026-04",
+          "refNote": "",
+          "dateFmt": "20 Aug 2026",
+          "dueFmt": "19 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "28,000.00",
+          "filesFmt": "2",
+          "hasAction": true,
+          "actionLabel": "Approve",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABSH",
+          "entityShort": "Ayu Borneo (SH)",
+          "contact": "Syarikat Air Sarawak",
+          "statusLabel": "Awaiting approval",
+          "statusBg": "var(--amber-100)",
+          "statusFg": "#8a6300",
+          "reference": "SAS-WTR-8811",
+          "refNote": "",
+          "dateFmt": "19 Aug 2026",
+          "dueFmt": "3 Sep 2026",
+          "dueColor": "var(--color-danger)",
+          "dueWeight": "700",
+          "paidFmt": "0.00",
+          "outFmt": "612.40",
+          "filesFmt": "1",
+          "hasAction": true,
+          "actionLabel": "Approve",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Zurich General Insurance",
+          "statusLabel": "Awaiting approval",
+          "statusBg": "var(--amber-100)",
+          "statusFg": "#8a6300",
+          "reference": "ZUR-POL-2026",
+          "refNote": "",
+          "dateFmt": "18 Aug 2026",
+          "dueFmt": "17 Sep 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "0.00",
+          "outFmt": "6,420.00",
+          "filesFmt": "3",
+          "hasAction": true,
+          "actionLabel": "Approve",
+          "isPaid": false,
+          "paidNote": ""
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "KWSP (EPF)",
+          "statusLabel": "Paid",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "reference": "EPF-0826",
+          "refNote": "",
+          "dateFmt": "15 Aug 2026",
+          "dueFmt": "31 Aug 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "9,840.20",
+          "outFmt": "0.00",
+          "filesFmt": "1",
+          "hasAction": false,
+          "actionLabel": "",
+          "isPaid": true,
+          "paidNote": "28 Aug 2026"
+        },
+        {
+          "entityCode": "ABKK",
+          "entityShort": "Ayu Borneo (KK)",
+          "contact": "PERKESO (SOCSO)",
+          "statusLabel": "Paid",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "reference": "SOCSO-0826",
+          "refNote": "",
+          "dateFmt": "15 Aug 2026",
+          "dueFmt": "31 Aug 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "2,318.75",
+          "outFmt": "0.00",
+          "filesFmt": "1",
+          "hasAction": false,
+          "actionLabel": "",
+          "isPaid": true,
+          "paidNote": "28 Aug 2026"
+        },
+        {
+          "entityCode": "ABSH",
+          "entityShort": "Ayu Borneo (SH)",
+          "contact": "Lazada Express Malaysia",
+          "statusLabel": "Paid",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "reference": "LEX-SH-71204",
+          "refNote": "",
+          "dateFmt": "12 Aug 2026",
+          "dueFmt": "26 Aug 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "1,104.30",
+          "outFmt": "0.00",
+          "filesFmt": "1",
+          "hasAction": false,
+          "actionLabel": "",
+          "isPaid": true,
+          "paidNote": "20 Aug 2026"
+        },
+        {
+          "entityCode": "ABKJ",
+          "entityShort": "Ayu Borneo (KJ)",
+          "contact": "Astro Radio Sdn Bhd",
+          "statusLabel": "Paid",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "reference": "AST-ADV-0726",
+          "refNote": "",
+          "dateFmt": "28 Jul 2026",
+          "dueFmt": "27 Aug 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "4,500.00",
+          "outFmt": "0.00",
+          "filesFmt": "1",
+          "hasAction": false,
+          "actionLabel": "",
+          "isPaid": true,
+          "paidNote": "25 Aug 2026"
+        },
+        {
+          "entityCode": "ABM",
+          "entityShort": "Ayu Borneo Management",
+          "contact": "Tenaga Nasional Berhad",
+          "statusLabel": "Paid",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "reference": "TNB-GRP-0726",
+          "refNote": " Paid on behalf",
+          "dateFmt": "26 Jul 2026",
+          "dueFmt": "10 Aug 2026",
+          "dueColor": "var(--text-body)",
+          "dueWeight": "400",
+          "paidFmt": "17,980.00",
+          "outFmt": "0.00",
+          "filesFmt": "1",
+          "hasAction": false,
+          "actionLabel": "",
+          "isPaid": true,
+          "paidNote": "8 Aug 2026"
+        }
+      ],
+      "metaText": "28 items \u00b7 RM 115,399.35 outstanding \u00b7 all 40 entities",
+      "bannerHead": "11 draft bills across 7 entities are waiting to be cleared.",
+      "bannerTail": "RM 37,480.40 in total. The WhatsApp digest goes to 2 recipients every working day at 09:00.",
+      "digestText": "*FusionETA \u00b7 Bills digest*\n\u6bcf\u65e5 \u00b7 Fri 4 Sep 2026, 09:00 MYT\nAyu Borneo Group \u00b7 40 Xero entities\n\nDraft bills to clear: *11* across 7 entities\nTotal value: *RM 37,480.40*\n\n\u2022 Ayu Borneo (KJ) \u2014 3 bills \u00b7 RM 28,539.00\n\u2022 Ayu Borneo (KCH) \u2014 1 bill \u00b7 RM 2,216.80\n\u2022 Ayu Borneo (SH) \u2014 1 bill \u00b7 RM 1,902.35\n\nOldest draft: 28 Aug 2026 \u00b7 Ayu Borneo (SDK)\n\nOpen the queue: fusioneta.app/ayuborneo/drafts",
+      "recipients": [
+        {
+          "name": "Nurul Aisyah Rahim",
+          "phone": "+60 12-345 6789",
+          "role": "Finance Manager",
+          "on": true,
+          "allEntities": true,
+          "chips": [],
+          "hasMore": false,
+          "moreLabel": "+-3 more"
+        },
+        {
+          "name": "Chin Wei Loong",
+          "phone": "+60 16-228 4410",
+          "role": "Group Accountant",
+          "on": true,
+          "allEntities": false,
+          "chips": [
+            {
+              "code": "ABKK"
+            },
+            {
+              "code": "ABKJ"
+            },
+            {
+              "code": "ABSH"
+            }
+          ],
+          "hasMore": false,
+          "moreLabel": "+0 more"
+        },
+        {
+          "name": "Simon Chim",
+          "phone": "+60 19-887 3021",
+          "role": "Director",
+          "on": false,
+          "allEntities": false,
+          "chips": [
+            {
+              "code": "ABM"
+            }
+          ],
+          "hasMore": false,
+          "moreLabel": "+-2 more"
+        }
+      ],
+      "recipientMeta": "2 of 3 numbers active. Each recipient can be assigned all 40 entities or only the ones they are responsible for.",
+      "ruleCards": [
+        {
+          "supplier": "Tenaga Nasional Berhad",
+          "payerShort": "Ayu Borneo Management",
+          "on": true,
+          "splitLabel": "Reference contains \"TNB-KK\"",
+          "targetCode": "ABKK",
+          "targetShort": "Ayu Borneo (KK)"
+        },
+        {
+          "supplier": "Tenaga Nasional Berhad",
+          "payerShort": "Ayu Borneo Management",
+          "on": true,
+          "splitLabel": "Reference contains \"TNB-GRP\"",
+          "targetCode": "ABKJ",
+          "targetShort": "Ayu Borneo (KJ)"
+        },
+        {
+          "supplier": "Maxis Broadband Sdn Bhd",
+          "payerShort": "Ayu Borneo Management",
+          "on": true,
+          "splitLabel": "Any bill from this supplier",
+          "targetCode": "ABKK",
+          "targetShort": "Ayu Borneo (KK)"
+        },
+        {
+          "supplier": "Zurich General Insurance",
+          "payerShort": "Ayu Borneo Management",
+          "on": false,
+          "splitLabel": "Any bill from this supplier",
+          "targetCode": "ABSH",
+          "targetShort": "Ayu Borneo (SH)"
+        }
+      ],
+      "runCards": [
+        {
+          "supplier": "Tenaga Nasional Berhad",
+          "billRef": "TNB-GRP-0726",
+          "arDoc": "AR-IC-1038",
+          "payerShort": "Ayu Borneo Management",
+          "paidFmt": "8 Aug 2026",
+          "totalFmt": "17,980.00",
+          "statusLabel": "Fully settled",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "hasOpen": false,
+          "lines": [
+            {
+              "code": "ABKJ",
+              "short": "Ayu Borneo (KJ)",
+              "amountFmt": "17,980.00",
+              "doc": "IC-TNB-GRP-0726-KJ",
+              "settled": true,
+              "settledNote": "MBB-FT-20260812-08 \u00b7 12 Aug 2026"
+            }
+          ]
+        }
+      ],
+      "rechargeStats": [
+        {
+          "label": "Recharged to date",
+          "amount": "RM 17,980.00",
+          "sub": "1 run",
+          "color": "var(--blue-500)"
+        },
+        {
+          "label": "Awaiting settlement",
+          "amount": "RM 0.00",
+          "sub": "0 intercompany bills",
+          "color": "var(--amber-500)"
+        },
+        {
+          "label": "Settled",
+          "amount": "RM 17,980.00",
+          "sub": "1 transfer recorded",
+          "color": "var(--green-500)"
+        },
+        {
+          "label": "Active rules",
+          "amount": "3",
+          "sub": "of 4 configured",
+          "color": "var(--neutral-400)"
+        }
+      ],
+      "rechargeTabs": [
+        {
+          "value": "runs",
+          "label": "Recharge runs",
+          "count": 1
+        },
+        {
+          "value": "rules",
+          "label": "Rules",
+          "count": 4
+        }
+      ],
+      "bankStats": [
+        {
+          "label": "Ready to download",
+          "amount": "RM 0.00",
+          "sub": "0 files",
+          "color": "var(--color-primary)"
+        },
+        {
+          "label": "Downloaded",
+          "amount": "1",
+          "sub": "awaiting upload to the portal",
+          "color": "var(--amber-500)"
+        },
+        {
+          "label": "Uploaded",
+          "amount": "1",
+          "sub": "confirmed in the banking portal",
+          "color": "var(--green-500)"
+        },
+        {
+          "label": "Bank formats",
+          "amount": "3",
+          "sub": "across 4 paying accounts",
+          "color": "var(--blue-500)"
+        }
+      ],
+      "batchCards": [
+        {
+          "ref": "PAY-4469",
+          "bank": "Maybank",
+          "entityLabel": "Ayu Borneo Management",
+          "entityCode": "ABM",
+          "account": "Maybank Current 5142 (MYR)",
+          "format": "Maybank M2E (CSV)",
+          "dateFmt": "8 Aug 2026",
+          "fileName": "PAY-4469_Maybank.csv",
+          "totalFmt": "17,980.00",
+          "countLabel": "1 payment",
+          "statusLabel": "Uploaded to portal",
+          "statusBg": "var(--green-100)",
+          "statusFg": "var(--green-500)",
+          "canUpload": false,
+          "downloadedNote": "Downloaded 8 Aug 2026",
+          "lines": [
+            {
+              "contact": "Tenaga Nasional Berhad",
+              "acct": "22588039",
+              "amountFmt": "17,980.00",
+              "ref": "TNB-GRP-0726"
+            }
+          ]
+        },
+        {
+          "ref": "PAY-4470",
+          "bank": "Maybank",
+          "entityLabel": "Ayu Borneo Management",
+          "entityCode": "ABM",
+          "account": "Maybank Current 5142 (MYR)",
+          "format": "Maybank M2E (CSV)",
+          "dateFmt": "28 Aug 2026",
+          "fileName": "PAY-4470_Maybank.csv",
+          "totalFmt": "37,840.20",
+          "countLabel": "2 payments",
+          "statusLabel": "Downloaded",
+          "statusBg": "var(--amber-100)",
+          "statusFg": "#8a6300",
+          "canUpload": true,
+          "downloadedNote": "Downloaded 28 Aug 2026",
+          "lines": [
+            {
+              "contact": "KWSP (EPF)",
+              "acct": "94781727",
+              "amountFmt": "9,840.20",
+              "ref": "EPF-0826"
+            },
+            {
+              "contact": "Deloitte Malaysia",
+              "acct": "97860155",
+              "amountFmt": "28,000.00",
+              "ref": "DEL-AUD-2026-04"
+            }
+          ]
+        }
+      ],
+      "entities": [
+        {
+          "code": "ABM",
+          "short": "Ayu Borneo Management"
+        },
+        {
+          "code": "ABKK",
+          "short": "Ayu Borneo (KK)"
+        },
+        {
+          "code": "ABKJ",
+          "short": "Ayu Borneo (KJ)"
+        },
+        {
+          "code": "ABSH",
+          "short": "Ayu Borneo (SH)"
+        },
+        {
+          "code": "ABBKI",
+          "short": "Ayu Borneo (BKI)"
+        },
+        {
+          "code": "ABTWU",
+          "short": "Ayu Borneo (TWU)"
+        },
+        {
+          "code": "ABSDK",
+          "short": "Ayu Borneo (SDK)"
+        },
+        {
+          "code": "ABLDU",
+          "short": "Ayu Borneo (LDU)"
+        },
+        {
+          "code": "ABKCH",
+          "short": "Ayu Borneo (KCH)"
+        },
+        {
+          "code": "ABMYY",
+          "short": "Ayu Borneo (MYY)"
+        },
+        {
+          "code": "ABSBW",
+          "short": "Ayu Borneo (SBW)"
+        },
+        {
+          "code": "ABLMN",
+          "short": "Ayu Borneo (LMN)"
+        },
+        {
+          "code": "ABBTU",
+          "short": "Ayu Borneo (BTU)"
+        },
+        {
+          "code": "ABMZV",
+          "short": "Ayu Borneo (MZV)"
+        },
+        {
+          "code": "ABLBU",
+          "short": "Ayu Borneo (LBU)"
+        },
+        {
+          "code": "ABKUL",
+          "short": "Ayu Borneo (KUL)"
+        },
+        {
+          "code": "ABPEN",
+          "short": "Ayu Borneo (PEN)"
+        },
+        {
+          "code": "ABJHB",
+          "short": "Ayu Borneo (JHB)"
+        },
+        {
+          "code": "ABIPH",
+          "short": "Ayu Borneo (IPH)"
+        },
+        {
+          "code": "ABKTN",
+          "short": "Ayu Borneo (KTN)"
+        },
+        {
+          "code": "ABTGG",
+          "short": "Ayu Borneo (TGG)"
+        },
+        {
+          "code": "ABAOR",
+          "short": "Ayu Borneo (AOR)"
+        },
+        {
+          "code": "ABMKZ",
+          "short": "Ayu Borneo (MKZ)"
+        },
+        {
+          "code": "ABSZB",
+          "short": "Ayu Borneo (SZB)"
+        },
+        {
+          "code": "ABBWH",
+          "short": "Ayu Borneo (BWH)"
+        },
+        {
+          "code": "ABKLG",
+          "short": "Ayu Borneo (KLG)"
+        },
+        {
+          "code": "ABSRB",
+          "short": "Ayu Borneo (SRB)"
+        },
+        {
+          "code": "ABPDG",
+          "short": "Ayu Borneo (PDG)"
+        },
+        {
+          "code": "ABSPT",
+          "short": "Ayu Borneo (SPT)"
+        },
+        {
+          "code": "ABLWY",
+          "short": "Ayu Borneo (LWY)"
+        },
+        {
+          "code": "ABKKB",
+          "short": "Ayu Borneo (KKB)"
+        },
+        {
+          "code": "ABMUR",
+          "short": "Ayu Borneo (MUR)"
+        },
+        {
+          "code": "ABBLG",
+          "short": "Ayu Borneo (BLG)"
+        },
+        {
+          "code": "ABTOD",
+          "short": "Ayu Borneo (TOD)"
+        },
+        {
+          "code": "ABSMM",
+          "short": "Ayu Borneo (SMM)"
+        },
+        {
+          "code": "ABKUD",
+          "short": "Ayu Borneo (KUD)"
+        },
+        {
+          "code": "ABRNU",
+          "short": "Ayu Borneo (RNU)"
+        },
+        {
+          "code": "ABPGH",
+          "short": "Ayu Borneo (PGH)"
+        },
+        {
+          "code": "ABTMB",
+          "short": "Ayu Borneo (TMB)"
+        },
+        {
+          "code": "ABNBA",
+          "short": "Ayu Borneo (NBA)"
+        }
+      ]
+    };</script>
+  <script type="text/babel" data-presets="react">
+    const { useState } = React;
+    const VM = window.VM;
+
+    /* ---------- Icons (lucide-style, inline) ---------- */
+    function Icon({ name, size = 16, color = 'currentColor', stroke = 2 }) {
+      const P = {
+        x: <path d="M18 6 6 18M6 6l12 12" />,
+        'trash-2': <g><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M10 11v6M14 11v6" /></g>,
+        paperclip: <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
+        'file-check': <g><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" /><path d="M14 2v5h5" /><path d="m9 15 2 2 4-4" /></g>,
+        download: <g><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></g>,
+        check: <path d="M20 6 9 17l-5-5" />,
+      }[name];
+      return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round">{P}</svg>;
+    }
+
+    /* ---------- Design-system primitives ---------- */
+    function Tabs({ tabs, value, onChange, variant = 'line' }) {
+      if (variant === 'pill') {
+        return <div style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 999, background: 'rgba(255,255,255,.08)' }}>
+          {tabs.map(t => {
+            const on = t.value === value; return (
+              <button key={t.value} onClick={() => onChange && onChange(t.value)} className="feta-hover"
+                style={{
+                  border: 'none', cursor: 'pointer', borderRadius: 999, padding: '0 16px', height: 32, fontSize: 13, fontWeight: 700,
+                  background: on ? '#fff' : 'transparent', color: on ? 'var(--ink-900)' : 'rgba(255,255,255,.72)'
+                }}>{t.label}</button>);
+          })}
+        </div>;
+      }
+      return <div style={{ display: 'flex', gap: 4 }}>
+        {tabs.map(t => {
+          const on = t.value === value; return (
+            <button key={t.value} onClick={() => onChange && onChange(t.value)} className="feta-hover"
+              style={{
+                border: 'none', background: 'none', cursor: 'pointer', padding: '0 4px', height: 48, display: 'inline-flex', alignItems: 'center', gap: 8,
+                fontSize: 14, fontWeight: 700, color: on ? 'var(--text-heading)' : 'var(--text-muted)',
+                borderBottom: '2.5px solid ' + (on ? 'var(--color-primary)' : 'transparent'), marginBottom: -1.5
+              }}>
+              <span style={{ padding: '0 8px' }}>{t.label}</span>
+              {typeof t.count === 'number' && <span style={{
+                fontSize: 11, fontWeight: 700, minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, display: 'inline-grid', placeItems: 'center',
+                background: on ? 'var(--orange-50)' : 'var(--surface-sunken)', color: on ? 'var(--orange-600)' : 'var(--text-muted)'
+              }}>{t.count}</span>}
+            </button>);
+        })}
+      </div>;
+    }
+
+    function Button({ variant = 'primary', size = 'md', children, onClick, style }) {
+      const h = size === 'sm' ? 36 : 46, pad = size === 'sm' ? '0 14px' : '0 18px', fs = size === 'sm' ? 13 : 14;
+      const V = {
+        primary: { background: 'var(--color-primary)', color: '#fff', border: '1.5px solid var(--color-primary)' },
+        secondary: { background: 'var(--color-secondary)', color: '#fff', border: '1.5px solid var(--color-secondary)' },
+        outline: { background: 'var(--surface-card)', color: 'var(--text-heading)', border: '1.5px solid var(--border-default)' },
+        ghost: { background: 'transparent', color: 'var(--text-body)', border: '1.5px solid transparent' },
+      }[variant];
+      return <button onClick={onClick} className="feta-hover"
+        style={{ ...V, height: h, padding: pad, borderRadius: 10, fontSize: fs, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, ...style }}>{children}</button>;
+    }
+
+    function Field({ label, hint, children }) {
+      return <label style={{ display: 'block' }}>
+        {label && <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>{label}</div>}
+        {children}
+        {hint && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{hint}</div>}
+      </label>;
+    }
+    function Input({ label, hint, placeholder, type = 'text', value = '' }) {
+      return <Field label={label} hint={hint}>
+        <input defaultValue={value} type={type} placeholder={placeholder}
+          style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', outline: 'none' }}
+          onFocus={e => { e.target.style.borderColor = 'var(--color-primary)'; e.target.style.boxShadow = 'var(--ring)'; }}
+          onBlur={e => { e.target.style.borderColor = 'var(--border-default)'; e.target.style.boxShadow = 'none'; }} />
+      </Field>;
+    }
+    function Select({ label, options = [], value }) {
+      return <Field label={label}>
+        <div style={{ position: 'relative' }}>
+          <select defaultValue={value}
+            style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 34px 0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', appearance: 'none', cursor: 'pointer', outline: 'none' }}>
+            {options.map(o => <option key={o}>{o}</option>)}
+          </select>
+          <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 11, pointerEvents: 'none' }}>▾</span>
+        </div>
+      </Field>;
+    }
+    function Checkbox({ checked }) {
+      return <span style={{ width: 20, height: 20, borderRadius: 6, border: '1.5px solid ' + (checked ? 'var(--color-primary)' : 'var(--border-default)'), background: checked ? 'var(--color-primary)' : 'var(--surface-card)', display: 'inline-grid', placeItems: 'center', flex: '0 0 auto', cursor: 'pointer' }}>
+        {checked && <Icon name="check" size={13} color="#fff" stroke={3} />}
+      </span>;
+    }
+    function Radio({ checked, label }) {
+      return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+        <span style={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid ' + (checked ? 'var(--color-primary)' : 'var(--border-default)'), display: 'inline-grid', placeItems: 'center', flex: '0 0 auto' }}>
+          {checked && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-primary)' }} />}
+        </span>
+        {label && <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>{label}</span>}
+      </span>;
+    }
+    function Switch({ checked, label }) {
+      const sw = <span style={{ width: 42, height: 24, borderRadius: 999, background: checked ? 'var(--color-primary)' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', cursor: 'pointer', transition: 'background var(--dur-fast)' }}>
+        <span style={{ position: 'absolute', top: 2, left: checked ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: 'var(--shadow-sm)', transition: 'left var(--dur-fast) var(--ease-out)' }} />
+      </span>;
+      if (!label) return sw;
+      return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>{sw}<span style={{ fontSize: 14, color: 'var(--text-body)' }}>{label}</span></span>;
+    }
+
+    function Dialog({ open, title, description, size = 'md', onClose, children }) {
+      if (!open) return null;
+      const w = size === 'sm' ? 440 : 640;
+      return <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(16,18,53,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={onClose}>
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: w, background: 'var(--surface-card)', borderRadius: 16, boxShadow: 'var(--shadow-lg)', padding: 24, animation: 'feta-rise var(--dur-slow) var(--ease-out)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
+              {description && <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{description}</div>}
+            </div>
+            <button onClick={onClose} aria-label="Close" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex' }}><Icon name="x" size={18} /></button>
+          </div>
+          {children}
+        </div>
+      </div>;
+    }
+    function Toast({ title, message, onClose }) {
+      return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, width: 320, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--color-success)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: '14px 16px' }}>
+        <span style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--green-100)', color: 'var(--green-500)', display: 'grid', placeItems: 'center', flex: '0 0 auto' }}><Icon name="check" size={14} stroke={3} /></span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{message}</div>
+        </div>
+        <button onClick={onClose} style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}><Icon name="x" size={15} /></button>
+      </div>;
+    }
+
+    /* ---------- shared bits ---------- */
+    function StatCard({ s, rm }) {
+      return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s.label}</span>
+        </div>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)', lineHeight: 1.1 }}>{rm ? 'RM ' : ''}{s.amount}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{s.sub}</div>
+      </div>;
+    }
+    const Code = ({ children }) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)', background: 'var(--blue-50)', padding: '2px 5px', borderRadius: 4, flex: '0 0 auto' }}>{children}</span>;
+    const Ellip = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+    const GRID = '44px 172px minmax(150px,1.1fr) 148px minmax(150px,1.1fr) 92px 92px 92px 96px 46px 104px';
+
+    /* ---------- Bills view ---------- */
+    function BillsView() {
+      const [tab, setTab] = useState('all');
+      const [filtersOpen, setFiltersOpen] = useState(false);
+      return <div style={{ maxWidth: 1440, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, whiteSpace: 'nowrap' }}><a href="#">Purchases overview</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>All entities</span></div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Bills</h1>
+          </div>
+          <span style={{ flex: 1 }} />
+          <Button variant="outline" size="sm">Export</Button>
+        </div>
+        <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}>
+          <Tabs tabs={VM.statusTabs} value={tab} onChange={setTab} variant="line" />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--color-primary)', borderRadius: 10, padding: '14px 18px', marginBottom: 20 }}>
+          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}><strong style={{ color: 'var(--text-heading)' }}>{VM.bannerHead}</strong> {VM.bannerTail}</div>
+          <button style={{ border: 'none', background: 'none', fontSize: 14, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Review drafts</button>
+          <button style={{ border: 'none', background: 'none', fontSize: 14, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Notification settings</button>
+          <button aria-label="Dismiss" style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4, display: 'flex', borderRadius: '50%' }}><Icon name="x" size={16} /></button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 20 }}>
+          {VM.stats.map((s, i) => <StatCard key={i} s={s} rm />)}
+        </div>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: '16px 18px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 240px', minWidth: 220 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>Xero entity</div>
+              <button className="feta-hover" style={{ width: '100%', height: 46, display: 'flex', alignItems: 'center', gap: 8, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 14px', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer' }}><span style={{ flex: 1, ...Ellip, textAlign: 'left' }}>All 40 entities</span><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>▾</span></button>
+            </div>
+            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>Contact</div>
+              <button className="feta-hover" style={{ width: '100%', height: 46, display: 'flex', alignItems: 'center', gap: 8, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 14px', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer' }}><span style={{ flex: 1, ...Ellip, textAlign: 'left' }}>All contacts</span><span style={{ color: 'var(--text-muted)', fontSize: 11 }}>▾</span></button>
+            </div>
+            <div style={{ flex: '1 1 220px', minWidth: 200 }}><Input label="Amount or reference" placeholder="e.g. 246.15 or MYIN26" /></div>
+            <div style={{ width: 160 }}><Input label="Start date" type="date" /></div>
+            <div style={{ width: 160 }}><Input label="End date" type="date" /></div>
+            <div style={{ width: 150 }}><Select label="Date type" options={['Any date', 'Bill date', 'Due date', 'Paid date']} /></div>
+            <Button variant="outline" size="md" onClick={() => setFiltersOpen(o => !o)}>Filters</Button>
+          </div>
+          {filtersOpen && <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14 }}>
+              <Input label="Amount from" type="number" placeholder="0.00" />
+              <Input label="Amount to" type="number" placeholder="0.00" />
+              <Input label="Reference" placeholder="e.g. MYIN26" />
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <Button variant="ghost" size="sm">Clear all filters</Button>
+                <Button variant="secondary" size="sm" onClick={() => setFiltersOpen(false)}>Apply</Button>
+              </div>
+            </div>
+          </div>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 4px 10px' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{VM.metaText}</span><span style={{ flex: 1 }} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sorted by bill date, newest first</span>
+        </div>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto', overflowY: 'hidden' }}>
+          <div style={{ minWidth: 1290, display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 8, padding: '11px 16px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <div><Checkbox /></div><div>Entity</div><div>From</div><div>Status</div><div>Reference</div><div>Date</div><div>Due date</div>
+            <div style={{ textAlign: 'right' }}>Paid</div><div style={{ textAlign: 'right' }}>Due</div><div style={{ textAlign: 'center' }}>Files</div><div />
+          </div>
+          {VM.rows.map((r, i) => (
+            <div key={i} className="feta-hover" style={{ minWidth: 1290, display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: 'var(--surface-card)' }}>
+              <div><Checkbox /></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{r.entityCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.entityShort}</span></div>
+              <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.contact}</div>
+              <div><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span></div>
+              <div style={{ minWidth: 0, ...Ellip }}><span style={{ color: 'var(--text-body)' }}>{r.reference}</span><span style={{ color: 'var(--text-subtle)' }}>{r.refNote}</span></div>
+              <div style={{ color: 'var(--text-body)' }}>{r.dateFmt}</div>
+              <div style={{ color: r.dueColor, fontWeight: r.dueWeight }}>{r.dueFmt}</div>
+              <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>{r.paidFmt}</div>
+              <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{r.outFmt}</div>
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{r.filesFmt}</div>
+              <div style={{ textAlign: 'right' }}>
+                {r.hasAction && <button className="feta-hover" style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>{r.actionLabel}</button>}
+                {r.isPaid && <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{r.paidNote}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>;
+    }
+
+    /* ---------- Recharge view ---------- */
+    function RechargeView() {
+      const [rv, setRv] = useState('runs');
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Intercompany recharge</span></div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Intercompany recharge</h1>
+            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>When a paying entity settles a bill on behalf of a subsidiary, the full amount is recharged to that subsidiary. Each recharge raises an AR invoice in the payer and a draft bill in the subsidiary, cleared by intercompany transfer.</p>
+          </div>
+          <span style={{ flex: 1 }} />
+          <Button variant="primary" size="sm">New rule</Button>
+        </div>
+        <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}><Tabs tabs={VM.rechargeTabs} value={rv} onChange={setRv} variant="line" /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>{VM.rechargeStats.map((s, i) => <StatCard key={i} s={s} />)}</div>
+        {rv === 'runs' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {VM.runCards.map((r, i) => (
+            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{r.supplier}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.billRef} · paid {r.paidFmt} by {r.payerShort}</div></div>
+                <span style={{ flex: 1 }} />
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-heading)' }}>RM {r.totalFmt}</div></div>
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>AR invoice</div><div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-body)' }}>{r.arDoc}</div></div>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 150px', gap: 10, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
+                <div>Subsidiary</div><div style={{ textAlign: 'right' }}>Amount</div><div>Bill created</div><div style={{ textAlign: 'right' }}>Settlement</div>
+              </div>
+              {r.lines.map((l, j) => (
+                <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 150px', gap: 10, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{l.code}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{l.short}</span></div>
+                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{l.amountFmt}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', ...Ellip }}>{l.doc}</div>
+                  <div style={{ textAlign: 'right' }}>{l.settled
+                    ? <span><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'var(--green-100)', color: 'var(--green-500)' }}>Settled</span><div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 3 }}>{l.settledNote}</div></span>
+                    : <button className="feta-hover" style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>Mark settled</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>}
+        {rv === 'rules' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {VM.ruleCards.map((r, i) => (
+            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{r.supplier}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Paid by {r.payerShort} · {r.splitLabel}</div></div>
+                <span style={{ flex: 1 }} />
+                <Switch checked={r.on} />
+                <Button variant="outline" size="sm">Edit rule</Button>
+                <button aria-label="Delete rule" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={16} /></button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged in full to</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)' }}>{r.targetCode}</span><span>{r.targetShort}</span><span style={{ fontWeight: 700, color: 'var(--text-heading)' }}>100%</span>
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>}
+      </div>;
+    }
+
+    /* ---------- Bank files view ---------- */
+    function BankView() {
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Bank payment files</span></div>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Bank payment files</h1>
+          <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>Marking bills as paid generates a payment file in the layout the paying account's bank expects. Download the file, upload it to the banking portal, then mark the batch as uploaded.</p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>{VM.bankStats.map((s, i) => <StatCard key={i} s={s} />)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 }}>
+          {VM.batchCards.map((b, i) => (
+            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Code>{b.entityCode}</Code><span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{b.ref} · {b.bank}</span></div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{b.entityLabel} · {b.account} · {b.format} · {b.dateFmt}</div>
+                </div>
+                <span style={{ flex: 1 }} />
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{b.countLabel}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-heading)' }}>RM {b.totalFmt}</div></div>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: b.statusBg, color: b.statusFg }}>{b.statusLabel}</span>
+                <Button variant="primary" size="sm"><Icon name="download" size={15} color="#fff" />Download file</Button>
+                {b.canUpload && <Button variant="outline" size="sm">Mark uploaded</Button>}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 130px 110px minmax(0,1fr)', gap: 10, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
+                <div>Payee</div><div>Account</div><div style={{ textAlign: 'right' }}>Amount</div><div>Reference</div>
+              </div>
+              {b.lines.map((l, j) => (
+                <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 130px 110px minmax(0,1fr)', gap: 10, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{l.contact}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)' }}>{l.acct}</div>
+                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{l.amountFmt}</div>
+                  <div style={{ color: 'var(--text-body)', ...Ellip }}>{l.ref}</div>
+                </div>
+              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px' }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-body)' }}>{b.fileName}</span><span style={{ flex: 1 }} /><span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{b.downloadedNote}</span></div>
+            </div>
+          ))}
+        </div>
+      </div>;
+    }
+
+    /* ---------- Notifications (settings) view ---------- */
+    function SettingsView({ onAssign }) {
+      const [freq, setFreq] = useState('daily');
+      const FR = [['daily', 'Daily', 'Every working day'], ['weekly', 'Weekly', 'One day each week'], ['monthly', 'Monthly', 'One day each month']];
+      return <div style={{ maxWidth: 1040, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Settings</span></div>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>WhatsApp notifications</h1>
+          <p style={{ margin: '8px 0 0', fontSize: 15, color: 'var(--text-muted)', maxWidth: '70ch' }}>Send finance a digest of draft bills waiting to be cleared across all 40 Ayu Borneo Xero entities. Admins manage the schedule and the numbers that receive it.</p>
+        </div>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Schedule</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>How often the draft-bills digest is sent.</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+            {FR.map(([k, lab, sub]) => {
+              const on = freq === k; return (
+                <div key={k} onClick={() => setFreq(k)} style={{ border: '1.5px solid ' + (on ? 'var(--color-primary)' : 'var(--border-subtle)'), background: on ? 'var(--orange-50)' : 'var(--surface-card)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}>
+                  <Radio name="freq" label={lab} checked={on} />
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, paddingLeft: 30 }}>{sub}</div>
+                </div>);
+            })}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginTop: 16 }}>
+            <Select label="Send time (MYT)" options={['07:00', '08:00', '09:00', '12:00', '17:00', '18:30']} value="09:00" />
+            {freq === 'weekly' && <Select label="Day of week" options={['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']} value="Monday" />}
+            {freq === 'monthly' && <Select label="Day of month" options={['1', '5', '10', '15', '20', '25', 'Last day']} value="1" />}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)' }}>
+            <Switch label="Include a per-entity breakdown of the top 3 entities" checked={true} />
+            <Switch label="Send even when there are no draft bills" checked={false} />
+          </div>
+        </div>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Recipients</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>{VM.recipientMeta}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px 130px minmax(200px,1.2fr) 72px 40px', gap: 10, padding: '0 12px 8px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <div>Name</div><div>WhatsApp number</div><div>Role</div><div>Xero entities</div><div>Active</div><div />
+          </div>
+          {VM.recipients.map((p, i) => (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 150px 130px minmax(200px,1.2fr) 72px 40px', gap: 10, alignItems: 'center', padding: 12, borderTop: '1px solid var(--neutral-100)', fontSize: 14 }}>
+              <div style={{ fontWeight: 700, color: 'var(--text-heading)' }}>{p.name}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-body)' }}>{p.phone}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{p.role}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap' }}>
+                  {p.allEntities && <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 9px', borderRadius: 999, background: 'var(--orange-50)', color: 'var(--orange-600)' }}>All 40 entities</span>}
+                  {p.chips.map((c, j) => <span key={j} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)', background: 'var(--blue-50)', padding: '3px 6px', borderRadius: 4 }}>{c.code}</span>)}
+                  {p.hasMore && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.moreLabel}</span>}
+                </div>
+                <button onClick={onAssign} className="feta-hover" style={{ flex: '0 0 auto', border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '4px 11px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>Assign</button>
+              </div>
+              <div><Switch checked={p.on} /></div>
+              <div style={{ textAlign: 'right' }}><button aria-label="Remove recipient" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={16} /></button></div>
+            </div>
+          ))}
+          <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, alignItems: 'flex-end' }}>
+            <Input label="Name" placeholder="Full name" />
+            <Input label="WhatsApp number" placeholder="+60 12-345 6789" />
+            <Select label="Role" options={['Accounts Payable', 'Finance Manager', 'Group Accountant', 'Director', 'Admin']} />
+            <div><div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>Xero entities</div>
+              <button onClick={onAssign} className="feta-hover" style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 14px', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer', textAlign: 'left' }}>All 40 entities</button>
+            </div>
+            <Button variant="outline" size="md">Add recipient</Button>
+          </div>
+        </div>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 20 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Message preview</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>Group-wide digest · 11 drafts · RM 37,480.40. Recipients assigned to specific entities receive the same message scoped to their entities.</div>
+          <div style={{ background: 'var(--green-100)', borderRadius: 14, padding: 20 }}>
+            <div style={{ maxWidth: 520, background: '#fff', borderRadius: 12, borderTopLeftRadius: 2, padding: '16px 18px', boxShadow: 'var(--shadow-sm)', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.65, color: 'var(--text-heading)', whiteSpace: 'pre-wrap' }}>{VM.digestText}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <Button variant="ghost" size="md">Send test message</Button>
+          <Button variant="primary" size="md">Save settings</Button>
+        </div>
+      </div>;
+    }
+
+    /* ---------- App shell ---------- */
+    function App() {
+      const [view, setView] = useState('bills');
+      const [assignOpen, setAssignOpen] = useState(false);
+      const [paidOpen, setPaidOpen] = useState(false);
+      const viewTabs = [{ value: 'bills', label: 'Bills' }, { value: 'recharge', label: 'Recharge' }, { value: 'bank', label: 'Bank files' }, { value: 'settings', label: 'Notifications' }];
+      return <div style={{ minHeight: '100vh', background: 'var(--surface-page)' }}>
+        <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'var(--ink-900)', padding: '0 28px', display: 'flex', alignItems: 'center', gap: 20, height: 64 }}>
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, letterSpacing: '-.03em', color: '#fff' }}>Fusion<span style={{ color: 'var(--orange-500)' }}>ETA</span></span>
+          <span style={{ width: 1, height: 26, background: 'rgba(255,255,255,.18)' }} />
+          <span style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.01em', color: '#fff' }}>Bills Hub</span>
+          <span style={{ whiteSpace: 'nowrap', fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--orange-400)' }}>Ayu Borneo Group</span>
+          <span style={{ flex: 1 }} />
+          <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green-500)' }} /><span>40 Xero entities connected</span>
+          </div>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700 }}>NA</div>
+        </header>
+
+        {view === 'bills' && <BillsView />}
+        {view === 'recharge' && <RechargeView />}
+        {view === 'bank' && <BankView />}
+        {view === 'settings' && <SettingsView onAssign={() => setAssignOpen(true)} />}
+
+        <Dialog open={assignOpen} onClose={() => setAssignOpen(false)} title="Assign Xero entities" description="Chin Wei Loong · +60 16-228 4410" size="md">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1, border: '1.5px solid var(--border-subtle)', background: 'var(--surface-card)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>All entities</div><div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Group-wide totals for all 40 companies. New entities included automatically.</div></div>
+              <div style={{ flex: 1, border: '1.5px solid var(--color-primary)', background: 'var(--orange-50)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>Selected entities</div><div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Only the drafts belonging to the entities ticked below.</div></div>
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>3 of 40 entities selected</span><span style={{ flex: 1 }} /><button style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Select all 40</button><button style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}>Clear</button></div>
+              <Input placeholder="Search entities" />
+              <div style={{ marginTop: 10, maxHeight: 236, overflow: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '10px 12px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '8px 16px' }}>
+                {VM.entities.slice(0, 16).map((e, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minWidth: 0 }}>
+                    <Checkbox checked={['ABKK', 'ABKJ', 'ABSH'].includes(e.code)} /><Code>{e.code}</Code><span style={{ flex: 1, minWidth: 0, color: 'var(--text-body)', ...Ellip }}>{e.short}</span>
+                  </div>))}
+              </div>
+            </div>
+            <div style={{ background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)' }}>Receives draft totals for 3 entities only.</div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}><Button variant="outline" size="md" onClick={() => setAssignOpen(false)}>Cancel</Button><Button variant="primary" size="md" onClick={() => setAssignOpen(false)}>Save assignment</Button></div>
+          </div>
+        </Dialog>
+
+        {/* Demo affordance: preview the Mark-as-paid dialog */}
+        <button onClick={() => setPaidOpen(true)} title="Preview: Mark bills as paid dialog" style={{ position: 'fixed', left: 20, bottom: 20, zIndex: 50, border: '1px solid var(--border-default)', background: 'var(--surface-card)', color: 'var(--text-muted)', borderRadius: 999, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' }}>Preview: Mark-as-paid dialog</button>
+        <Dialog open={paidOpen} onClose={() => setPaidOpen(false)} title="Mark bills as paid" description="3 bills · RM 23,850.60" size="md">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Input label="Date paid" type="date" value="2026-09-04" />
+            <Select label="Paid from" options={['Maybank Current 5142 (MYR)', 'CIMB Operating 8830 (MYR)', 'HSBC Collections 2201 (MYR)', 'Petty Cash (MYR)']} value="Maybank Current 5142 (MYR)" />
+            <div style={{ gridColumn: '1 / -1' }}><Input label="Reference" placeholder="e.g. MBB-FT-20260904-01" hint="Shown on the Xero payment in every entity." /></div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 6 }}>Payment slip <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· required</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, border: '1.5px dashed var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '14px 16px', cursor: 'pointer' }}>
+                <span style={{ display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 10, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)', flex: '0 0 auto' }}><Icon name="paperclip" size={18} /></span>
+                <span style={{ flex: 1, minWidth: 0 }}><span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-heading)' }}>Attach payment slip</span><span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>PDF or image · bank transfer slip or receipt</span></span>
+              </div>
+            </div>
+            <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)' }}>Marks the selected bills paid in Xero across every entity and records the payment against the chosen account.</div>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--color-secondary)', borderRadius: 10, padding: '14px 16px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-heading)' }}>Generate bank payment file</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Maybank M2E (CSV) · download it from Bank files and upload to the portal.</div></div>
+              <Switch checked={true} />
+            </div>
+            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}><Button variant="outline" size="md" onClick={() => setPaidOpen(false)}>Cancel</Button><Button variant="primary" size="md" onClick={() => setPaidOpen(false)}>Mark 3 as paid</Button></div>
+          </div>
+        </Dialog>
+      </div>;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+
+</html>

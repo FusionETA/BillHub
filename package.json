@@ -1,0 +1,34 @@
+{
+  "name": "wazzocr-billhub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bills Hub \u2014 multi-entity Xero bill management, WhatsApp digests, bank payment files and intercompany recharges",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "db:migrate": "node scripts/db-migrate.js",
+    "db:test": "node scripts/db-test.js",
+    "create-account": "node scripts/create-account.js",
+    "sync": "node scripts/sync-bills.js",
+    "test": "node test/api.test.js && node test/sync.test.js && node test/grant.test.js && node test/payments.test.js && node test/digest.test.js && node test/openaccess.test.js",
+    "test:api": "node test/api.test.js",
+    "test:sync": "node test/sync.test.js",
+    "test:seed": "node test/seed.js",
+    "test:grant": "node test/grant.test.js",
+    "dev:local": "./scripts/dev-local.sh",
+    "test:openaccess": "node test/openaccess.test.js",
+    "preflight": "node scripts/preflight.js",
+    "test:payments": "node test/payments.test.js",
+    "test:digest": "node test/digest.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "mysql2": "^3.22.5"
+  }
+}

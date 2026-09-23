@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bills Hub — FusionETA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
+    rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+  <style>
+    :root {
+      --brand-orange: #FE5000;
+      --brand-blue: #1E22AA;
+      --brand-gray: #999999;
+      --orange-50: #FFF3EC;
+      --orange-100: #FFE1D2;
+      --orange-200: #FFC1A3;
+      --orange-300: #FF9B6E;
+      --orange-400: #FF7333;
+      --orange-500: #FE5000;
+      --orange-600: #DB3F00;
+      --orange-700: #AE3100;
+      --orange-800: #802400;
+      --orange-900: #521700;
+      --blue-50: #ECEDFA;
+      --blue-100: #D6D7F3;
+      --blue-200: #ABADE7;
+      --blue-300: #7E81D9;
+      --blue-400: #4D51C7;
+      --blue-500: #1E22AA;
+      --blue-600: #191C8C;
+      --blue-700: #13166B;
+      --blue-800: #0D0F49;
+      --blue-900: #08092A;
+      --neutral-0: #FFFFFF;
+      --neutral-50: #F6F7F9;
+      --neutral-100: #ECEEF2;
+      --neutral-200: #DEE1E7;
+      --neutral-300: #C7CCD5;
+      --neutral-400: #9AA1AD;
+      --neutral-500: #6C7480;
+      --neutral-600: #4C525D;
+      --neutral-700: #363B44;
+      --neutral-800: #22262D;
+      --neutral-900: #14161B;
+      --ink-900: #101235;
+      --ink-800: #1B1E4A;
+      --green-500: #1E9E62;
+      --green-100: #DDF3E8;
+      --amber-500: #E8A400;
+      --amber-100: #FBEECB;
+      --red-500: #E23A2E;
+      --red-100: #FBDEDB;
+      --info-500: #2F6BFF;
+      --info-100: #DEE9FF;
+      --color-primary: var(--brand-orange);
+      --color-primary-hover: var(--orange-600);
+      --color-primary-active: var(--orange-700);
+      --color-primary-soft: var(--orange-50);
+      --color-on-primary: #fff;
+      --color-secondary: var(--brand-blue);
+      --color-secondary-hover: var(--blue-600);
+      --color-secondary-active: var(--blue-700);
+      --color-secondary-soft: var(--blue-50);
+      --color-on-secondary: #fff;
+      --text-heading: var(--ink-900);
+      --text-body: var(--neutral-700);
+      --text-muted: var(--neutral-500);
+      --text-subtle: var(--neutral-400);
+      --text-inverse: #fff;
+      --text-link: var(--brand-blue);
+      --text-link-hover: var(--orange-600);
+      --surface-page: var(--neutral-50);
+      --surface-card: var(--neutral-0);
+      --surface-sunken: var(--neutral-100);
+      --surface-inverse: var(--ink-900);
+      --surface-brand: var(--brand-blue);
+      --border-subtle: var(--neutral-200);
+      --border-default: var(--neutral-300);
+      --border-strong: var(--neutral-400);
+      --border-focus: var(--brand-orange);
+      --color-success: var(--green-500);
+      --color-warning: var(--amber-500);
+      --color-danger: var(--red-500);
+      --color-info: var(--info-500);
+      --ring: 0 0 0 3px rgba(254, 80, 0, .35);
+      --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+      --font-body: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+      --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
+      --shadow-sm: 0 1px 3px rgba(16, 18, 53, .08), 0 1px 2px rgba(16, 18, 53, .04);
+      --shadow-md: 0 4px 12px rgba(16, 18, 53, .08), 0 2px 4px rgba(16, 18, 53, .05);
+      --shadow-lg: 0 12px 28px rgba(16, 18, 53, .12), 0 4px 10px rgba(16, 18, 53, .06);
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+      --dur-fast: 120ms;
+      --dur-base: 200ms;
+      --dur-slow: 320ms;
+      --ease-standard: cubic-bezier(.2, 0, 0, 1);
+      --ease-out: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--surface-page);
+      color: var(--text-body);
+      -webkit-font-smoothing: antialiased
+    }
+
+    a {
+      color: var(--text-link);
+      text-decoration: none
+    }
+
+    a:hover {
+      color: var(--text-link-hover)
+    }
+
+    button {
+      font-family: var(--font-body)
+    }
+
+    @keyframes feta-rise {
+      from {
+        transform: translateY(14px);
+        opacity: 0
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1
+      }
+    }
+
+    .feta-hover {
+      transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard)
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--neutral-300);
+      border-radius: 8px;
+      border: 2px solid var(--surface-card)
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script>
+  /* Static data for the one module still to be built: Recharge. Bills, Bank
+     files and Notifications all read from the API. */
+  window.VM = {
+  "ruleCards": [
+    {
+      "supplier": "Tenaga Nasional Berhad",
+      "payerShort": "Ayu Borneo Management",
+      "on": true,
+      "splitLabel": "Reference contains \"TNB-KK\"",
+      "targetCode": "ABKK",
+      "targetShort": "Ayu Borneo (KK)"
+    },
+    {
+      "supplier": "Tenaga Nasional Berhad",
+      "payerShort": "Ayu Borneo Management",
+      "on": true,
+      "splitLabel": "Reference contains \"TNB-GRP\"",
+      "targetCode": "ABKJ",
+      "targetShort": "Ayu Borneo (KJ)"
+    },
+    {
+      "supplier": "Maxis Broadband Sdn Bhd",
+      "payerShort": "Ayu Borneo Management",
+      "on": true,
+      "splitLabel": "Any bill from this supplier",
+      "targetCode": "ABKK",
+      "targetShort": "Ayu Borneo (KK)"
+    },
+    {
+      "supplier": "Zurich General Insurance",
+      "payerShort": "Ayu Borneo Management",
+      "on": false,
+      "splitLabel": "Any bill from this supplier",
+      "targetCode": "ABSH",
+      "targetShort": "Ayu Borneo (SH)"
+    }
+  ],
+  "runCards": [
+    {
+      "supplier": "Tenaga Nasional Berhad",
+      "billRef": "TNB-GRP-0726",
+      "arDoc": "AR-IC-1038",
+      "payerShort": "Ayu Borneo Management",
+      "paidFmt": "8 Aug 2026",
+      "totalFmt": "17,980.00",
+      "statusLabel": "Fully settled",
+      "statusBg": "var(--green-100)",
+      "statusFg": "var(--green-500)",
+      "hasOpen": false,
+      "lines": [
+        {
+          "code": "ABKJ",
+          "short": "Ayu Borneo (KJ)",
+          "amountFmt": "17,980.00",
+          "doc": "IC-TNB-GRP-0726-KJ",
+          "settled": true,
+          "settledNote": "MBB-FT-20260812-08 · 12 Aug 2026"
+        }
+      ]
+    }
+  ],
+  "rechargeStats": [
+    {
+      "label": "Recharged to date",
+      "amount": "RM 17,980.00",
+      "sub": "1 run",
+      "color": "var(--blue-500)"
+    },
+    {
+      "label": "Awaiting settlement",
+      "amount": "RM 0.00",
+      "sub": "0 intercompany bills",
+      "color": "var(--amber-500)"
+    },
+    {
+      "label": "Settled",
+      "amount": "RM 17,980.00",
+      "sub": "1 transfer recorded",
+      "color": "var(--green-500)"
+    },
+    {
+      "label": "Active rules",
+      "amount": "3",
+      "sub": "of 4 configured",
+      "color": "var(--neutral-400)"
+    }
+  ],
+  "rechargeTabs": [
+    {
+      "value": "runs",
+      "label": "Recharge runs",
+      "count": 1
+    },
+    {
+      "value": "rules",
+      "label": "Rules",
+      "count": 4
+    }
+  ]
+};
+  </script>
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useCallback } = React;
+    const VM = window.VM;
+
+    /* ---------- API client ---------- */
+    // Every call is same-origin and cookie-authenticated. A 401 means the
+    // session has gone, so we bounce to the sign-in page rather than rendering
+    // an empty hub.
+    async function request(path, { method = 'GET', body } = {}) {
+      const res = await fetch(path, {
+        method,
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined
+      });
+      // A 401 means the session has gone — but only when sign-in exists at all.
+      // With AUTH_DISABLED the server never returns one, so this stays dormant
+      // rather than needing to be torn out and put back.
+      if (res.status === 401) {
+        window.location.href = '/login.html?next=' + encodeURIComponent(window.location.pathname);
+        throw new Error('Your session has expired.');
+      }
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Keep the status and body on the error: a Xero problem (424) needs a
+        // different message from an ordinary failure.
+        const err = new Error(payload.error || 'Request failed (' + res.status + ')');
+        err.status = res.status;
+        err.payload = payload;
+        throw err;
+      }
+      return payload;
+    }
+    const api = {
+      get: (path) => request(path),
+      post: (path, body) => request(path, { method: 'POST', body })
+    };
+
+    // Holds off on a value until the user stops typing, so each keystroke in the
+    // search or amount boxes doesn't fire its own query.
+    function useDebounced(value, ms = 350) {
+      const [v, setV] = useState(value);
+      useEffect(() => {
+        const t = setTimeout(() => setV(value), ms);
+        return () => clearTimeout(t);
+      }, [value, ms]);
+      return v;
+    }
+
+    // Closes a popover when the user clicks anywhere outside it.
+    function useClickOutside(open, onClose) {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (!open) return;
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+      }, [open, onClose]);
+      return ref;
+    }
+
+    /* ---------- Icons (lucide-style, inline) ---------- */
+    function Icon({ name, size = 16, color = 'currentColor', stroke = 2 }) {
+      const P = {
+        x: <path d="M18 6 6 18M6 6l12 12" />,
+        'trash-2': <g><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M10 11v6M14 11v6" /></g>,
+        paperclip: <path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
+        'file-check': <g><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" /><path d="M14 2v5h5" /><path d="m9 15 2 2 4-4" /></g>,
+        download: <g><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></g>,
+        check: <path d="M20 6 9 17l-5-5" />,
+      }[name];
+      return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round">{P}</svg>;
+    }
+
+    /* ---------- Design-system primitives ---------- */
+    function Tabs({ tabs, value, onChange, variant = 'line' }) {
+      if (variant === 'pill') {
+        return <div style={{ display: 'inline-flex', gap: 4, padding: 4, borderRadius: 999, background: 'rgba(255,255,255,.08)' }}>
+          {tabs.map(t => {
+            const on = t.value === value; return (
+              <button key={t.value} onClick={() => onChange && onChange(t.value)} className="feta-hover"
+                style={{
+                  border: 'none', cursor: 'pointer', borderRadius: 999, padding: '0 16px', height: 32, fontSize: 13, fontWeight: 700,
+                  background: on ? '#fff' : 'transparent', color: on ? 'var(--ink-900)' : 'rgba(255,255,255,.72)'
+                }}>{t.label}</button>);
+          })}
+        </div>;
+      }
+      return <div style={{ display: 'flex', gap: 4 }}>
+        {tabs.map(t => {
+          const on = t.value === value; return (
+            <button key={t.value} onClick={() => onChange && onChange(t.value)} className="feta-hover"
+              style={{
+                border: 'none', background: 'none', cursor: 'pointer', padding: '0 4px', height: 48, display: 'inline-flex', alignItems: 'center', gap: 8,
+                fontSize: 14, fontWeight: 700, color: on ? 'var(--text-heading)' : 'var(--text-muted)',
+                borderBottom: '2.5px solid ' + (on ? 'var(--color-primary)' : 'transparent'), marginBottom: -1.5
+              }}>
+              <span style={{ padding: '0 8px' }}>{t.label}</span>
+              {typeof t.count === 'number' && <span style={{
+                fontSize: 11, fontWeight: 700, minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, display: 'inline-grid', placeItems: 'center',
+                background: on ? 'var(--orange-50)' : 'var(--surface-sunken)', color: on ? 'var(--orange-600)' : 'var(--text-muted)'
+              }}>{t.count}</span>}
+            </button>);
+        })}
+      </div>;
+    }
+
+    function Button({ variant = 'primary', size = 'md', children, onClick, style }) {
+      const h = size === 'sm' ? 36 : 46, pad = size === 'sm' ? '0 14px' : '0 18px', fs = size === 'sm' ? 13 : 14;
+      const V = {
+        primary: { background: 'var(--color-primary)', color: '#fff', border: '1.5px solid var(--color-primary)' },
+        secondary: { background: 'var(--color-secondary)', color: '#fff', border: '1.5px solid var(--color-secondary)' },
+        outline: { background: 'var(--surface-card)', color: 'var(--text-heading)', border: '1.5px solid var(--border-default)' },
+        ghost: { background: 'transparent', color: 'var(--text-body)', border: '1.5px solid transparent' },
+      }[variant];
+      return <button onClick={onClick} className="feta-hover"
+        style={{ ...V, height: h, padding: pad, borderRadius: 10, fontSize: fs, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, ...style }}>{children}</button>;
+    }
+
+    function Field({ label, hint, children }) {
+      return <label style={{ display: 'block' }}>
+        {label && <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>{label}</div>}
+        {children}
+        {hint && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{hint}</div>}
+      </label>;
+    }
+    // Controlled when given `onChange`, uncontrolled otherwise, so the static
+    // screens that were built against the prototype keep working unchanged.
+    function Input({ label, hint, placeholder, type = 'text', value = '', onChange, disabled }) {
+      const controlled = typeof onChange === 'function';
+      return <Field label={label} hint={hint}>
+        <input {...(controlled ? { value, onChange: e => onChange(e.target.value) } : { defaultValue: value })}
+          type={type} placeholder={placeholder} disabled={disabled}
+          style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', background: disabled ? 'var(--neutral-50)' : 'var(--surface-card)', outline: 'none' }}
+          onFocus={e => { e.target.style.borderColor = 'var(--color-primary)'; e.target.style.boxShadow = 'var(--ring)'; }}
+          onBlur={e => { e.target.style.borderColor = 'var(--border-default)'; e.target.style.boxShadow = 'none'; }} />
+      </Field>;
+    }
+
+    // `options` accepts plain strings (prototype style) or { label, value } pairs.
+    function Select({ label, options = [], value, onChange }) {
+      const opts = options.map(o => (typeof o === 'string' ? { label: o, value: o } : o));
+      const controlled = typeof onChange === 'function';
+      return <Field label={label}>
+        <div style={{ position: 'relative' }}>
+          <select {...(controlled ? { value, onChange: e => onChange(e.target.value) } : { defaultValue: value })}
+            style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 34px 0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', appearance: 'none', cursor: 'pointer', outline: 'none' }}>
+            {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 11, pointerEvents: 'none' }}>▾</span>
+        </div>
+      </Field>;
+    }
+
+    function Checkbox({ checked, onChange, label }) {
+      const box = <span
+        onClick={onChange ? (e) => { e.stopPropagation(); onChange(!checked); } : undefined}
+        role={onChange ? 'checkbox' : undefined} aria-checked={onChange ? Boolean(checked) : undefined}
+        style={{ width: 20, height: 20, borderRadius: 6, border: '1.5px solid ' + (checked ? 'var(--color-primary)' : 'var(--border-default)'), background: checked ? 'var(--color-primary)' : 'var(--surface-card)', display: 'inline-grid', placeItems: 'center', flex: '0 0 auto', cursor: 'pointer' }}>
+        {checked && <Icon name="check" size={13} color="#fff" stroke={3} />}
+      </span>;
+      if (!label) return box;
+      return <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', minWidth: 0 }}>{box}<span style={{ fontSize: 13, color: 'var(--text-body)', ...Ellip }}>{label}</span></label>;
+    }
+
+    function Radio({ checked, label }) {
+      return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+        <span style={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid ' + (checked ? 'var(--color-primary)' : 'var(--border-default)'), display: 'inline-grid', placeItems: 'center', flex: '0 0 auto' }}>
+          {checked && <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-primary)' }} />}
+        </span>
+        {label && <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>{label}</span>}
+      </span>;
+    }
+    function Switch({ checked, label, onChange }) {
+      const fire = onChange ? (e) => { e.stopPropagation(); onChange(!checked); } : undefined;
+      const sw = <span onClick={label ? undefined : fire}
+        role={onChange ? 'switch' : undefined} aria-checked={onChange ? Boolean(checked) : undefined}
+        style={{ width: 42, height: 24, borderRadius: 999, background: checked ? 'var(--color-primary)' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', cursor: 'pointer', transition: 'background var(--dur-fast)' }}>
+        <span style={{ position: 'absolute', top: 2, left: checked ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: 'var(--shadow-sm)', transition: 'left var(--dur-fast) var(--ease-out)' }} />
+      </span>;
+      if (!label) return sw;
+      return <span onClick={fire} style={{ display: 'inline-flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>{sw}<span style={{ fontSize: 14, color: 'var(--text-body)' }}>{label}</span></span>;
+    }
+
+    function Dialog({ open, title, description, size = 'md', onClose, children }) {
+      if (!open) return null;
+      const w = size === 'sm' ? 440 : 640;
+      return <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(16,18,53,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={onClose}>
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: w, background: 'var(--surface-card)', borderRadius: 16, boxShadow: 'var(--shadow-lg)', padding: 24, animation: 'feta-rise var(--dur-slow) var(--ease-out)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
+              {description && <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{description}</div>}
+            </div>
+            <button onClick={onClose} aria-label="Close" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex' }}><Icon name="x" size={18} /></button>
+          </div>
+          {children}
+        </div>
+      </div>;
+    }
+    function Toast({ title, message, onClose, tone }) {
+      const bad = tone === 'error';
+      return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, width: 320, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid ' + (bad ? 'var(--color-danger)' : 'var(--color-success)'), borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: '14px 16px', animation: 'feta-rise var(--dur-base) var(--ease-out)' }}>
+        <span style={{ width: 24, height: 24, borderRadius: '50%', background: bad ? 'var(--red-100)' : 'var(--green-100)', color: bad ? 'var(--red-500)' : 'var(--green-500)', display: 'grid', placeItems: 'center', flex: '0 0 auto' }}><Icon name={bad ? 'x' : 'check'} size={14} stroke={3} /></span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{message}</div>
+        </div>
+        <button onClick={onClose} style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}><Icon name="x" size={15} /></button>
+      </div>;
+    }
+
+    /* ---------- shared bits ---------- */
+    function StatCard({ s, rm }) {
+      return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s.label}</span>
+        </div>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)', lineHeight: 1.1 }}>{rm ? 'RM ' : ''}{s.amount}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{s.sub}</div>
+      </div>;
+    }
+    const Code = ({ children }) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)', background: 'var(--blue-50)', padding: '2px 5px', borderRadius: 4, flex: '0 0 auto' }}>{children}</span>;
+    const Ellip = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+    const GRID = '44px 172px minmax(150px,1.1fr) 148px minmax(150px,1.1fr) 92px 92px 92px 96px 46px 104px';
+
+    // Pay a selection of approved bills. Everything shown here comes from
+    // /api/payments/preview, which runs the same checks the real create does —
+    // so what the dialog says is what will happen, including the refusals.
+    function PayDialog({ open, bills, onClose, onDone, onToast }) {
+      const [bankAccounts, setBankAccounts] = useState([]);
+      const [bankAccountId, setBankAccountId] = useState('');
+      const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+      const [preview, setPreview] = useState(null);
+      const [error, setError] = useState(null);
+      const [checking, setChecking] = useState(false);
+      const [busy, setBusy] = useState(false);
+      const [showFile, setShowFile] = useState(false);
+
+      // A batch lives in one Xero organisation, so the paying accounts offered
+      // are only that organisation's.
+      const tenantIds = [...new Set(bills.map(b => b.tenantId))];
+      const oneOrg = tenantIds.length === 1;
+
+      useEffect(() => {
+        if (!open || !oneOrg) return;
+        api.get('/api/payments/bank-accounts?tenantId=' + encodeURIComponent(tenantIds[0]))
+          .then(d => {
+            setBankAccounts(d.bankAccounts || []);
+            const preferred = (d.bankAccounts || []).find(b => b.isDefault) || (d.bankAccounts || [])[0];
+            setBankAccountId(preferred ? String(preferred.id) : '');
+          })
+          .catch(e => setError(e.message));
+      }, [open, oneOrg, tenantIds[0]]);
+
+      useEffect(() => {
+        if (!open || !bankAccountId || !bills.length) { setPreview(null); return; }
+        let cancelled = false;
+        setChecking(true);
+        api.post('/api/payments/preview', {
+          billIds: bills.map(b => b.id), bankAccountId: Number(bankAccountId), paymentDate
+        })
+          .then(p => { if (!cancelled) { setPreview(p); setError(null); } })
+          .catch(e => { if (!cancelled) { setPreview(null); setError(e.message); } })
+          .finally(() => { if (!cancelled) setChecking(false); });
+        return () => { cancelled = true; };
+      }, [open, bankAccountId, paymentDate, bills.map(b => b.id).join(',')]);
+
+      async function submit(generateFile) {
+        setBusy(true);
+        try {
+          const r = await api.post('/api/payments/batches', {
+            billIds: bills.map(b => b.id),
+            bankAccountId: Number(bankAccountId),
+            paymentDate,
+            generateFile
+          });
+          onToast({
+            title: r.reference + ' created',
+            message: generateFile
+              ? 'Open Bank files to download it. The bills stay unpaid in Xero until you mark the batch uploaded.'
+              : 'Recorded in Xero as a batch payment. The bills are now paid.'
+          });
+          onDone();
+        } catch (e) {
+          onToast({
+            title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : 'Could not create the batch',
+            message: e.message, tone: 'error'
+          });
+        } finally { setBusy(false); }
+      }
+
+      const total = bills.reduce((s, b) => s + Number(b.amountDue || 0), 0);
+      const fmtTotal = total.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const canSubmit = Boolean(preview) && !checking && !busy;
+
+      return <Dialog open={open} onClose={onClose} title="Pay bills"
+        description={bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' · RM ' + fmtTotal} size="md">
+        {!oneOrg
+          ? <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: 'var(--red-100)', borderRadius: 10, padding: '14px 16px', fontSize: 13.5, color: '#8d1f17', lineHeight: 1.6 }}>
+                These bills belong to {tenantIds.length} different Xero organisations. A batch payment has to sit inside one organisation, so pay them one organisation at a time.
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button variant="outline" size="md" onClick={onClose}>Close</Button></div>
+            </div>
+          : <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Input label="Date paid" type="date" value={paymentDate} onChange={setPaymentDate} />
+            <Select label="Paid from" value={bankAccountId} onChange={setBankAccountId}
+              options={bankAccounts.length
+                ? bankAccounts.map(b => ({ label: b.label, value: String(b.id) }))
+                : [{ label: 'No paying accounts — run Sync in Bank files', value: '' }]} />
+
+            {error && <div style={{ gridColumn: '1 / -1', background: 'var(--red-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#8d1f17', lineHeight: 1.6 }}>{error}</div>}
+
+            {preview && <React.Fragment>
+              {preview.warnings.map((w, i) => (
+                <div key={i} style={{ gridColumn: '1 / -1', background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#6b4d00', lineHeight: 1.6 }}>
+                  {w} Those lines will be blank and the bank will reject them.
+                </div>
+              ))}
+
+              <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '14px 16px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7 }}>
+                <div><strong style={{ color: 'var(--text-heading)' }}>{preview.reference}</strong> · {preview.lineCount} payment{preview.lineCount === 1 ? '' : 's'} · RM {preview.total}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{preview.fileName}</span>
+                  <span style={{ color: 'var(--text-subtle)' }}>·</span>
+                  <span>{preview.format.name}</span>
+                  {!preview.format.verified && <UnverifiedTag />}
+                  <span style={{ flex: 1 }} />
+                  <button onClick={() => setShowFile(v => !v)} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
+                    {showFile ? 'Hide file' : 'Check the file'}
+                  </button>
+                </div>
+              </div>
+
+              {showFile && <pre style={{ gridColumn: '1 / -1', margin: 0, maxHeight: 180, overflow: 'auto', background: 'var(--ink-900)', color: '#d8dbe8', borderRadius: 10, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}>{preview.filePreview}</pre>}
+
+              {!preview.format.verified && <div style={{ gridColumn: '1 / -1', background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#6b4d00', lineHeight: 1.6 }}>
+                This layout has not been checked against the bank's own spec sheet. Compare the file above with what {preview.bankAccount.bankName || 'your bank'} expects, and send a single-line test payment before a full run.
+              </div>}
+            </React.Fragment>}
+
+            <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+              Creating the batch does not change anything in Xero yet. The bills are marked paid when you mark the batch uploaded, which is when the money has actually left.
+            </div>
+
+            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 4 }}>
+              <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+              <Button variant="ghost" size="md" onClick={() => submit(false)}
+                style={canSubmit ? null : { opacity: .5, pointerEvents: 'none' }}>Already paid — just record it</Button>
+              <Button variant="primary" size="md" onClick={() => submit(true)}
+                style={canSubmit ? null : { opacity: .5, pointerEvents: 'none' }}>
+                {checking ? 'Checking…' : busy ? 'Creating…' : 'Create payment file'}
+              </Button>
+            </div>
+          </div>}
+      </Dialog>;
+    }
+
+    /* ---------- Bills view ---------- */
+
+    const DATE_TYPES = [
+      { label: 'Any date', value: '' },
+      { label: 'Bill date', value: 'bill' },
+      { label: 'Due date', value: 'due' },
+      { label: 'Paid date', value: 'paid' }
+    ];
+    const EMPTY_FILTERS = { entities: [], contact: '', q: '', dateType: '', dateFrom: '', dateTo: '', amountFrom: '', amountTo: '' };
+    const TRIGGER = { width: '100%', height: 46, display: 'flex', alignItems: 'center', gap: 8, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 14px', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer' };
+
+    // Multi-select over the connected Xero orgs. No selection means "all", which
+    // is also what the API expects (an absent `entities` param).
+    function EntityPicker({ entities, selected, onChange }) {
+      const [open, setOpen] = useState(false);
+      const [q, setQ] = useState('');
+      const ref = useClickOutside(open, useCallback(() => setOpen(false), []));
+
+      const shown = entities.filter(e => !q || (e.code + ' ' + e.short).toLowerCase().includes(q.toLowerCase()));
+      const label = selected.length === 0
+        ? (entities.length ? 'All ' + entities.length + ' entities' : 'No entities yet')
+        : selected.length === 1
+          ? ((entities.find(e => e.tenantId === selected[0]) || {}).short || '1 entity')
+          : selected.length + ' entities';
+      const toggle = (id) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : selected.concat(id));
+
+      return <div ref={ref} style={{ position: 'relative' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>Xero entity</div>
+        <button className="feta-hover" onClick={() => setOpen(o => !o)} style={TRIGGER}>
+          <span style={{ flex: 1, ...Ellip, textAlign: 'left' }}>{label}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>▾</span>
+        </button>
+        {open && <div style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', left: 0, width: 340, maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: 12 }}>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search entities"
+            style={{ width: '100%', height: 38, border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '0 12px', fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--text-body)', outline: 'none', marginBottom: 10 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{selected.length ? selected.length + ' selected' : 'All entities'}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => onChange([])} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Clear</button>
+          </div>
+          <div style={{ maxHeight: 260, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {shown.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>No entities match.</div>}
+            {shown.map(e => (
+              <div key={e.tenantId} onClick={() => toggle(e.tenantId)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', minWidth: 0 }}>
+                <Checkbox checked={selected.includes(e.tenantId)} onChange={() => toggle(e.tenantId)} />
+                <Code>{e.code}</Code>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-body)', ...Ellip }}>{e.short}</span>
+              </div>
+            ))}
+          </div>
+        </div>}
+      </div>;
+    }
+
+    // Full-width message card used for the loading, error, empty and
+    // not-connected states, so the table area never just goes blank.
+    function Placeholder({ title, message, action, tone }) {
+      const accent = tone === 'error' ? 'var(--color-danger)' : 'var(--border-subtle)';
+      return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid ' + accent, borderRadius: 16, padding: '36px 28px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
+        {message && <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 6, maxWidth: 520, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>{message}</div>}
+        {action && <div style={{ marginTop: 18 }}>{action}</div>}
+      </div>;
+    }
+
+    function BillsView({ entities, xero, onToast, onSynced, onPaid }) {
+      const [tab, setTab] = useState('all');
+      const [filtersOpen, setFiltersOpen] = useState(false);
+      const [f, setF] = useState(EMPTY_FILTERS);
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [selected, setSelected] = useState([]);
+      const [busy, setBusy] = useState(false);
+      const [syncing, setSyncing] = useState(false);
+      const [contacts, setContacts] = useState([]);
+      // The bills a pay run is being built from — one row, or the whole selection.
+      const [payFor, setPayFor] = useState([]);
+      const [nonce, setNonce] = useState(0);
+
+      const set = (patch) => setF(prev => ({ ...prev, ...patch }));
+      const reload = () => setNonce(n => n + 1);
+
+      const dq = useDebounced(f.q);
+      const dAmountFrom = useDebounced(f.amountFrom);
+      const dAmountTo = useDebounced(f.amountTo);
+      const entityKey = f.entities.join(',');
+
+      useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        const qs = new URLSearchParams({ status: tab, limit: '200' });
+        if (entityKey) qs.set('entities', entityKey);
+        if (f.contact) qs.set('contact', f.contact);
+        if (dq) qs.set('q', dq);
+        if (f.dateType) qs.set('dateType', f.dateType);
+        if (f.dateFrom) qs.set('dateFrom', f.dateFrom);
+        if (f.dateTo) qs.set('dateTo', f.dateTo);
+        if (dAmountFrom) qs.set('amountFrom', dAmountFrom);
+        if (dAmountTo) qs.set('amountTo', dAmountTo);
+
+        api.get('/api/bills?' + qs.toString())
+          .then(d => { if (!cancelled) { setData(d); setError(null); } })
+          .catch(e => { if (!cancelled) setError(e.message); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [tab, entityKey, f.contact, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, nonce]);
+
+      useEffect(() => {
+        api.get('/api/bills/contacts').then(d => setContacts(d.contacts || [])).catch(() => {});
+      }, [nonce]);
+
+      // Bills the current filters no longer return shouldn't stay selected.
+      const rows = (data && data.rows) || [];
+      useEffect(() => {
+        const visible = new Set(rows.map(r => r.id));
+        setSelected(s => s.filter(id => visible.has(id)));
+      }, [data]);
+
+      const allSelected = rows.length > 0 && selected.length === rows.length;
+      const toggleRow = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : s.concat(id));
+      const selectedRows = rows.filter(r => selected.includes(r.id));
+      const canSubmit = selectedRows.length > 0 && selectedRows.every(r => r.uiStatus === 'draft');
+      const canApprove = selectedRows.length > 0 && selectedRows.every(r => r.uiStatus === 'approval');
+      const canPay = selectedRows.length > 0 && selectedRows.every(r => r.uiStatus === 'payment');
+
+      async function runAction(action, ids) {
+        const verb = action === 'submit' ? 'submitted' : 'approved';
+        setBusy(true);
+        try {
+          if (ids.length === 1) {
+            await api.post('/api/bills/' + ids[0] + '/' + action);
+            onToast({ title: 'Bill ' + verb, message: 'The change is saved in Xero.' });
+          } else {
+            const r = await api.post('/api/bills/bulk', { action, ids });
+            const needsReconnect = r.failed.some(x => x.needsXeroReconnect);
+            onToast({
+              title: r.succeeded.length + ' bill' + (r.succeeded.length === 1 ? '' : 's') + ' ' + verb,
+              message: !r.failed.length
+                ? 'The changes are saved in Xero.'
+                : needsReconnect
+                  ? r.failed.length + ' could not be ' + verb + ' — Xero needs reconnecting.'
+                  : r.failed.length + ' could not be ' + verb + ' — ' + r.failed[0].error,
+              tone: r.failed.length ? 'error' : 'success'
+            });
+          }
+          setSelected([]);
+          reload();
+        } catch (e) {
+          const reconnect = e.payload && e.payload.needsXeroReconnect;
+          onToast({
+            title: reconnect ? 'Xero needs reconnecting' : 'Xero rejected the change',
+            message: reconnect ? e.message + ' Use the badge in the header to reconnect.' : e.message,
+            tone: 'error'
+          });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function runSync(full) {
+        setSyncing(true);
+        try {
+          const r = await api.post('/api/bills/sync', { full: Boolean(full) });
+          onToast({
+            title: 'Synced with Xero',
+            message: r.upserted + ' bill' + (r.upserted === 1 ? '' : 's') + ' from ' + r.tenants + ' organisation' + (r.tenants === 1 ? '' : 's') + (r.failed ? ' · ' + r.failed + ' failed' : ''),
+            tone: r.failed ? 'error' : 'success'
+          });
+          reload();
+          if (onSynced) onSynced();
+        } catch (e) {
+          onToast({ title: 'Sync failed', message: e.message, tone: 'error' });
+        } finally {
+          setSyncing(false);
+        }
+      }
+
+      // Exports exactly what is on screen — the current filters, not the whole table.
+      function exportCsv() {
+        const head = ['Entity', 'Entity name', 'From', 'Status', 'Reference', 'Bill date', 'Due date', 'Paid', 'Due', 'Currency', 'Files'];
+        const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+        const lines = [head.map(esc).join(',')].concat(rows.map(r =>
+          [r.entityCode, r.entityShort, r.contact, r.statusLabel, r.reference, r.dateFmt, r.dueFmt, r.paidFmt, r.outFmt, r.currency || '', r.filesFmt].map(esc).join(',')
+        ));
+        const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'bills-' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      const activeFilters = Boolean(f.entities.length || f.contact || f.q || f.dateFrom || f.dateTo || f.amountFrom || f.amountTo);
+      const notConnected = xero && xero.connected === false;
+      const lastSynced = data && data.lastSyncedAt
+        ? new Date(data.lastSyncedAt).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+        : null;
+
+      return <div style={{ maxWidth: 1440, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginBottom: 18 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, whiteSpace: 'nowrap' }}>
+              <a href="#">Purchases overview</a> <span style={{ color: 'var(--text-subtle)' }}>/</span>{' '}
+              <span>{f.entities.length ? f.entities.length + ' selected' : 'All entities'}</span>
+            </div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Bills</h1>
+          </div>
+          <span style={{ flex: 1 }} />
+          {lastSynced && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Last synced {lastSynced}</span>}
+          <Button variant="outline" size="sm" onClick={() => runSync(false)} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>
+            {syncing ? 'Syncing…' : 'Sync Xero'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportCsv} style={rows.length ? null : { opacity: .5, pointerEvents: 'none' }}>Export</Button>
+        </div>
+
+        {notConnected
+          ? <Placeholder
+              tone={xero && xero.error ? 'error' : undefined}
+              title={xero && xero.error ? 'Xero is not reachable' : 'Connect Xero in WazzOCR'}
+              message={(xero && xero.error)
+                || 'Bills Hub reads the Xero connection WazzOCR already holds, so there is nothing to authorise here — connecting again would sign WazzOCR out of Xero. Connect it there and the organisations appear straight away.'}
+              action={xero && xero.manageAt
+                ? <Button variant="primary" size="md" onClick={() => window.open(xero.manageAt, '_blank', 'noreferrer')}>Open WazzOCR</Button>
+                : null} />
+          : <React.Fragment>
+
+        <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}>
+          <Tabs tabs={(data && data.statusTabs) || []} value={tab} onChange={setTab} variant="line" />
+        </div>
+
+        {data && data.hasBanner && <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--color-primary)', borderRadius: 10, padding: '14px 18px', marginBottom: 20 }}>
+          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}>
+            <strong style={{ color: 'var(--text-heading)' }}>{data.bannerHead}</strong> {data.bannerTail}
+          </div>
+          <button onClick={() => setTab('draft')} style={{ border: 'none', background: 'none', fontSize: 14, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Review drafts</button>
+        </div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 20 }}>
+          {((data && data.stats) || [0, 1, 2, 3].map(() => ({ label: '—', amount: '0.00', sub: '', color: 'var(--neutral-300)' })))
+            .map((s, i) => <StatCard key={i} s={s} rm />)}
+        </div>
+
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: '16px 18px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 240px', minWidth: 220 }}>
+              <EntityPicker entities={entities} selected={f.entities} onChange={v => set({ entities: v })} />
+            </div>
+            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+              <Select label="Contact" value={f.contact} onChange={v => set({ contact: v })}
+                options={[{ label: 'All contacts', value: '' }].concat(contacts.map(c => ({ label: c.name + ' (' + c.count + ')', value: c.name })))} />
+            </div>
+            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+              <Input label="Amount or reference" placeholder="e.g. 246.15 or MYIN26" value={f.q} onChange={v => set({ q: v })} />
+            </div>
+            <div style={{ width: 160 }}><Input label="Start date" type="date" value={f.dateFrom} onChange={v => set({ dateFrom: v })} /></div>
+            <div style={{ width: 160 }}><Input label="End date" type="date" value={f.dateTo} onChange={v => set({ dateTo: v })} /></div>
+            <div style={{ width: 150 }}><Select label="Date type" options={DATE_TYPES} value={f.dateType} onChange={v => set({ dateType: v })} /></div>
+            <Button variant="outline" size="md" onClick={() => setFiltersOpen(o => !o)}>Filters</Button>
+          </div>
+          {filtersOpen && <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14 }}>
+              <Input label="Amount from" type="number" placeholder="0.00" value={f.amountFrom} onChange={v => set({ amountFrom: v })} />
+              <Input label="Amount to" type="number" placeholder="0.00" value={f.amountTo} onChange={v => set({ amountTo: v })} />
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <Button variant="ghost" size="sm" onClick={() => setF(EMPTY_FILTERS)}>Clear all filters</Button>
+                <Button variant="secondary" size="sm" onClick={() => setFiltersOpen(false)}>Apply</Button>
+              </div>
+            </div>
+          </div>}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 4px 10px', minHeight: 20 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(data && data.metaText) || (loading ? 'Loading…' : '')}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sorted by bill date, newest first</span>
+        </div>
+
+        {error
+          ? <Placeholder tone="error" title="Could not load bills" message={error}
+              action={<Button variant="outline" size="md" onClick={reload}>Try again</Button>} />
+          : (!loading && rows.length === 0)
+            ? <Placeholder
+                title={activeFilters || tab !== 'all' ? 'No bills match these filters' : 'No bills yet'}
+                message={activeFilters || tab !== 'all'
+                  ? 'Try widening the date range or clearing the entity and contact filters.'
+                  : 'Pull your supplier bills in from Xero to get started. The first sync reads every connected organisation, so give it a moment.'}
+                action={activeFilters || tab !== 'all'
+                  ? <Button variant="outline" size="md" onClick={() => { setF(EMPTY_FILTERS); setTab('all'); }}>Clear filters</Button>
+                  : <Button variant="primary" size="md" onClick={() => runSync(true)} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>{syncing ? 'Syncing…' : 'Sync from Xero'}</Button>} />
+            : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto', overflowY: 'hidden', opacity: loading ? .55 : 1, transition: 'opacity var(--dur-fast)' }}>
+          <div style={{ minWidth: 1290, display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 8, padding: '11px 16px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <div><Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map(r => r.id))} /></div>
+            <div>Entity</div><div>From</div><div>Status</div><div>Reference</div><div>Date</div><div>Due date</div>
+            <div style={{ textAlign: 'right' }}>Paid</div><div style={{ textAlign: 'right' }}>Due</div><div style={{ textAlign: 'center' }}>Files</div><div />
+          </div>
+          {rows.map(r => (
+            <div key={r.id} className="feta-hover" style={{ minWidth: 1290, display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: selected.includes(r.id) ? 'var(--orange-50)' : 'var(--surface-card)' }}>
+              <div><Checkbox checked={selected.includes(r.id)} onChange={() => toggleRow(r.id)} /></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{r.entityCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.entityShort}</span></div>
+              <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.contact}</div>
+              <div><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span></div>
+              <div style={{ minWidth: 0, ...Ellip }}><span style={{ color: 'var(--text-body)' }}>{r.reference}</span><span style={{ color: 'var(--text-subtle)' }}>{r.refNote}</span></div>
+              <div style={{ color: 'var(--text-body)' }}>{r.dateFmt}</div>
+              <div style={{ color: r.dueColor, fontWeight: r.dueWeight }}>{r.dueFmt}</div>
+              <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>{r.paidFmt}</div>
+              <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{r.outFmt}</div>
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{r.filesFmt}</div>
+              <div style={{ textAlign: 'right' }}>
+                {r.hasAction && <button className="feta-hover" disabled={busy}
+                  onClick={() => (r.uiStatus === 'payment' ? setPayFor([r]) : runAction(r.uiStatus === 'draft' ? 'submit' : 'approve', [r.id]))}
+                  style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: busy ? 'default' : 'pointer', opacity: busy ? .5 : 1 }}>{r.actionLabel}</button>}
+                {r.isPaid && <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{r.paidNote}</span>}
+              </div>
+            </div>
+          ))}
+          {data && data.page && data.page.hasMore && <div style={{ padding: '14px 16px', textAlign: 'center', fontSize: 12.5, color: 'var(--text-muted)' }}>
+            Showing the first {rows.length} of {data.page.total}. Narrow the filters to see the rest.
+          </div>}
+        </div>}
+
+        {/* Selection action bar — floats above the table while bills are ticked. */}
+        {selected.length > 0 && <div style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 24, zIndex: 80, display: 'flex', alignItems: 'center', gap: 14, background: 'var(--ink-900)', color: '#fff', borderRadius: 999, padding: '10px 14px 10px 20px', boxShadow: 'var(--shadow-lg)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>{selected.length} selected</span>
+          <span style={{ width: 1, height: 20, background: 'rgba(255,255,255,.2)' }} />
+          {canSubmit && <Button variant="primary" size="sm" onClick={() => runAction('submit', selected)} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Submit for approval</Button>}
+          {canApprove && <Button variant="primary" size="sm" onClick={() => runAction('approve', selected)} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Approve</Button>}
+          {canPay && <Button variant="primary" size="sm" onClick={() => setPayFor(selectedRows)} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Pay selected</Button>}
+          {!canSubmit && !canApprove && !canPay && <span style={{ fontSize: 12.5, color: 'rgba(255,255,255,.7)', maxWidth: 320 }}>Pick bills that are all at the same stage to act on them together.</span>}
+          <button onClick={() => setSelected([])} aria-label="Clear selection" style={{ border: 'none', background: 'none', color: 'rgba(255,255,255,.75)', cursor: 'pointer', padding: 6, display: 'flex' }}><Icon name="x" size={16} /></button>
+        </div>}
+
+        <PayDialog open={payFor.length > 0} bills={payFor} onToast={onToast}
+          onClose={() => setPayFor([])}
+          onDone={() => { setPayFor([]); setSelected([]); reload(); if (onPaid) onPaid(); }} />
+
+          </React.Fragment>}
+      </div>;
+    }
+
+    /* ---------- Recharge view ---------- */
+    function RechargeView() {
+      const [rv, setRv] = useState('runs');
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Intercompany recharge</span></div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Intercompany recharge</h1>
+            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>When a paying entity settles a bill on behalf of a subsidiary, the full amount is recharged to that subsidiary. Each recharge raises an AR invoice in the payer and a draft bill in the subsidiary, cleared by intercompany transfer.</p>
+          </div>
+          <span style={{ flex: 1 }} />
+          <Button variant="primary" size="sm">New rule</Button>
+        </div>
+        <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}><Tabs tabs={VM.rechargeTabs} value={rv} onChange={setRv} variant="line" /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>{VM.rechargeStats.map((s, i) => <StatCard key={i} s={s} />)}</div>
+        {rv === 'runs' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {VM.runCards.map((r, i) => (
+            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{r.supplier}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.billRef} · paid {r.paidFmt} by {r.payerShort}</div></div>
+                <span style={{ flex: 1 }} />
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-heading)' }}>RM {r.totalFmt}</div></div>
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>AR invoice</div><div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-body)' }}>{r.arDoc}</div></div>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 150px', gap: 10, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
+                <div>Subsidiary</div><div style={{ textAlign: 'right' }}>Amount</div><div>Bill created</div><div style={{ textAlign: 'right' }}>Settlement</div>
+              </div>
+              {r.lines.map((l, j) => (
+                <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) 110px minmax(0,1fr) 150px', gap: 10, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{l.code}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{l.short}</span></div>
+                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{l.amountFmt}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', ...Ellip }}>{l.doc}</div>
+                  <div style={{ textAlign: 'right' }}>{l.settled
+                    ? <span><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'var(--green-100)', color: 'var(--green-500)' }}>Settled</span><div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 3 }}>{l.settledNote}</div></span>
+                    : <button className="feta-hover" style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>Mark settled</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>}
+        {rv === 'rules' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {VM.ruleCards.map((r, i) => (
+            <div key={i} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{r.supplier}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Paid by {r.payerShort} · {r.splitLabel}</div></div>
+                <span style={{ flex: 1 }} />
+                <Switch checked={r.on} />
+                <Button variant="outline" size="sm">Edit rule</Button>
+                <button aria-label="Delete rule" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={16} /></button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharged in full to</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)' }}>{r.targetCode}</span><span>{r.targetShort}</span><span style={{ fontWeight: 700, color: 'var(--text-heading)' }}>100%</span>
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>}
+      </div>;
+    }
+
+    /* ---------- Bank files view ---------- */
+
+    // A layout nobody has checked against the bank's own spec can be rejected by
+    // the portal — or pay the wrong account. Say so wherever it appears.
+    function UnverifiedTag({ children }) {
+      return <span title="This layout has not been checked against the bank's own spec sheet."
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 999, background: 'var(--amber-100)', color: '#8a6300', whiteSpace: 'nowrap' }}>
+        {children || 'Layout unverified'}
+      </span>;
+    }
+
+    function BankView({ onToast }) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [syncing, setSyncing] = useState(false);
+      const [formats, setFormats] = useState([]);
+      const [nonce, setNonce] = useState(0);
+      const reload = () => setNonce(n => n + 1);
+
+      useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        api.get('/api/payments')
+          .then(d => { if (!cancelled) { setData(d); setError(null); } })
+          .catch(e => { if (!cancelled) setError(e.message); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [nonce]);
+
+      useEffect(() => {
+        api.get('/api/payments/formats').then(d => setFormats(d.formats || [])).catch(() => {});
+      }, [nonce]);
+
+      const unverified = new Set(formats.filter(f => !f.verified).map(f => f.key));
+
+      async function runSync() {
+        setSyncing(true);
+        try {
+          const r = await api.post('/api/payments/sync');
+          onToast({
+            title: 'Synced from Xero',
+            message: r.banks + ' paying account' + (r.banks === 1 ? '' : 's') + ' and ' + r.suppliers + ' supplier' + (r.suppliers === 1 ? '' : 's') + ' across ' + r.organisations + ' organisation' + (r.organisations === 1 ? '' : 's') + (r.failed ? ' · ' + r.failed + ' failed' : ''),
+            tone: r.failed ? 'error' : 'success'
+          });
+          reload();
+        } catch (e) {
+          onToast({
+            title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : 'Sync failed',
+            message: e.message, tone: 'error'
+          });
+        } finally { setSyncing(false); }
+      }
+
+      // Downloading is what moves a batch to "downloaded", so the list has to
+      // refresh afterwards.
+      async function download(batch) {
+        setBusy(batch.id);
+        try {
+          const res = await fetch('/api/payments/batches/' + batch.id + '/file', { credentials: 'same-origin' });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || 'Could not build the file.');
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = batch.fileName && batch.fileName !== '—' ? batch.fileName : (batch.ref + '.csv');
+          a.click();
+          URL.revokeObjectURL(url);
+          reload();
+        } catch (e) {
+          onToast({ title: 'Download failed', message: e.message, tone: 'error' });
+        } finally { setBusy(null); }
+      }
+
+      async function markUploaded(batch) {
+        setBusy(batch.id);
+        try {
+          const r = await api.post('/api/payments/batches/' + batch.id + '/uploaded');
+          onToast({
+            title: batch.ref + ' recorded in Xero',
+            message: 'Batch payment ' + String(r.batchPaymentId).slice(0, 8) + '… created. The bills are now paid.'
+          });
+          reload();
+        } catch (e) {
+          onToast({
+            title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : 'Xero rejected the batch',
+            message: e.message, tone: 'error'
+          });
+          reload();
+        } finally { setBusy(null); }
+      }
+
+      async function cancelBatch(batch) {
+        setBusy(batch.id);
+        try {
+          await api.post('/api/payments/batches/' + batch.id + '/cancel');
+          onToast({ title: batch.ref + ' cancelled', message: 'Its bills are free to go into another run.' });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not cancel', message: e.message, tone: 'error' });
+        } finally { setBusy(null); }
+      }
+
+      const cards = (data && data.batchCards) || [];
+
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, marginBottom: 22, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Bank payment files</span></div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Bank payment files</h1>
+            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>
+              Paying bills from the Bills tab creates a batch here, in the layout the paying account's bank expects. Download the file, upload it to the banking portal, then mark the batch uploaded — that last step is what records the payment in Xero.
+            </p>
+          </div>
+          <span style={{ flex: 1 }} />
+          <Button variant="outline" size="sm" onClick={runSync} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>
+            {syncing ? 'Syncing…' : 'Sync accounts & payees'}
+          </Button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>
+          {((data && data.bankStats) || [0, 1, 2, 3].map(() => ({ label: '—', amount: '—', sub: '', color: 'var(--neutral-300)' })))
+            .map((s, i) => <StatCard key={i} s={s} />)}
+        </div>
+
+        {data && data.payeeWarning && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--amber-500)', borderRadius: 10, padding: '14px 18px', marginBottom: 16 }}>
+          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}>
+            <strong style={{ color: 'var(--text-heading)' }}>{data.payeeWarning}</strong> Those lines will be blank in the file and the bank will reject them. Add the details in Xero, or correct them here.
+          </div>
+        </div>}
+
+        {error
+          ? <Placeholder tone="error" title="Could not load payment batches" message={error}
+              action={<Button variant="outline" size="md" onClick={reload}>Try again</Button>} />
+          : (!loading && cards.length === 0)
+            ? <Placeholder
+                title="No payment batches yet"
+                message="Go to Bills, tick the approved bills you want to pay, and choose Pay selected. The batch and its bank file appear here." />
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24, opacity: loading ? .55 : 1, transition: 'opacity var(--dur-fast)' }}>
+          {cards.map(b => (
+            <div key={b.id} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Code>{b.entityCode}</Code>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{b.ref} · {b.bank}</span>
+                    {unverified.has(b.format) && <UnverifiedTag />}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{b.entityLabel} · {b.account} · {b.format} · {b.dateFmt}</div>
+                </div>
+                <span style={{ flex: 1 }} />
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{b.countLabel}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--text-heading)' }}>{b.currency} {b.totalFmt}</div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: b.statusBg, color: b.statusFg }}>{b.statusLabel}</span>
+                {b.canDownload && <Button variant="primary" size="sm" onClick={() => download(b)} style={busy === b.id ? { opacity: .6, pointerEvents: 'none' } : null}>
+                  <Icon name="download" size={15} color="#fff" />Download file
+                </Button>}
+                {b.canUpload && <Button variant="outline" size="sm" onClick={() => markUploaded(b)} style={busy === b.id ? { opacity: .6, pointerEvents: 'none' } : null}>Mark uploaded</Button>}
+                {b.canCancel && <button onClick={() => cancelBatch(b)} title="Cancel this batch and release its bills"
+                  style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, display: 'flex', borderRadius: 6 }}><Icon name="trash-2" size={16} /></button>}
+              </div>
+
+              {b.postError && <div style={{ padding: '10px 18px', background: 'var(--red-100)', color: '#8d1f17', fontSize: 13 }}>
+                <strong>Xero rejected this batch:</strong> {b.postError}
+              </div>}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 150px 110px minmax(0,1fr)', gap: 10, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
+                <div>Payee</div><div>Account</div><div style={{ textAlign: 'right' }}>Amount</div><div>Reference</div>
+              </div>
+              {b.lines.map((l, j) => (
+                <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 150px 110px minmax(0,1fr)', gap: 10, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{l.contact}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: l.hasAccount ? 'var(--text-muted)' : 'var(--color-danger)' }}>{l.acct}</div>
+                  <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{l.amountFmt}</div>
+                  <div style={{ color: 'var(--text-body)', ...Ellip }}>{l.ref}</div>
+                </div>
+              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px', flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-body)' }}>{b.fileName}</span>
+                <span style={{ flex: 1 }} />
+                {b.postedNote && <span style={{ fontSize: 12, color: 'var(--green-500)', fontWeight: 600 }}>{b.postedNote}</span>}
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{b.downloadedNote}</span>
+              </div>
+            </div>
+          ))}
+        </div>}
+      </div>;
+    }
+
+    /* ---------- Notifications (settings) view ---------- */
+
+    const FREQUENCIES = [
+      ['daily', 'Daily', 'Every working day'],
+      ['weekly', 'Weekly', 'One day each week'],
+      ['monthly', 'Monthly', 'One day each month']
+    ];
+    const WEEKDAYS = [[1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [7, 'Sunday']];
+    const SEND_TIMES = ['07:00', '08:00', '08:30', '09:00', '10:00', '12:00', '15:00', '17:00', '18:30'];
+    const ROLES = ['Accounts Payable', 'Finance Manager', 'Group Accountant', 'Director', 'Admin'];
+    const TIMEZONES = ['Asia/Kuala_Lumpur', 'Asia/Singapore', 'Asia/Jakarta', 'Asia/Bangkok', 'Asia/Hong_Kong', 'Australia/Perth', 'UTC'];
+
+    function SettingsView({ entities, onToast }) {
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const [nonce, setNonce] = useState(0);
+      const [assignFor, setAssignFor] = useState(null);
+      const [previewFor, setPreviewFor] = useState('');       // '' = the group digest
+      const [previewText, setPreviewText] = useState('');
+      const [testPhone, setTestPhone] = useState('');
+      // A new recipient being typed in the bottom row.
+      const [draft, setDraft] = useState({ name: '', phone: '', role: ROLES[0], allEntities: true, tenantIds: [] });
+
+      const reload = () => setNonce(n => n + 1);
+
+      useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        api.get('/api/digest')
+          .then(d => { if (!cancelled) { setData(d); setPreviewText(d.digestText); setError(null); } })
+          .catch(e => { if (!cancelled) setError(e.message); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [nonce]);
+
+      // The preview follows whichever recipient is selected, so you can see the
+      // scoped message a branch accountant actually receives.
+      useEffect(() => {
+        if (!data) return;
+        const qs = previewFor ? '?recipientId=' + previewFor : '';
+        api.get('/api/digest/preview' + qs)
+          .then(d => setPreviewText(d.text))
+          .catch(() => {});
+      }, [previewFor, data]);
+
+      const s = data && data.settings;
+
+      async function save(patch) {
+        setBusy(true);
+        try {
+          const res = await request('/api/digest/settings', { method: 'PATCH', body: patch });
+          setData(d => ({ ...d, settings: res.settings, nextRun: res.nextRun }));
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not save', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      async function addRecipient() {
+        if (!draft.name.trim() || !draft.phone.trim()) {
+          onToast({ title: 'Missing details', message: 'A name and a WhatsApp number are both needed.', tone: 'error' });
+          return;
+        }
+        setBusy(true);
+        try {
+          await api.post('/api/digest/recipients', draft);
+          setDraft({ name: '', phone: '', role: ROLES[0], allEntities: true, tenantIds: [] });
+          onToast({ title: 'Recipient added', message: draft.name + ' will receive the digest.' });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not add recipient', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      async function patchRecipient(id, patch) {
+        try {
+          await request('/api/digest/recipients/' + id, { method: 'PATCH', body: patch });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not update', message: e.message, tone: 'error' });
+        }
+      }
+
+      async function removeRecipient(r) {
+        try {
+          await request('/api/digest/recipients/' + r.id, { method: 'DELETE' });
+          onToast({ title: 'Recipient removed', message: r.name + ' will no longer receive the digest.' });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not remove', message: e.message, tone: 'error' });
+        }
+      }
+
+      async function sendTest() {
+        const phone = testPhone.trim() || (s && s.senderPhone) || '';
+        if (!phone) { onToast({ title: 'No number', message: 'Enter a WhatsApp number to send the test to.', tone: 'error' }); return; }
+        setBusy(true);
+        try {
+          const r = await api.post('/api/digest/test', { phone });
+          onToast({ title: 'Test sent', message: 'Check WhatsApp on ' + r.phone + '.' });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Test failed', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      async function sendNow() {
+        setBusy(true);
+        try {
+          const r = await api.post('/api/digest/send', {});
+          onToast({
+            title: r.sent + ' digest' + (r.sent === 1 ? '' : 's') + ' sent',
+            message: [r.failed ? r.failed + ' failed' : null, r.skipped ? r.skipped + ' skipped (nothing to clear)' : null]
+              .filter(Boolean).join(' · ') || 'Everyone on the list has it.',
+            tone: r.failed ? 'error' : 'success'
+          });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not send', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      if (error) {
+        return <div style={{ maxWidth: 1040, margin: '0 auto', padding: '24px 28px 120px' }}>
+          <Placeholder tone="error" title="Could not load notification settings" message={error}
+            action={<Button variant="outline" size="md" onClick={reload}>Try again</Button>} />
+        </div>;
+      }
+      if (!s) {
+        return <div style={{ maxWidth: 1040, margin: '0 auto', padding: '24px 28px 120px' }}>
+          <Placeholder title="Loading…" message="Fetching the digest settings." />
+        </div>;
+      }
+
+      const recipients = data.recipients || [];
+
+      return <div style={{ maxWidth: 1040, margin: '0 auto', padding: '24px 28px 120px', opacity: loading ? .6 : 1, transition: 'opacity var(--dur-fast)' }}>
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Notifications</span></div>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>WhatsApp notifications</h1>
+          <p style={{ margin: '8px 0 0', fontSize: 15, color: 'var(--text-muted)', maxWidth: '70ch' }}>
+            Send finance a digest of draft bills waiting to be cleared across your {data.entityCount} Xero {data.entityCount === 1 ? 'entity' : 'entities'}. Each recipient can get the group total or only the entities they look after.
+          </p>
+        </div>
+
+        {/* Master switch and channel health, up front — everything below is moot
+            without them. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid ' + (s.enabled ? 'var(--green-500)' : 'var(--neutral-300)'), borderRadius: 12, padding: '16px 18px', marginBottom: 16, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{s.enabled ? 'Digest is on' : 'Digest is off'}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 3 }}>{data.nextRun}</div>
+          </div>
+          {!s.configured && <span style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'var(--red-100)', color: 'var(--red-500)' }}>No WhatsApp channel</span>}
+          {s.configured && s.senderPhoneFmt && <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Sending from <strong style={{ color: 'var(--text-body)' }}>{s.senderPhoneFmt}</strong></span>}
+          <Switch checked={s.enabled} onChange={v => save({ enabled: v })} />
+        </div>
+
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Schedule</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>How often the draft-bills digest is sent. Times are local to {s.timezone}.</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+            {FREQUENCIES.map(([k, lab, sub]) => {
+              const on = s.frequency === k;
+              return <div key={k} onClick={() => save({ frequency: k })}
+                style={{ border: '1.5px solid ' + (on ? 'var(--color-primary)' : 'var(--border-subtle)'), background: on ? 'var(--orange-50)' : 'var(--surface-card)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}>
+                <Radio label={lab} checked={on} />
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, paddingLeft: 30 }}>{sub}</div>
+              </div>;
+            })}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 14, marginTop: 16 }}>
+            <Select label="Send time" value={s.sendTime} onChange={v => save({ sendTime: v })}
+              options={SEND_TIMES.map(t => ({ label: t, value: t }))} />
+            {s.frequency === 'weekly' && <Select label="Day of week" value={String(s.dayOfWeek)} onChange={v => save({ dayOfWeek: Number(v) })}
+              options={WEEKDAYS.map(([n, lab]) => ({ label: lab, value: String(n) }))} />}
+            {s.frequency === 'monthly' && <Select label="Day of month" value={String(s.dayOfMonth)} onChange={v => save({ dayOfMonth: Number(v) })}
+              options={[1, 5, 10, 15, 20, 25].map(n => ({ label: String(n), value: String(n) })).concat([{ label: 'Last day', value: '0' }])} />}
+            <Select label="Timezone" value={s.timezone} onChange={v => save({ timezone: v })}
+              options={TIMEZONES.map(t => ({ label: t, value: t }))} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)' }}>
+            {s.frequency === 'daily' && <Switch label="Skip weekends" checked={s.workingDaysOnly} onChange={v => save({ workingDaysOnly: v })} />}
+            <Switch label={'Include a per-entity breakdown of the top ' + s.breakdownLimit} checked={s.includeBreakdown} onChange={v => save({ includeBreakdown: v })} />
+            <Switch label="Send even when there are no draft bills" checked={s.sendWhenEmpty} onChange={v => save({ sendWhenEmpty: v })} />
+          </div>
+        </div>
+
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Recipients</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>{data.recipientMeta}</div>
+
+          {recipients.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px 130px minmax(200px,1.2fr) 72px 40px', gap: 10, padding: '0 12px 8px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <div>Name</div><div>WhatsApp number</div><div>Role</div><div>Xero entities</div><div>Active</div><div />
+          </div>}
+          {recipients.map(p => (
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '1fr 150px 130px minmax(200px,1.2fr) 72px 40px', gap: 10, alignItems: 'center', padding: 12, borderTop: '1px solid var(--neutral-100)', fontSize: 14 }}>
+              <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{p.name}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-body)' }}>{p.phone}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, ...Ellip }}>{p.role}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap' }}>
+                  {p.allEntities && <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 9px', borderRadius: 999, background: 'var(--orange-50)', color: 'var(--orange-600)' }}>All {data.entityCount} entities</span>}
+                  {!p.allEntities && p.chips.map((c, j) => <Code key={j}>{c.code}</Code>)}
+                  {!p.allEntities && !p.chips.length && <span style={{ fontSize: 12, color: 'var(--color-danger)' }}>No entities assigned</span>}
+                  {p.hasMore && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.moreLabel}</span>}
+                </div>
+                <button onClick={() => setAssignFor(p)} className="feta-hover" style={{ flex: '0 0 auto', border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '4px 11px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: 'pointer' }}>Assign</button>
+              </div>
+              <div><Switch checked={p.on} onChange={v => patchRecipient(p.id, { enabled: v })} /></div>
+              <div style={{ textAlign: 'right' }}>
+                <button aria-label={'Remove ' + p.name} onClick={() => removeRecipient(p)} className="feta-hover"
+                  style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={16} /></button>
+              </div>
+            </div>
+          ))}
+
+          <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, alignItems: 'flex-end' }}>
+            <Input label="Name" placeholder="Full name" value={draft.name} onChange={v => setDraft(d => ({ ...d, name: v }))} />
+            <Input label="WhatsApp number" placeholder="+60 12-345 6789" value={draft.phone} onChange={v => setDraft(d => ({ ...d, phone: v }))} />
+            <Select label="Role" value={draft.role} onChange={v => setDraft(d => ({ ...d, role: v }))} options={ROLES} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>Xero entities</div>
+              <button onClick={() => setAssignFor({ draft: true, allEntities: draft.allEntities, entityIds: draft.tenantIds, name: draft.name || 'New recipient', phone: draft.phone })}
+                className="feta-hover" style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 14px', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer', textAlign: 'left', ...Ellip }}>
+                {draft.allEntities ? `All ${data.entityCount} entities` : `${draft.tenantIds.length} selected`}
+              </button>
+            </div>
+            <Button variant="outline" size="md" onClick={addRecipient} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Add recipient</Button>
+          </div>
+        </div>
+
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Message preview</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {data.previewSummary.count} draft{data.previewSummary.count === 1 ? '' : 's'} · RM {data.previewSummary.total} group-wide. This is the real message, built from the same figures as the Bills screen.
+              </div>
+            </div>
+            <span style={{ flex: 1 }} />
+            <div style={{ minWidth: 210 }}>
+              <Select label="Preview as" value={previewFor} onChange={setPreviewFor}
+                options={[{ label: 'Group digest', value: '' }].concat(recipients.map(r => ({ label: r.name, value: String(r.id) })))} />
+            </div>
+          </div>
+          <div style={{ background: 'var(--green-100)', borderRadius: 14, padding: 20 }}>
+            <div style={{ maxWidth: 520, background: '#fff', borderRadius: 12, borderTopLeftRadius: 2, padding: '16px 18px', boxShadow: 'var(--shadow-sm)', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.65, color: 'var(--text-heading)', whiteSpace: 'pre-wrap' }}>{previewText}</div>
+          </div>
+        </div>
+
+        {data.runs && data.runs.length > 0 && <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 22, marginBottom: 20 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Recent sends</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>What actually went out, and to whom.</div>
+          {data.runs.slice(0, 8).map(r => (
+            <div key={r.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 150px 110px 120px', gap: 10, alignItems: 'center', padding: '10px 2px', borderTop: '1px solid var(--neutral-100)', fontSize: 13 }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-heading)', ...Ellip }}>{r.recipient}{r.error ? <span style={{ fontWeight: 400, color: 'var(--color-danger)' }}> — {r.error}</span> : null}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>{r.atFmt}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>{r.draftCount} draft{r.draftCount === 1 ? '' : 's'}</div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999,
+                  background: r.status === 'sent' ? 'var(--green-100)' : r.status === 'failed' ? 'var(--red-100)' : 'var(--neutral-100)',
+                  color: r.status === 'sent' ? '#126b42' : r.status === 'failed' ? 'var(--red-500)' : 'var(--neutral-600)' }}>
+                  {r.status}{r.trigger !== 'schedule' ? ' · ' + r.trigger : ''}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>}
+
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ width: 210 }}>
+            <Input label="Send a test to" placeholder={s.senderPhoneFmt || '+60 12-345 6789'} value={testPhone} onChange={setTestPhone} />
+          </div>
+          <Button variant="ghost" size="md" onClick={sendTest} style={busy || !s.configured ? { opacity: .5, pointerEvents: 'none' } : null}>Send test message</Button>
+          <Button variant="primary" size="md" onClick={sendNow}
+            style={busy || !s.configured || !recipients.some(r => r.on) ? { opacity: .5, pointerEvents: 'none' } : null}>
+            Send digest now
+          </Button>
+        </div>
+
+        <AssignDialog open={Boolean(assignFor)} target={assignFor} entities={entities} entityCount={data.entityCount}
+          onClose={() => setAssignFor(null)}
+          onSave={(allEntities, tenantIds) => {
+            if (assignFor && assignFor.draft) setDraft(d => ({ ...d, allEntities, tenantIds }));
+            else patchRecipient(assignFor.id, { allEntities, tenantIds });
+            setAssignFor(null);
+          }} />
+      </div>;
+    }
+
+    // Picks which Xero organisations a recipient's digest covers.
+    function AssignDialog({ open, target, entities, entityCount, onClose, onSave }) {
+      const [allEntities, setAllEntities] = useState(true);
+      const [selected, setSelected] = useState([]);
+      const [query, setQuery] = useState('');
+
+      useEffect(() => {
+        if (!target) return;
+        setAllEntities(Boolean(target.allEntities));
+        setSelected(target.entityIds || []);
+        setQuery('');
+      }, [target]);
+
+      const shown = entities.filter(e => !query || (e.code + ' ' + e.short).toLowerCase().includes(query.toLowerCase()));
+      const toggle = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : s.concat(id));
+
+      return <Dialog open={open} onClose={onClose} title="Assign Xero entities"
+        description={target ? `${target.name}${target.phone ? ' · ' + target.phone : ''}` : ''} size="md">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div onClick={() => setAllEntities(true)} style={{ flex: 1, border: '1.5px solid ' + (allEntities ? 'var(--color-primary)' : 'var(--border-subtle)'), background: allEntities ? 'var(--orange-50)' : 'var(--surface-card)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>All entities</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Group-wide totals for all {entityCount} companies. New entities are included automatically.</div>
+            </div>
+            <div onClick={() => setAllEntities(false)} style={{ flex: 1, border: '1.5px solid ' + (!allEntities ? 'var(--color-primary)' : 'var(--border-subtle)'), background: !allEntities ? 'var(--orange-50)' : 'var(--surface-card)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-heading)' }}>Selected entities</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Only the drafts belonging to the entities ticked below.</div>
+            </div>
+          </div>
+
+          <div style={{ opacity: allEntities ? .45 : 1, pointerEvents: allEntities ? 'none' : 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{selected.length} of {entities.length} entities selected</span>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => setSelected(entities.map(e => e.tenantId))} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Select all {entities.length}</button>
+              <button onClick={() => setSelected([])} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', cursor: 'pointer' }}>Clear</button>
+            </div>
+            <Input placeholder="Search entities" value={query} onChange={setQuery} />
+            <div style={{ marginTop: 10, maxHeight: 236, overflow: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '10px 12px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '8px 16px' }}>
+              {shown.length === 0 && <div style={{ gridColumn: '1 / -1', fontSize: 13, color: 'var(--text-muted)' }}>{entities.length ? 'No entities match.' : 'Connect Xero in WazzOCR to load your entities.'}</div>}
+              {shown.map(e => (
+                <div key={e.tenantId} onClick={() => toggle(e.tenantId)} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minWidth: 0, cursor: 'pointer' }}>
+                  <Checkbox checked={selected.includes(e.tenantId)} /><Code>{e.code}</Code>
+                  <span style={{ flex: 1, minWidth: 0, color: 'var(--text-body)', ...Ellip }}>{e.short}</span>
+                </div>))}
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)' }}>
+            {allEntities
+              ? 'Receives group-wide draft totals for every entity.'
+              : selected.length
+                ? `Receives draft totals for ${selected.length} entit${selected.length === 1 ? 'y' : 'ies'} only.`
+                : 'No entities selected — this recipient would get nothing.'}
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="md" onClick={() => onSave(allEntities, selected)}>Save assignment</Button>
+          </div>
+        </div>
+      </Dialog>;
+    }
+
+    function App() {
+      const [view, setView] = useState('bills');
+      const [me, setMe] = useState(null);
+      const [xero, setXero] = useState(null);
+      const [entities, setEntities] = useState([]);
+      const [toasts, setToasts] = useState([]);
+
+      const pushToast = useCallback((t) => {
+        const id = Date.now() + Math.random();
+        setToasts(list => list.concat({ ...t, id }));
+        setTimeout(() => setToasts(list => list.filter(x => x.id !== id)), t.tone === 'error' ? 9000 : 5000);
+      }, []);
+
+      const loadContext = useCallback(() => {
+        api.get('/api/auth/me').then(setMe).catch(() => {});
+        api.get('/api/xero/status').then(setXero).catch(() => setXero({ connected: false, count: 0 }));
+        api.get('/api/bills/entities').then(d => setEntities(d.entities || [])).catch(() => {});
+      }, []);
+
+      useEffect(loadContext, [loadContext]);
+
+      // Report the outcome of the Xero consent round trip, then take the result
+      // out of the address bar so a refresh doesn't replay the toast.
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const result = params.get('xero');
+        if (!result) return;
+        if (result === 'connected') {
+          const orgs = params.get('orgs') || '0';
+          pushToast({ title: 'Xero connected', message: orgs + ' organisation' + (orgs === '1' ? '' : 's') + ' linked. Run a sync to pull their bills in.' });
+        } else {
+          pushToast({ title: 'Xero connection failed', message: params.get('message') || 'Please try again.', tone: 'error' });
+        }
+        window.history.replaceState({}, '', window.location.pathname);
+      }, [pushToast]);
+
+      const viewTabs = [
+        { value: 'bills', label: 'Bills' },
+        { value: 'recharge', label: 'Recharge' },
+        { value: 'bank', label: 'Bank files' },
+        { value: 'settings', label: 'Notifications' }
+      ];
+      const orgCount = xero ? xero.count || 0 : null;
+      const connected = xero ? xero.connected : true;
+      const needsReconnect = (xero && xero.needsReconnect) || 0;
+      // Connecting happens in WazzOCR — Bills Hub borrows its Xero grant.
+      const manageAt = (xero && xero.manageAt) || null;
+      const xeroProblem = (xero && xero.error) || null;
+      const openAccess = Boolean(me && me.authDisabled);
+
+      return <div style={{ minHeight: '100vh', background: 'var(--surface-page)' }}>
+        <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'var(--ink-900)', padding: '0 28px', display: 'flex', alignItems: 'center', gap: 20, height: 64 }}>
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, letterSpacing: '-.03em', color: '#fff' }}>Fusion<span style={{ color: 'var(--orange-500)' }}>ETA</span></span>
+          <span style={{ width: 1, height: 26, background: 'rgba(255,255,255,.18)' }} />
+          <span style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.01em', color: '#fff' }}>Bills Hub</span>
+          <span style={{ whiteSpace: 'nowrap', fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--orange-400)' }}>{(me && me.account && me.account.name) || ''}</span>
+          <span style={{ flex: 1 }} />
+          <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
+          <a href={manageAt || undefined} target={manageAt ? '_blank' : undefined} rel="noreferrer"
+            title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting in WazzOCR' : 'Xero is connected through WazzOCR')}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', cursor: manageAt ? 'pointer' : 'default' }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: needsReconnect ? 'var(--amber-500)' : connected ? 'var(--green-500)' : 'var(--red-500)' }} />
+            <span>{orgCount === null ? 'Checking Xero…' : connected ? orgCount + ' Xero ' + (orgCount === 1 ? 'entity' : 'entities') + ' connected' : 'Xero not connected'}</span>
+          </a>
+          {!openAccess && <div title={me && me.user ? me.user.email : ''} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700 }}>{(me && me.user && me.user.initials) || '–'}</div>}
+        </header>
+
+        {/* Sign-in is off, and this app can change bills in a live Xero. Keep
+            that visible rather than letting it be forgotten. */}
+        {openAccess && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'var(--amber-100)', borderBottom: '1px solid #e7c96b', padding: '9px 20px', fontSize: 13, color: '#6b4d00' }}>
+          <strong style={{ color: '#5a4100' }}>Sign-in is off.</strong>
+          <span>Anyone who can open this page can submit and approve bills in your Xero organisations.</span>
+        </div>}
+
+        {view === 'bills' && <BillsView entities={entities} xero={xero} onToast={pushToast} onSynced={loadContext} onPaid={() => setView('bank')} />}
+        {view === 'recharge' && <RechargeView />}
+        {view === 'bank' && <BankView onToast={pushToast} />}
+        {view === 'settings' && <SettingsView entities={entities} onToast={pushToast} />}
+
+        <div style={{ position: 'fixed', right: 20, bottom: 20, zIndex: 120, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {toasts.map(t => <Toast key={t.id} title={t.title} message={t.message} tone={t.tone} onClose={() => setToasts(list => list.filter(x => x.id !== t.id))} />)}
+        </div>
+      </div>;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+  </script>
+</body>
+
+</html>

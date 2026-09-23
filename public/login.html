@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Bills Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --brand-orange: #FE5000;
+      --orange-50: #FFF3EC;
+      --orange-600: #DB3F00;
+      --blue-500: #1E22AA;
+      --neutral-0: #FFFFFF;
+      --neutral-50: #F6F7F9;
+      --neutral-200: #DEE1E7;
+      --neutral-300: #C7CCD5;
+      --neutral-500: #6C7480;
+      --neutral-700: #363B44;
+      --ink-900: #101235;
+      --red-500: #E23A2E;
+      --red-100: #FBDEDB;
+      --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+      --font-body: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+      --shadow-lg: 0 12px 28px rgba(16, 18, 53, .12), 0 4px 10px rgba(16, 18, 53, .06);
+      --ring: 0 0 0 3px rgba(254, 80, 0, .35);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--neutral-50);
+      color: var(--neutral-700);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px
+    }
+
+    .card {
+      width: 100%;
+      max-width: 400px;
+      background: var(--neutral-0);
+      border: 1px solid var(--neutral-200);
+      border-radius: 16px;
+      box-shadow: var(--shadow-lg);
+      padding: 32px
+    }
+
+    .brand {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 22px;
+      letter-spacing: -.03em;
+      color: var(--ink-900);
+      margin-bottom: 4px
+    }
+
+    .brand span {
+      color: var(--brand-orange)
+    }
+
+    h1 {
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--ink-900);
+      margin: 18px 0 4px
+    }
+
+    .sub {
+      font-size: 13.5px;
+      color: var(--neutral-500);
+      margin-bottom: 22px
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-900);
+      margin-bottom: 6px
+    }
+
+    input {
+      width: 100%;
+      height: 46px;
+      border: 1.5px solid var(--neutral-300);
+      border-radius: 10px;
+      padding: 0 14px;
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--neutral-700);
+      background: var(--neutral-0);
+      outline: none;
+      margin-bottom: 14px
+    }
+
+    input:focus {
+      border-color: var(--brand-orange);
+      box-shadow: var(--ring)
+    }
+
+    button {
+      width: 100%;
+      height: 46px;
+      border: none;
+      border-radius: 10px;
+      background: var(--brand-orange);
+      color: #fff;
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 4px
+    }
+
+    button:hover {
+      background: var(--orange-600)
+    }
+
+    button[disabled] {
+      opacity: .6;
+      cursor: default
+    }
+
+    .error {
+      display: none;
+      background: var(--red-100);
+      border-left: 4px solid var(--red-500);
+      border-radius: 8px;
+      padding: 11px 13px;
+      font-size: 13px;
+      color: #8d1f17;
+      margin-bottom: 16px
+    }
+
+    .error.on {
+      display: block
+    }
+  </style>
+</head>
+
+<body>
+  <form class="card" id="form">
+    <div class="brand">Fusion<span>ETA</span></div>
+    <h1>Bills Hub</h1>
+    <div class="sub">Sign in to manage bills across your Xero entities.</div>
+    <div class="error" id="error" role="alert"></div>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" id="submit">Sign in</button>
+  </form>
+
+  <script>
+    const form = document.getElementById('form');
+    const errorBox = document.getElementById('error');
+    const submit = document.getElementById('submit');
+
+    // Only same-origin paths are honoured, so a crafted ?next= can't be used to
+    // bounce someone to another site after they sign in.
+    function safeNext() {
+      const next = new URLSearchParams(location.search).get('next') || '/';
+      return /^\/(?!\/)/.test(next) ? next : '/';
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.classList.remove('on');
+      submit.disabled = true;
+      submit.textContent = 'Signing in…';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('email').value,
+            password: document.getElementById('password').value
+          })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Sign-in failed.');
+        location.href = safeNext();
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.add('on');
+        submit.disabled = false;
+        submit.textContent = 'Sign in';
+      }
+    });
+  </script>
+</body>
+
+</html>

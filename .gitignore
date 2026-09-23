@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+node_modules/
+certs/
+*.log
+.DS_Store
+.devdata/
