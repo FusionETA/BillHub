@@ -79,6 +79,27 @@ async function createWazzocrFixture() {
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 }
 
+// Refuses to wipe a database that holds real Xero data.
+//
+// Every fixture tenant id is `tenant-…` or `synct…`; a real one is a UUID. If a
+// real one is present, this database is somebody's working instance and seeding
+// would silently replace 46 synced bills with 12 invented ones — which is
+// exactly what happened once during development.
+async function assertSafeToWipe() {
+  if (process.env.ALLOW_DESTRUCTIVE_SEED === '1') return;
+  const row = await db.getOne(
+    `SELECT COUNT(*) AS n FROM bills
+      WHERE xero_tenant_id NOT LIKE 'tenant-%' AND xero_tenant_id NOT LIKE 'synct%'`
+  ).catch(() => null);
+  if (row && Number(row.n) > 0) {
+    throw new Error(
+      `${row.n} bill(s) in "${process.env.DB_NAME}" came from a real Xero organisation, and seeding would delete them.
+`
+      + '      Point the tests at their own database (DB_NAME), or re-run with ALLOW_DESTRUCTIVE_SEED=1 to wipe it anyway.'
+    );
+  }
+}
+
 // Wipes the tables this fixture owns, so a suite can call seed() and start from
 // a known state regardless of what ran before it.
 async function reset() {
@@ -94,6 +115,7 @@ async function reset() {
 
 async function seed({ quiet = false } = {}) {
   const log = quiet ? () => {} : console.log;
+  await assertSafeToWipe();
   await createWazzocrFixture();
   await reset();
   await db.execute(`DELETE FROM ${CONNECTIONS} WHERE account_id = ?`, [CONN_ACCOUNT]);
@@ -204,7 +226,7 @@ async function seed({ quiet = false } = {}) {
     : `Own Xero grant: account ${ACCOUNT}, grant ${grantId}.`);
 }
 
-module.exports = { seed, reset, ACCOUNT, WAZZOCR_ACCOUNT, ORGS, INVOICES };
+module.exports = { seed, reset, assertSafeToWipe, ACCOUNT, WAZZOCR_ACCOUNT, ORGS, INVOICES };
 
 // Run as a script: node test/seed.js
 if (require.main === module) {

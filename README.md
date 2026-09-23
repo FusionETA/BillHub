@@ -292,7 +292,15 @@ shape costs one org and not forty.
 
 For a full walkthrough of deploying and testing against the Xero Demo Company
 without any risk to the live organisations, see
-[docs/TESTING-WITH-XERO.md](docs/TESTING-WITH-XERO.md).
+[docs/TESTING-WITH-XERO.md](docs/TESTING-WITH-XERO.md), and
+[docs/TEST-PLAN.md](docs/TEST-PLAN.md) for what to exercise module by module.
+
+```bash
+npm run smoke
+```
+
+is a read-only readiness check: it proves each Xero scope by calling the
+endpoint, counts what is synced, and says what is blocking each module.
 
 ## The bill sync
 
@@ -629,7 +637,15 @@ server, no sign-in):
   stray user row is created.
 
 Each suite reseeds its fixtures first, so they are order-independent and can be
-re-run without a wipe.
+re-run without a wipe. **They run against their own database** (`billhub_suite`,
+override with `BILLHUB_TEST_DB`) and the seed refuses outright if it finds bills
+from a real Xero organisation — seeding wipes `bills` and `entities`, and doing
+that to somebody's working instance is a silent, expensive mistake.
+
+```bash
+npm run db:migrate:test   # once
+npm test
+```
 
 All but the last pin `AUTH_DISABLED=false` so they exercise the real sign-in
 path whatever your local `.env` says.

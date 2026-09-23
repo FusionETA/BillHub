@@ -244,6 +244,13 @@ const at = (iso) => new Date(iso);
   check('their history survives them',
     (await req('GET', '/api/digest/runs', { cookie })).body.runs.length > 0);
 
+  // Disarm. These are invented numbers on what may be a real Wazzup channel,
+  // and the scheduler would try them at the next send time.
+  await db.execute('DELETE FROM digest_recipient_entities');
+  await db.execute('DELETE FROM digest_recipients');
+  await db.execute('DELETE FROM digest_runs');
+  await db.execute('UPDATE digest_settings SET enabled = 0, last_sent_for = NULL');
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
