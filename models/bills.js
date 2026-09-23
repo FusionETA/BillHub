@@ -1,7 +1,7 @@
 // Bills: the local mirror of Xero ACCPAY invoices, plus the queries the Bills
 // list and its stat cards run against it.
 const db = require('../db');
-const { CONNECTIONS } = require('../lib/wazzocrDb');
+const { CONNECTIONS } = require('../lib/grantSource');
 
 // Xero's status vocabulary mapped to the four tabs the UI shows. AUTHORISED
 // splits on whether anything is still owed, because Xero leaves a part-paid

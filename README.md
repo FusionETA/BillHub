@@ -40,7 +40,7 @@ lib/
   bankFile.js          Renders a batch into a bank's layout (layouts are data)
   wazzup.js            Wazzup24 sender + Malaysian phone normalising
   schedule.js          Timezone-aware "is the digest due?" 
-  wazzocrDb.js         Where WazzOCR's two Xero tables live
+  grantSource.js       Which Xero grant this deployment uses, and where it lives
   xero.js              Token rotation under a row lock, rate-limited API client
 auth/
   middleware.js        attachUser / requireAuth                     (same as WazzOCR)
@@ -142,11 +142,30 @@ Every variable is documented in `.env.example`. The ones that need care:
 - `XERO_TENANT_ALLOWLIST` — comma-separated tenant ids. When set, Xero writes are
   refused outside the list. Empty means no restriction.
 
-There is no `XERO_REDIRECT_URI`, because Bills Hub never starts a consent.
+`XERO_REDIRECT_URI` is needed in `own` mode and must match one registered on
+that Xero app. In `wazzocr` mode there is no consent, so no redirect URI.
 
 ## Xero
 
-### Why the grant is shared
+### Two ways to hold the grant
+
+`XERO_GRANT_SOURCE` decides where Bills Hub's Xero token comes from:
+
+| Mode | What it means |
+| --- | --- |
+| `own` *(default)* | Bills Hub uses its own Xero app and runs its own consent, storing the grant in its own tables. Self-contained — it needs nothing from WazzOCR and cannot affect it. |
+| `wazzocr` | Bills Hub borrows WazzOCR's existing grant by reading `wazzocr.xero_grants`. No second consent, so WazzOCR's token is never superseded, and every organisation arrives at once. |
+
+Xero tenant ids identify the **organisation**, not the app connection, so an
+organisation keeps its id across both modes — `entities`, `bills`, batches and
+recharges all survive a switch.
+
+The sensible path is `own` first: get a deployment working against a Xero app of
+its own, with the Demo Company, where nothing you do can reach WazzOCR. Switch to
+`wazzocr` once it is proven and you want the real organisations without another
+consent.
+
+### Why `wazzocr` mode exists at all
 
 Xero's own guidance is blunt about this:
 
@@ -155,17 +174,18 @@ Xero's own guidance is blunt about this:
 > issued set of tokens will supersede the previous set."
 > — [Managing Tokens and Ids](https://developer.xero.com/documentation/best-practices/data-integrity/managing-tokens)
 
-Bills Hub uses the same Xero app as WazzOCR. If it ran its own consent with the
-same Xero login, Xero would supersede WazzOCR's tokens and WazzOCR's live bill
-pipeline would start failing with `invalid_grant`. Reconnecting WazzOCR would
-then break Bills Hub, and so on.
+If Bills Hub ran its own consent **on WazzOCR's app with the same Xero login**,
+Xero would supersede WazzOCR's tokens and its live pipeline would start failing
+with `invalid_grant`. Reconnecting WazzOCR would then break Bills Hub, and so on.
 
-So Bills Hub has **no consent flow at all**. `GET /api/xero/connect` returns 409
-and points at WazzOCR. Connecting and reconnecting happen there; Bills Hub reads
-the grant WazzOCR holds and is connected to all 40 organisations the moment
-WazzOCR is.
+`wazzocr` mode avoids that by sharing one grant rather than creating a second.
+In that mode `GET /api/xero/connect` returns 409 and points at WazzOCR, so the
+consent cannot be started here by accident.
 
-### What Bills Hub touches in WazzOCR's database
+A separate Xero app sidesteps the problem entirely, which is what `own` mode is
+for — different client id, different grant, no interference.
+
+### What Bills Hub touches in WazzOCR's database (`wazzocr` mode only)
 
 Two existing tables, no schema changes, nothing created or dropped:
 
@@ -488,7 +508,8 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/auth/me` | Current user and account |
 | `GET` | `/api/xero/status` | The borrowed grant's health and the orgs it covers |
 | `GET` | `/api/xero/verify` | Ask Xero which orgs the token can actually reach |
-| `GET` | `/api/xero/connect` | 409 — points at WazzOCR, never starts a consent |
+| `GET` | `/api/xero/connect` | Start a consent (`own`), or 409 pointing at WazzOCR |
+| `GET` | `/api/xero/callback` | Store the grant and its organisations (`own`) |
 | `GET` | `/api/bills` | The whole view model: stats, tabs, rows, meta, banner |
 | `GET` | `/api/bills/entities` | Connected organisations (`?all=true` includes excluded) |
 | `PATCH` | `/api/bills/entities/:tenantId` | Rename a code, or include/exclude an organisation |
@@ -578,6 +599,9 @@ server, no sign-in):
   refusal, both sides of the posting with their account codes and statuses
   asserted, idempotent re-posting, a half-failed line retrying only what is
   missing, settlement, rules and suggestions.
+- `ownmode.test.js` — `XERO_GRANT_SOURCE=own`: the consent round trip, a signed
+  state that rejects tampering, the token encrypted at rest in Bills Hub's own
+  tables, and WazzOCR's schema left alone.
 - `safety.test.js` — the two guards: the write allowlist refusing before any
   network call, and excluding an organisation from the sync and the lists.
 - `openaccess.test.js` — `AUTH_DISABLED`: requests work with no cookie, `/me`

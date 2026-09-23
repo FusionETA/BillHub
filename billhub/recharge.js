@@ -12,6 +12,7 @@
 //
 // Nothing reaches Xero until someone posts a run. Rules only ever *suggest*.
 const db = require('../db');
+const grantSource = require('../lib/grantSource');
 const xero = require('../lib/xero');
 const model = require('../models/recharge');
 const bills = require('../models/bills');
@@ -96,7 +97,7 @@ async function planRun(accountId, { billId, targets, ruleId = null }) {
   );
   if (existing) throw err(`That bill is already recharged (run #${existing.id}, ${existing.status}).`, 409);
 
-  const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   const known = await entities.listByAccount(accountId, wazzocrAccountId);
   const byTenant = new Map(known.map((e) => [e.xero_tenant_id, e]));
 
@@ -177,7 +178,7 @@ async function postRun(accountId, runId) {
     throw err('Set the recharge account codes before posting.', 400);
   }
 
-  const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   const known = new Map((await entities.listByAccount(accountId, wazzocrAccountId))
     .map((e) => [e.xero_tenant_id, e]));
   const payer = known.get(run.payer_tenant_id);

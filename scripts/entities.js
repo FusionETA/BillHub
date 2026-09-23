@@ -11,6 +11,7 @@
 // refuses Xero *writes* outside the list no matter what the database says.
 require('dotenv').config();
 const db = require('../db');
+const grantSource = require('../lib/grantSource');
 const entities = require('../models/entities');
 const accounts = require('../models/accounts');
 
@@ -26,7 +27,7 @@ function resolve(rows, key) {
 
 (async () => {
   const [cmd, ...args] = process.argv.slice(2);
-  const wazzocrAccountId = await accounts.wazzocrIdFor(ACCOUNT);
+  const wazzocrAccountId = await grantSource.connectionsAccountId(ACCOUNT);
   const rows = await entities.listByAccount(ACCOUNT, wazzocrAccountId, { includedOnly: false });
 
   if (!rows.length) {

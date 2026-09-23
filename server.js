@@ -45,7 +45,7 @@ app.get('/api/health', async (req, res) => {
   }
   // Bills Hub reads WazzOCR's Xero tables, so a missing GRANT is a deployment
   // fault worth surfacing here rather than discovering it one sync at a time.
-  const { GRANTS } = require('./lib/wazzocrDb');
+  const { GRANTS } = require('./lib/grantSource');
   let grantStore = 'up';
   try {
     await db.getOne(`SELECT 1 FROM ${GRANTS} LIMIT 1`);

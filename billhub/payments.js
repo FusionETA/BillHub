@@ -13,6 +13,7 @@
 //                      happened by some other route, so Xero is posted straight
 //                      away and no file is produced.
 const xero = require('../lib/xero');
+const grantSource = require('../lib/grantSource');
 const bills = require('../models/bills');
 const batches = require('../models/batches');
 const bankAccounts = require('../models/bankAccounts');
@@ -67,7 +68,7 @@ async function syncPayees(accountId, tenantId) {
 
 // Both, for every connected organisation.
 async function syncAll(accountId, { tenantIds = null } = {}) {
-  const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   let targets = await entities.listSyncable(accountId, wazzocrAccountId);
   if (tenantIds && tenantIds.length) {
     const want = new Set(tenantIds);

@@ -12,7 +12,7 @@ const db = require('../db');
 const xero = require('../lib/xero');
 const accounts = require('../models/accounts');
 const { encrypt, decrypt } = require('../lib/crypto');
-const { GRANTS, CONNECTIONS } = require('../lib/wazzocrDb');
+const { GRANTS, CONNECTIONS, BORROWED } = require('../lib/grantSource');
 
 const ACCOUNT = 1;
 const WAZZOCR_ACCOUNT = 7;

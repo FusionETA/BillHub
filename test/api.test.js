@@ -6,7 +6,7 @@ process.env.AUTH_DISABLED = 'false';
 const http = require('http');
 const xero = require('../lib/xero');
 const db = require('../db');
-const { GRANTS, CONNECTIONS, DB_NAME } = require('../lib/wazzocrDb');
+const { GRANTS, CONNECTIONS, WAZZOCR_DB: DB_NAME, BORROWED } = require('../lib/grantSource');
 const { decrypt } = require('../lib/crypto');
 
 const calls = [];

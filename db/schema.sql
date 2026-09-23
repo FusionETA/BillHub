@@ -5,11 +5,11 @@
 -- Every table below lives in the Bills Hub database; nothing here touches
 -- WazzOCR's schema.
 --
--- There are deliberately no xero_grants / xero_connections tables. Bills Hub
--- borrows WazzOCR's existing grant instead of holding one of its own, because
--- Xero supersedes the older token set whenever the same Xero user re-authorises
--- the same app — a second consent would silently break WazzOCR. See
--- lib/wazzocrDb.js for the two tables it reads and the grants it needs.
+-- The xero_grants / xero_connections tables below are used when
+-- XERO_GRANT_SOURCE=own (the default): Bills Hub runs its own consent and holds
+-- its own token. With XERO_GRANT_SOURCE=wazzocr it reads WazzOCR's tables
+-- instead and these stay empty — that avoids a second consent, which would
+-- supersede WazzOCR's token. See lib/grantSource.js.
 
 -- ── Tenancy & auth ──────────────────────────────────────────────────────────
 
@@ -54,6 +54,35 @@ CREATE TABLE IF NOT EXISTS sessions (
   ip         VARCHAR(45),
   user_agent VARCHAR(255),
   CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Xero (XERO_GRANT_SOURCE=own) ────────────────────────────────────────────
+--
+-- Bills Hub's own grant, used when it runs its own consent. In
+-- XERO_GRANT_SOURCE=wazzocr mode these tables are simply unused — the app reads
+-- WazzOCR's instead. See lib/grantSource.js.
+
+CREATE TABLE IF NOT EXISTS xero_grants (
+  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id    BIGINT UNSIGNED NOT NULL,
+  refresh_token VARBINARY(1024) NOT NULL,
+  scope         TEXT,
+  obtained_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_xerogrants_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS xero_connections (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id      BIGINT UNSIGNED NOT NULL,
+  grant_id        BIGINT UNSIGNED NOT NULL,
+  xero_tenant_id  VARCHAR(64) NOT NULL,
+  tenant_name     VARCHAR(255),
+  status          ENUM('active','expired','revoked') DEFAULT 'active',
+  needs_reconnect TINYINT(1) DEFAULT 0,
+  connected_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_acct_tenant (account_id, xero_tenant_id),
+  CONSTRAINT fk_xeroconn_account FOREIGN KEY (account_id) REFERENCES accounts(id),
+  CONSTRAINT fk_xeroconn_grant   FOREIGN KEY (grant_id)   REFERENCES xero_grants(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Bills module ────────────────────────────────────────────────────────────

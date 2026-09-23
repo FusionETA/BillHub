@@ -9,7 +9,7 @@ const db = require('../db');
 const sync = require('../billhub/sync');
 const syncState = require('../models/syncState');
 const { encrypt } = require('../lib/crypto');
-const { GRANTS, CONNECTIONS } = require('../lib/wazzocrDb');
+const { GRANTS, CONNECTIONS, BORROWED } = require('../lib/grantSource');
 
 const ACCOUNT = 1;          // Bills Hub account
 const WAZZOCR_ACCOUNT = 7;  // its counterpart in the WazzOCR database

@@ -17,7 +17,7 @@ require('dotenv').config();
 const db = require('../db');
 const entities = require('../models/entities');
 const accounts = require('../models/accounts');
-const { GRANTS, CONNECTIONS, DB_NAME } = require('../lib/wazzocrDb');
+const { GRANTS, CONNECTIONS, WAZZOCR_DB: DB_NAME, BORROWED } = require('../lib/grantSource');
 
 let problems = 0;
 const ok = (m) => console.log(`  ok    ${m}`);

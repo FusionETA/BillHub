@@ -15,10 +15,12 @@ const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
 const { encrypt } = require('../lib/crypto');
-const { DB_NAME, GRANTS, CONNECTIONS } = require('../lib/wazzocrDb');
+const { WAZZOCR_DB: DB_NAME, GRANTS, CONNECTIONS, BORROWED } = require('../lib/grantSource');
 
 const ACCOUNT = 1;          // Bills Hub account
 const WAZZOCR_ACCOUNT = 7;  // its counterpart in the WazzOCR database
+// Whichever account the connections table is keyed by in the active mode.
+const CONN_ACCOUNT = BORROWED ? WAZZOCR_ACCOUNT : ACCOUNT;
 
 const ORGS = [
   ['tenant-abm', 'Ayu Borneo Management Sdn Bhd'],
@@ -54,6 +56,9 @@ const INVOICES = [
 // Column types match WazzOCR's schema; its foreign keys are left out because
 // nothing here depends on them.
 async function createWazzocrFixture() {
+  // In `own` mode the grant lives in Bills Hub's own tables, which db:migrate
+  // already created — there is no stand-in schema to build.
+  if (!BORROWED) return;
   await db.execute(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4`);
   await db.execute(`CREATE TABLE IF NOT EXISTS ${GRANTS} (
     id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -91,12 +96,12 @@ async function seed({ quiet = false } = {}) {
   const log = quiet ? () => {} : console.log;
   await createWazzocrFixture();
   await reset();
-  await db.execute(`DELETE FROM ${CONNECTIONS} WHERE account_id = ?`, [WAZZOCR_ACCOUNT]);
-  await db.execute(`DELETE FROM ${GRANTS} WHERE account_id = ?`, [WAZZOCR_ACCOUNT]);
+  await db.execute(`DELETE FROM ${CONNECTIONS} WHERE account_id = ?`, [CONN_ACCOUNT]);
+  await db.execute(`DELETE FROM ${GRANTS} WHERE account_id = ?`, [CONN_ACCOUNT]);
 
   const grantId = await db.insert(
     `INSERT INTO ${GRANTS} (account_id, refresh_token, scope) VALUES (?,?,?)`,
-    [WAZZOCR_ACCOUNT, encrypt('fake-refresh-token-for-local-test'), 'accounting.transactions']
+    [CONN_ACCOUNT, encrypt('fake-refresh-token-for-local-test'), 'accounting.transactions']
   );
 
   // Point the Bills Hub account at that WazzOCR account.
@@ -107,7 +112,7 @@ async function seed({ quiet = false } = {}) {
       `INSERT INTO ${CONNECTIONS} (account_id, grant_id, xero_tenant_id, tenant_name, status)
        VALUES (?,?,?,?,'active')
        ON DUPLICATE KEY UPDATE grant_id = VALUES(grant_id), tenant_name = VALUES(tenant_name), status = 'active'`,
-      [WAZZOCR_ACCOUNT, grantId, tenantId, tenantName]
+      [CONN_ACCOUNT, grantId, tenantId, tenantName]
     );
     const e = await entities.ensure(ACCOUNT, tenantId, tenantName);
     log(`  ${e.code.padEnd(6)} ${e.shortName}`);
@@ -194,7 +199,9 @@ async function seed({ quiet = false } = {}) {
 
   log(`Seeded ${INVOICES.length} invoices across ${ORGS.length} organisations.`);
   log(`Bank files: ${BANKS.length} paying accounts, ${Object.keys(PAYEE_DETAILS).length} payees.`);
-  log(`WazzOCR fixture: database "${DB_NAME}", account ${WAZZOCR_ACCOUNT}, grant ${grantId}.`);
+  log(BORROWED
+    ? `WazzOCR fixture: database "${DB_NAME}", account ${WAZZOCR_ACCOUNT}, grant ${grantId}.`
+    : `Own Xero grant: account ${ACCOUNT}, grant ${grantId}.`);
 }
 
 module.exports = { seed, reset, ACCOUNT, WAZZOCR_ACCOUNT, ORGS, INVOICES };

@@ -9,13 +9,28 @@ this document is about doing it *safely against real Xero*.
 
 ---
 
-## The one risk to understand first
+## Do it in two stages
 
-Bills Hub borrows WazzOCR's Xero grant, and that grant covers **all 41
-organisations**. A test deployment pointed at it can therefore read — and
-without the guards below, write to — every live organisation.
+**Stage 1 — your own Xero app.** Create a second app at developer.xero.com just
+for Bills Hub, run `XERO_GRANT_SOURCE=own`, and connect the Demo Company through
+Bills Hub's own consent. Different client id, different grant: WazzOCR is not
+involved at all and cannot be affected. Prove every module here.
 
-Two independent guards stop that. Use both.
+**Stage 2 — switch to WazzOCR's grant.** Once it all works, set
+`XERO_GRANT_SOURCE=wazzocr` and the 41 real organisations arrive without another
+consent. Xero tenant ids belong to the organisation rather than the app
+connection, so everything already keyed on them carries over.
+
+Stage 1 is the whole point: nothing you do can reach WazzOCR or a live
+organisation, because the app holding the token has never been authorised for
+them.
+
+## The risk that appears in stage 2
+
+WazzOCR's grant covers **all 41 organisations**, so from stage 2 onward a
+deployment can read — and without the guards below, write to — every live one.
+
+Two independent guards stop that. Use both, from the moment you switch.
 
 | Guard | What it does | Where |
 | --- | --- | --- |
@@ -28,25 +43,28 @@ incapable of changing a live organisation.
 
 ---
 
-## 1. Connect the Demo Company — in WazzOCR, not here
+## 1. Create a Xero app for Bills Hub
 
-Every Xero user has one Demo Company. Connect it **through WazzOCR**, because
-Bills Hub deliberately has no consent flow:
+At developer.xero.com → **New app**:
 
-> Xero supersedes the older token set whenever the same user re-authorises the
-> same app. A consent started in Bills Hub would invalidate WazzOCR's token and
-> stop its live pipeline.
+| Field | Value |
+| --- | --- |
+| App name | Bills Hub (test) |
+| Company URL | anything of yours |
+| Redirect URI | `https://<your-host>/api/xero/callback` |
 
-So: open WazzOCR → Connect Xero → authorise, with the Demo Company selected
-alongside the organisations already connected. WazzOCR stores the new grant;
-Bills Hub reads it on the next call and sees the Demo Company automatically.
+Generate a secret. You now have a client id and secret **that have nothing to do
+with WazzOCR** — authorising this app cannot supersede WazzOCR's token, because
+the supersede rule is per Xero user *and app*.
 
-**Pick a quiet moment.** The reconnect rotates WazzOCR's refresh token. That is
-routine and WazzOCR handles it, but a reconnect while bills are being processed
-is worth avoiding. Take a backup first:
+Scopes Bills Hub asks for:
 
-```sql
-SELECT id, refresh_token FROM wazzocr.xero_grants;
+```
+openid profile email offline_access
+accounting.transactions          read + write invoices, batch payments
+accounting.contacts.read
+accounting.settings.read
+accounting.attachments.read
 ```
 
 ## 2. Deploy, pointed at its own database
@@ -57,80 +75,66 @@ a test run then touches the production Bills Hub data.
 
 ```sql
 CREATE DATABASE billhub_demo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-GRANT SELECT, UPDATE ON `wazzocr`.`xero_grants`        TO '<user>'@'%';
-GRANT SELECT          ON `wazzocr`.`xero_connections`  TO '<user>'@'%';
 ```
 
-`.env` for the test instance:
+`.env` for the test instance — note there is **nothing of WazzOCR's in it**:
 
 ```bash
 DB_NAME=billhub_demo
-WAZZOCR_DB_NAME=wazzocr
-APP_ENCRYPTION_KEY=<copied from WazzOCR's .env — not generated>
-XERO_CLIENT_ID=<copied from WazzOCR's .env>
-XERO_CLIENT_SECRET=<copied from WazzOCR's .env>
+
+XERO_GRANT_SOURCE=own
+XERO_CLIENT_ID=<your new app>
+XERO_CLIENT_SECRET=<your new app>
+XERO_REDIRECT_URI=https://<your-host>/api/xero/callback
+
+# Generate a fresh one; it is yours alone in this mode.
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+APP_ENCRYPTION_KEY=<generated>
 
 # Leave the digest off until the recipients are right.
 WAZZUP_CHANNEL_ID=...
 WAZZUP_API_KEY=...
-
-# Filled in at step 4.
-XERO_TENANT_ALLOWLIST=
 ```
+
+No cross-database GRANTs are needed in `own` mode, and `wazzocr_account_id` can
+stay null.
 
 ```bash
 npm ci --omit=dev
 npm run db:migrate
-npm run create-account "Ayu Borneo Group (demo)" you@example.com <wazzocrAccountId>
+npm run create-account "Ayu Borneo Group (demo)" you@example.com
 ```
 
-## 3. Preflight
+(No WazzOCR account id — that argument is only for `wazzocr` mode.)
+
+## 3. Connect the Demo Company
+
+Start the app, sign in, and press **Connect Xero** in the header. Authorise with
+your Xero login and pick the **Demo Company**.
+
+Every Xero user has one Demo Company; it is a sandbox that resets periodically,
+which is exactly what you want for a first run.
 
 ```bash
 node scripts/preflight.js
 ```
 
-Read-only: config, both databases, the cross-database GRANTs, that
-`APP_ENCRYPTION_KEY` decrypts WazzOCR's token, and **the entity codes it would
-derive from the real organisation names** — worth reading before they are
-created.
+Read-only. It checks the config and the database, that `APP_ENCRYPTION_KEY`
+decrypts the stored token, and **the entity codes it would derive** — worth a
+look before they are created. `GET /api/xero/verify` confirms the token reaches
+Xero.
+
+## 4. Sync
 
 ```bash
-node scripts/preflight.js --xero
-```
-
-adds one live call to prove the borrowed token works. It rotates WazzOCR's
-refresh token, which is routine; do it in the same quiet window as step 1.
-
-## 4. Fence off everything but the Demo Company
-
-```bash
-npm start                 # once, so the first sync creates the entity rows
 npm run sync              # or press Sync Xero in the UI
 npm run entities list
 ```
 
-Find the Demo Company's code in that list, then:
-
-```bash
-npm run entities only DEMO        # exclude all the others
-```
-
-It prints the allowlist line to paste into `.env`:
-
-```bash
-XERO_TENANT_ALLOWLIST=<the Demo Company's tenant id>
-```
-
-Restart. The boot log must now say:
-
-```
-[xero] XERO_TENANT_ALLOWLIST is set — writes are limited to 1 organisation(s).
-```
-
-**Check the guard before trusting it.** Temporarily include a live organisation,
-try to submit one of its bills, and confirm you get *"This deployment may not
-write to Xero organisation …"*. Then exclude it again.
+In `own` mode the only organisation connected is the Demo Company, so there is
+nothing to fence off yet — `XERO_TENANT_ALLOWLIST` and
+`npm run entities only …` matter from stage 2, when the real organisations
+appear.
 
 ## 5. What to test, and what the Demo Company can and cannot show
 
@@ -153,30 +157,61 @@ Add your own number, **Send test message**, then **Send digest now**. Leave the
 schedule off until the recipient list is right; `last_sent_for` prevents repeats
 but not a digest to the wrong people.
 
-### Recharge — **only partly testable**
-A recharge needs **two** organisations: an invoice in the payer and a mirror bill
-in the subsidiary. You get one Demo Company per Xero login, so with the Demo
-Company alone you can test the rules, the splits and every validation, but not
-an actual posting.
+### Recharge — **needs a second organisation**
+A recharge posts an invoice in the payer and a mirror bill in the subsidiary, so
+it needs **two** organisations. You get one Demo Company per Xero login, so with
+the Demo Company alone you can test the rules, the splits and every validation,
+but not an actual posting.
 
-To test it end to end, either:
-
-- **Create a second Xero trial organisation** and connect it in WazzOCR, then
-  allowlist both. This is the clean option.
-- Or allowlist two *real* organisations you are willing to have test documents
-  in, and void them in Xero afterwards. The documents are real accounting
-  records — Bills Hub will not delete them for you.
+In `own` mode the fix is easy: **create a free Xero trial organisation**, connect
+it to your Bills Hub app in the same consent, and recharge between the two. Still
+nothing to do with WazzOCR.
 
 You will also need account codes that exist in **both** organisations
 (`Account codes` in the Recharge tab). Xero rejects the line otherwise, and the
 reason is shown on the recharge.
 
-## 6. Turning it into production
+## 6. Stage 2 — switching to WazzOCR's grant
 
-When the demo run is clean:
+Only once everything above is proven.
 
-1. `XERO_TENANT_ALLOWLIST=` — empty, or list the organisations you actually want
-   writable.
+1. Add the cross-database grants:
+   ```sql
+   GRANT SELECT, UPDATE ON `wazzocr`.`xero_grants`       TO '<user>'@'%';
+   GRANT SELECT          ON `wazzocr`.`xero_connections` TO '<user>'@'%';
+   ```
+2. Set the WazzOCR account id: `UPDATE accounts SET wazzocr_account_id = <id>;`
+3. In `.env`:
+   ```bash
+   XERO_GRANT_SOURCE=wazzocr
+   WAZZOCR_DB_NAME=wazzocr
+   APP_ENCRYPTION_KEY=<WazzOCR's, copied>
+   XERO_CLIENT_ID=<WazzOCR's>
+   XERO_CLIENT_SECRET=<WazzOCR's>
+   XERO_TENANT_ALLOWLIST=<start restrictive>
+   ```
+4. `node scripts/preflight.js` — now checking the GRANTs and that the key
+   decrypts WazzOCR's token.
+5. `npm run sync`, then `npm run entities list`. **This is where the 41 real
+   organisations appear.** Fence off what you are not ready for:
+   ```bash
+   npm run entities only DEMO
+   ```
+   and paste the allowlist line it prints into `.env`, then restart. The boot log
+   must say:
+   ```
+   [xero] XERO_TENANT_ALLOWLIST is set — writes are limited to 1 organisation(s).
+   ```
+6. **Check the guard before trusting it.** Temporarily include a live
+   organisation, try to submit one of its bills, and confirm you get *"This
+   deployment may not write to Xero organisation …"*. Then exclude it again.
+
+The Xero app from stage 1 can be left alone; it simply stops being used. Revoke
+its connection in Xero if you want it gone.
+
+## 7. Turning it into production
+
+1. Widen or empty `XERO_TENANT_ALLOWLIST`.
 2. `npm run entities include …` for the real organisations.
 3. Point at the production `billhub` database.
 4. `AUTH_DISABLED=false`, and create the real logins.
@@ -187,7 +222,8 @@ When the demo run is clean:
 | Symptom | Where to look |
 | --- | --- |
 | `403 … may not write to Xero organisation` | The allowlist is doing its job. Add the tenant id, or you meant a different organisation. |
-| `Could not decrypt WazzOCR's Xero refresh token` | `APP_ENCRYPTION_KEY` was generated instead of copied. |
+| `Could not decrypt … refresh token` | In `wazzocr` mode, `APP_ENCRYPTION_KEY` was generated instead of copied from WazzOCR. In `own` mode, it changed since you connected — reconnect. |
+| `cannot start its own` consent | You are in `wazzocr` mode. That is deliberate; switch to `own` or connect in WazzOCR. |
 | `wazzocrGrantStore: unreadable` in `/api/health` | The cross-database GRANT is missing. |
 | Organisations missing after a sync | `GET /api/bills/entities?all=true` — they may be excluded. |
 | `invalid_grant` now and then | Bills Hub and WazzOCR refreshed the shared token at the same moment; it self-heals. See the README. |

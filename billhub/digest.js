@@ -5,6 +5,7 @@
 // sees the group. The numbers come from the same queries the Bills screen uses,
 // so a digest can never disagree with the hub.
 const db = require('../db');
+const grantSource = require('../lib/grantSource');
 const digestModel = require('../models/digest');
 const entities = require('../models/entities');
 const accounts = require('../models/accounts');
@@ -115,7 +116,7 @@ function buildMessage({ settings, summary, accountName, entityCount, currency = 
 async function previewFor(accountId, recipient = null, { now = new Date() } = {}) {
   const settings = await digestModel.getSettings(accountId);
   const account = await accounts.getById(accountId);
-  const wazzocrAccountId = await accounts.wazzocrIdFor(accountId).catch(() => null);
+  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId).catch(() => null);
   const allEntities = wazzocrAccountId
     ? await entities.listByAccount(accountId, wazzocrAccountId)
     : [];

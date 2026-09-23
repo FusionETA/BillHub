@@ -742,12 +742,18 @@
         {notConnected
           ? <Placeholder
               tone={xero && xero.error ? 'error' : undefined}
-              title={xero && xero.error ? 'Xero is not reachable' : 'Connect Xero in WazzOCR'}
+              title={xero && xero.error ? 'Xero is not reachable'
+                : xero && xero.canConnectHere ? 'Connect Xero to load your bills'
+                : 'Connect Xero in WazzOCR'}
               message={(xero && xero.error)
-                || 'Bills Hub reads the Xero connection WazzOCR already holds, so there is nothing to authorise here — connecting again would sign WazzOCR out of Xero. Connect it there and the organisations appear straight away.'}
-              action={xero && xero.manageAt
-                ? <Button variant="primary" size="md" onClick={() => window.open(xero.manageAt, '_blank', 'noreferrer')}>Open WazzOCR</Button>
-                : null} />
+                || (xero && xero.canConnectHere
+                  ? 'One sign-in covers every organisation this Xero login has authorised for the app — you do not connect them one at a time.'
+                  : 'Bills Hub reads the Xero connection WazzOCR already holds, so there is nothing to authorise here — connecting again would sign WazzOCR out of Xero. Connect it there and the organisations appear straight away.')}
+              action={xero && xero.canConnectHere
+                ? <Button variant="primary" size="md" onClick={() => { window.location.href = '/api/xero/connect'; }}>Connect Xero</Button>
+                : xero && xero.manageAt
+                  ? <Button variant="primary" size="md" onClick={() => window.open(xero.manageAt, '_blank', 'noreferrer')}>Open WazzOCR</Button>
+                  : null} />
           : <React.Fragment>
 
         <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}>
@@ -1883,8 +1889,11 @@
       const orgCount = xero ? xero.count || 0 : null;
       const connected = xero ? xero.connected : true;
       const needsReconnect = (xero && xero.needsReconnect) || 0;
-      // Connecting happens in WazzOCR — Bills Hub borrows its Xero grant.
+      // Where the badge sends people: this app's own consent when it owns the
+      // grant, or WazzOCR when it is borrowing one.
       const manageAt = (xero && xero.manageAt) || null;
+      const canConnectHere = Boolean(xero && xero.canConnectHere);
+      const xeroHref = manageAt || (canConnectHere && !connected ? '/api/xero/connect' : null);
       const xeroProblem = (xero && xero.error) || null;
       const openAccess = Boolean(me && me.authDisabled);
 
@@ -1896,11 +1905,11 @@
           <span style={{ whiteSpace: 'nowrap', fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--orange-400)' }}>{(me && me.account && me.account.name) || ''}</span>
           <span style={{ flex: 1 }} />
           <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
-          <a href={manageAt || undefined} target={manageAt ? '_blank' : undefined} rel="noreferrer"
-            title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting in WazzOCR' : 'Xero is connected through WazzOCR')}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', cursor: manageAt ? 'pointer' : 'default' }}>
+          <a href={xeroHref || undefined} target={manageAt ? '_blank' : undefined} rel="noreferrer"
+            title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting' : connected ? 'Xero is connected' : 'Connect Xero')}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', cursor: xeroHref ? 'pointer' : 'default' }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: needsReconnect ? 'var(--amber-500)' : connected ? 'var(--green-500)' : 'var(--red-500)' }} />
-            <span>{orgCount === null ? 'Checking Xero…' : connected ? orgCount + ' Xero ' + (orgCount === 1 ? 'entity' : 'entities') + ' connected' : 'Xero not connected'}</span>
+            <span>{orgCount === null ? 'Checking Xero…' : connected ? orgCount + ' Xero ' + (orgCount === 1 ? 'entity' : 'entities') + ' connected' : 'Connect Xero'}</span>
           </a>
           {!openAccess && <div title={me && me.user ? me.user.email : ''} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700 }}>{(me && me.user && me.user.initials) || '–'}</div>}
         </header>

@@ -10,6 +10,7 @@
 //   POST /api/bills/sync            -> pull from Xero now
 //   GET  /api/bills/sync/status     -> per-org sync state
 const express = require('express');
+const grantSource = require('../lib/grantSource');
 const router = express.Router();
 
 const bills = require('../models/bills');
@@ -61,7 +62,7 @@ router.get('/', async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
 
-    const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+    const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
     const [rows, meta, counts, stats, entityRows, lastSynced] = await Promise.all([
       bills.list(accountId, wazzocrAccountId, filters, { limit, offset }),
       bills.listMeta(accountId, filters),
@@ -102,7 +103,7 @@ router.patch('/entities/:tenantId', async (req, res) => {
   try {
     const n = await entities.update(accountId, req.params.tenantId, req.body || {});
     if (!n) return res.status(404).json({ error: 'That organisation is not in Bills Hub.' });
-    const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+    const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
     const all = await entities.listByAccount(accountId, wazzocrAccountId, { includedOnly: false });
     const row = all.find((e) => e.xero_tenant_id === req.params.tenantId);
     res.json({
@@ -121,7 +122,7 @@ router.get('/entities', async (req, res) => {
   try {
     // ?all=true also returns the organisations that have been excluded, so an
     // admin screen can show what is being left out.
-    const rows = await entities.listByAccount(accountId, await accounts.wazzocrIdFor(accountId),
+    const rows = await entities.listByAccount(accountId, await grantSource.connectionsAccountId(accountId),
       { includedOnly: req.query.all !== 'true' });
     res.json({
       entities: rows.map((e) => ({

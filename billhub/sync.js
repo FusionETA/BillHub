@@ -10,6 +10,7 @@
 //   await sync.syncAccount(accountId, { full: true });
 
 const xero = require('../lib/xero');
+const grantSource = require('../lib/grantSource');
 const entities = require('../models/entities');
 const bills = require('../models/bills');
 const syncState = require('../models/syncState');
@@ -108,7 +109,7 @@ function parseXeroDate(v) {
 
 // Sync every connected org for an account, a few at a time.
 async function syncAccount(accountId, { full = false, tenantIds = null } = {}) {
-  const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   let targets = await entities.listSyncable(accountId, wazzocrAccountId);
   if (tenantIds && tenantIds.length) {
     const want = new Set(tenantIds);

@@ -5,7 +5,7 @@
 // seeded from the tenant name on first sync and are editable afterwards, so a
 // re-sync never overwrites a code someone has corrected by hand.
 const db = require('../db');
-const { CONNECTIONS } = require('../lib/wazzocrDb');
+const { CONNECTIONS } = require('../lib/grantSource');
 
 // Legal-form suffixes stripped before deriving a code. Longest first so
 // "Sdn Bhd" wins over "Bhd".
