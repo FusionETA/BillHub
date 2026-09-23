@@ -134,6 +134,12 @@ function check(name, ok, detail) {
   check('the WazzOCR fixture schema is untouched by own mode',
     Number(wazzocrRows[0].n) === 2 || Number(wazzocrRows[0].n) === 0, wazzocrRows[0].n);
 
+  // Leave nothing behind: in own mode these are the very tables the running app
+  // reads, so a stray row looks like a real Xero connection.
+  await db.execute("DELETE FROM entities WHERE xero_tenant_id = 'demo-tenant-1'");
+  await db.execute("DELETE FROM xero_connections WHERE xero_tenant_id = 'demo-tenant-1'");
+  await db.execute('DELETE FROM xero_grants WHERE account_id = 1');
+
   global.fetch = realFetch;
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();

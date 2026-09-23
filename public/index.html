@@ -1893,7 +1893,10 @@
       // grant, or WazzOCR when it is borrowing one.
       const manageAt = (xero && xero.manageAt) || null;
       const canConnectHere = Boolean(xero && xero.canConnectHere);
-      const xeroHref = manageAt || (canConnectHere && !connected ? '/api/xero/connect' : null);
+      // In own mode the badge always reaches the consent: reconnecting is how you
+      // add another organisation, so hiding it once connected leaves no route to
+      // that at all.
+      const xeroHref = manageAt || (canConnectHere ? '/api/xero/connect' : null);
       const xeroProblem = (xero && xero.error) || null;
       const openAccess = Boolean(me && me.authDisabled);
 
@@ -1906,10 +1909,14 @@
           <span style={{ flex: 1 }} />
           <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
           <a href={xeroHref || undefined} target={manageAt ? '_blank' : undefined} rel="noreferrer"
-            title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting' : connected ? 'Xero is connected' : 'Connect Xero')}
+            title={xeroProblem
+              || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting'
+                : canConnectHere ? (connected ? 'Connected. Click to add another organisation or reconnect.' : 'Connect Xero')
+                : 'Xero is connected through WazzOCR')}
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', cursor: xeroHref ? 'pointer' : 'default' }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: needsReconnect ? 'var(--amber-500)' : connected ? 'var(--green-500)' : 'var(--red-500)' }} />
             <span>{orgCount === null ? 'Checking Xero…' : connected ? orgCount + ' Xero ' + (orgCount === 1 ? 'entity' : 'entities') + ' connected' : 'Connect Xero'}</span>
+            {canConnectHere && connected && <span style={{ opacity: .55, fontSize: 11 }}>· add</span>}
           </a>
           {!openAccess && <div title={me && me.user ? me.user.email : ''} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700 }}>{(me && me.user && me.user.initials) || '–'}</div>}
         </header>
