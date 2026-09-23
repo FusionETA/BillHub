@@ -396,7 +396,7 @@
     // Pay a selection of approved bills. Everything shown here comes from
     // /api/payments/preview, which runs the same checks the real create does —
     // so what the dialog says is what will happen, including the refusals.
-    function PayDialog({ open, bills, onClose, onDone, onToast }) {
+    function PayDialog({ open, bills, currency = '', onClose, onDone, onToast }) {
       const [bankAccounts, setBankAccounts] = useState([]);
       const [bankAccountId, setBankAccountId] = useState('');
       const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -461,10 +461,13 @@
 
       const total = bills.reduce((s, b) => s + Number(b.amountDue || 0), 0);
       const fmtTotal = total.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      // The preview knows the paying account's currency; fall back to whatever
+      // the Bills screen is showing until it arrives.
+      const cur = (preview && preview.currency) || currency;
       const canSubmit = Boolean(preview) && !checking && !busy;
 
       return <Dialog open={open} onClose={onClose} title="Pay bills"
-        description={bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' · RM ' + fmtTotal} size="md">
+        description={bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' · ' + (cur ? cur + ' ' : '') + fmtTotal} size="md">
         {!oneOrg
           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ background: 'var(--red-100)', borderRadius: 10, padding: '14px 16px', fontSize: 13.5, color: '#8d1f17', lineHeight: 1.6 }}>
@@ -484,12 +487,12 @@
             {preview && <React.Fragment>
               {preview.warnings.map((w, i) => (
                 <div key={i} style={{ gridColumn: '1 / -1', background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#6b4d00', lineHeight: 1.6 }}>
-                  {w} Those lines will be blank and the bank will reject them.
+                  {w} Those lines would be blank, and the bank will reject them.
                 </div>
               ))}
 
               <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '14px 16px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7 }}>
-                <div><strong style={{ color: 'var(--text-heading)' }}>{preview.reference}</strong> · {preview.lineCount} payment{preview.lineCount === 1 ? '' : 's'} · RM {preview.total}</div>
+                <div><strong style={{ color: 'var(--text-heading)' }}>{preview.reference}</strong> · {preview.lineCount} payment{preview.lineCount === 1 ? '' : 's'} · {preview.currency} {preview.total}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{preview.fileName}</span>
                   <span style={{ color: 'var(--text-subtle)' }}>·</span>
@@ -865,7 +868,7 @@
           <button onClick={() => setSelected([])} aria-label="Clear selection" style={{ border: 'none', background: 'none', color: 'rgba(255,255,255,.75)', cursor: 'pointer', padding: 6, display: 'flex' }}><Icon name="x" size={16} /></button>
         </div>}
 
-        <PayDialog open={payFor.length > 0} bills={payFor} onToast={onToast}
+        <PayDialog open={payFor.length > 0} bills={payFor} currency={(data && data.currency) || ''} onToast={onToast}
           onClose={() => setPayFor([])}
           onDone={() => { setPayFor([]); setSelected([]); reload(); if (onPaid) onPaid(); }} />
 
@@ -1731,7 +1734,7 @@
             <div style={{ minWidth: 0 }}>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 4 }}>Message preview</div>
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                {data.previewSummary.count} draft{data.previewSummary.count === 1 ? '' : 's'} · RM {data.previewSummary.total} group-wide. This is the real message, built from the same figures as the Bills screen.
+                {data.previewSummary.count} draft{data.previewSummary.count === 1 ? '' : 's'} · {data.previewSummary.currency} {data.previewSummary.total} group-wide. This is the real message, built from the same figures as the Bills screen.
               </div>
             </div>
             <span style={{ flex: 1 }} />

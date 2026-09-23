@@ -190,7 +190,7 @@ router.post('/preview', async (req, res) => {
       reference: await batches.nextReference(accountId),
       bankAccount: vm.bankAccountRow(plan.bank),
       paymentDate: plan.paymentDate,
-      currency: plan.currencyCode,
+      currency: plan.currencyCode || '',
       total: vm.money(plan.total),
       lineCount: plan.lines.length,
       warnings: plan.warnings,

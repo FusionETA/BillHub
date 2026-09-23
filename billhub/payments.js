@@ -181,7 +181,7 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
     currencyCode: bankCurrency,
     paymentDate: paymentDate || new Date().toISOString().slice(0, 10),
     warnings: withoutAccount.length
-      ? [`${withoutAccount.length} payee(s) have no bank account number: ${withoutAccount.slice(0, 5).map((l) => l.contactName).join(', ')}${withoutAccount.length > 5 ? '…' : ''}`]
+      ? [`${withoutAccount.length} payee(s) have no bank account number: ${withoutAccount.slice(0, 5).map((l) => l.contactName).join(', ')}${withoutAccount.length > 5 ? '…' : ''}.`]
       : [],
     missingPayeeAccounts: withoutAccount.map((l) => ({ contactId: l.contactId, contactName: l.contactName }))
   };

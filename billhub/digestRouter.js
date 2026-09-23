@@ -64,7 +64,8 @@ router.get('/', async (req, res) => {
       previewSummary: {
         count: preview.summary.count,
         total: vm.money(preview.summary.total),
-        entities: preview.summary.entities
+        entities: preview.summary.entities,
+        currency: req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM')
       },
       nextRun: vm.nextRunLabel(settings),
       runs: runs.map(vm.digestRunRow),
