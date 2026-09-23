@@ -337,9 +337,13 @@
     }
     function Switch({ checked, label, onChange }) {
       const fire = onChange ? (e) => { e.stopPropagation(); onChange(!checked); } : undefined;
+      // display:inline-block matters — a bare <span> is inline, so width and
+      // height are ignored and the track collapses to nothing, leaving the knob
+      // floating on its own. It only looked right where a flex parent happened
+      // to blockify it.
       const sw = <span onClick={label ? undefined : fire}
         role={onChange ? 'switch' : undefined} aria-checked={onChange ? Boolean(checked) : undefined}
-        style={{ width: 42, height: 24, borderRadius: 999, background: checked ? 'var(--color-primary)' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', cursor: 'pointer', transition: 'background var(--dur-fast)' }}>
+        style={{ display: 'inline-block', width: 42, height: 24, borderRadius: 999, background: checked ? 'var(--color-primary)' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', cursor: 'pointer', transition: 'background var(--dur-fast)', verticalAlign: 'middle' }}>
         <span style={{ position: 'absolute', top: 2, left: checked ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: 'var(--shadow-sm)', transition: 'left var(--dur-fast) var(--ease-out)' }} />
       </span>;
       if (!label) return sw;
