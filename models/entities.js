@@ -40,32 +40,32 @@ function codeFrom(tenantName) {
 
 // The two id spaces meet on the Xero tenant id: `entities` is keyed by the Bills
 // Hub account, `xero_connections` by the WazzOCR one, so both are passed in.
-function listByAccount(accountId, wazzocrAccountId, { includedOnly = true } = {}) {
+function listByAccount(accountId, connAccountId, { includedOnly = true } = {}) {
   return db.query(
     `SELECT e.id, e.xero_tenant_id, e.code, e.short_name, e.position, e.included,
-            c.tenant_name, c.status, c.needs_reconnect
+            e.base_currency, c.tenant_name, c.status, c.needs_reconnect
        FROM entities e
        JOIN ${CONNECTIONS} c
          ON c.account_id = ? AND c.xero_tenant_id = e.xero_tenant_id
       WHERE e.account_id = ? ${includedOnly ? 'AND e.included = 1' : ''}
         AND c.status = 'active'
       ORDER BY e.position, e.short_name`,
-    [wazzocrAccountId, accountId]
+    [connAccountId, accountId]
   );
 }
 
 // Organisations Bills Hub should sync: everything WazzOCR has connected, minus
 // any the user has excluded here.
-function listSyncable(accountId, wazzocrAccountId) {
+function listSyncable(accountId, connAccountId) {
   return db.query(
-    `SELECT c.xero_tenant_id, c.tenant_name, e.code, e.short_name
+    `SELECT c.xero_tenant_id, c.tenant_name, e.code, e.short_name, e.base_currency
        FROM ${CONNECTIONS} c
        LEFT JOIN entities e
          ON e.account_id = ? AND e.xero_tenant_id = c.xero_tenant_id
       WHERE c.account_id = ? AND c.status = 'active'
         AND (e.included IS NULL OR e.included = 1)
       ORDER BY e.position, c.tenant_name`,
-    [accountId, wazzocrAccountId]
+    [accountId, connAccountId]
   );
 }
 
@@ -106,6 +106,35 @@ async function ensure(accountId, tenantId, tenantName) {
   return { code, shortName };
 }
 
+async function setBaseCurrency(accountId, tenantId, currency) {
+  if (!currency) return 0;
+  const res = await db.execute(
+    'UPDATE entities SET base_currency = ? WHERE account_id = ? AND xero_tenant_id = ?',
+    [String(currency).toUpperCase().slice(0, 8), accountId, tenantId]
+  );
+  return res.affectedRows;
+}
+
+// What to label figures with.
+//
+// Each organisation has its own base currency, so a group spanning two of them
+// has no single right answer — totals across them would be adding MYR to USD.
+// When they disagree, `currency` comes back empty and `mixed` lists what is
+// actually there, so the UI can say so instead of printing one symbol over a
+// meaningless number.
+const SYMBOLS = { MYR: 'RM' };
+
+async function currencyFor(accountId, connAccountId) {
+  const rows = await listByAccount(accountId, connAccountId);
+  const found = [...new Set(rows.map((r) => r.base_currency).filter(Boolean))];
+  if (found.length === 1) {
+    return { code: found[0], symbol: SYMBOLS[found[0]] || found[0], mixed: null };
+  }
+  if (found.length > 1) return { code: null, symbol: '', mixed: found.sort() };
+  // Nothing synced yet, or an older row with no currency recorded.
+  return { code: null, symbol: '', mixed: null };
+}
+
 async function update(accountId, tenantId, { code, shortName, included, position } = {}) {
   const sets = [];
   const params = [];
@@ -133,4 +162,7 @@ async function map(accountId) {
   return out;
 }
 
-module.exports = { listByAccount, listSyncable, ensure, update, map, codeFrom, shortNameFrom };
+module.exports = {
+  listByAccount, listSyncable, ensure, update, map, codeFrom, shortNameFrom,
+  setBaseCurrency, currencyFor, SYMBOLS
+};

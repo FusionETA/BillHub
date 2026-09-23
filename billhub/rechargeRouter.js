@@ -14,6 +14,8 @@ const router = express.Router();
 
 const recharge = require('./recharge');
 const model = require('../models/recharge');
+const entities = require('../models/entities');
+const grantSource = require('../lib/grantSource');
 const vm = require('./viewModel');
 const { attachUser, requireAuth } = require('../auth/middleware');
 
@@ -23,6 +25,13 @@ function needAccount(req, res) {
   if (!req.user.account_id) { res.status(400).json({ error: 'This user has no account.' }); return null; }
   return req.user.account_id;
 }
+// The label for money on screen: the organisations' own base currency, or
+// nothing at all when they disagree — see models/entities.currencyFor.
+async function currencyFor(req) {
+  const connAccountId = await grantSource.connectionsAccountId(req.user.account_id);
+  return entities.currencyFor(req.user.account_id, connAccountId);
+}
+
 function fail(res, err, fallback = 500) {
   const xeroAuth = err.statusCode === 401;
   res.status(xeroAuth ? 424 : (err.statusCode || fallback))
@@ -32,7 +41,8 @@ function fail(res, err, fallback = 500) {
 router.get('/', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const currency = req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM');
+    const cur = await currencyFor(req);
+    const currency = cur.symbol;
     const [runs, rules, stats, settings] = await Promise.all([
       model.listRuns(accountId, { status: req.query.status || null }),
       model.listRules(accountId),
@@ -63,7 +73,8 @@ router.get('/', async (req, res) => {
 router.get('/suggestions', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const currency = req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM');
+    const cur = await currencyFor(req);
+    const currency = cur.symbol;
     const out = await recharge.suggestions(accountId, { limit: Math.min(Number(req.query.limit) || 50, 200) });
     res.json({ suggestions: out.map((p) => vm.rechargeSuggestion(p, currency)) });
   } catch (err) { fail(res, err); }
@@ -117,7 +128,8 @@ router.delete('/rules/:id(\\d+)', async (req, res) => {
 router.post('/plan', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const currency = req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM');
+    const cur = await currencyFor(req);
+    const currency = cur.symbol;
     const plan = await recharge.planRun(accountId, req.body || {});
     res.json({
       bill: {

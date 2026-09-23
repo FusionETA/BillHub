@@ -76,6 +76,7 @@ const requests = [];
       err.statusCode = 401;
       throw err;
     }
+    if (path === '/Organisation') return { Organisations: [{ BaseCurrency: 'MYR' }] };
     const page = Number(new URL('http://x' + path).searchParams.get('page'));
     if (tenantId === 'synctB') return { Invoices: [] };
     if (page === 1) return { Invoices: Array.from({ length: 100 }, (_, i) => invoice(i, tenantId, '2026-09-01T00:00:00Z')) };
@@ -89,11 +90,13 @@ const requests = [];
   check('all three organisations were attempted', r1.tenants === 3, r1.tenants);
   check('250 bills pulled across 3 pages', r1.upserted === 250, r1.upserted);
   check('one organisation failed without stopping the others', r1.failed === 1, r1.failed);
+  const pagesFor = (t) => requests.filter(r => r.tenantId === t && String(r.path || '').startsWith('/Invoices'));
   check('the first run sends no If-Modified-Since',
-    requests.filter(r => r.tenantId === 'synctA').every(r => r.ifModifiedSince === null));
-  check('it stopped after the short final page',
-    requests.filter(r => r.tenantId === 'synctA').length === 3,
-    requests.filter(r => r.tenantId === 'synctA').length);
+    pagesFor('synctA').every(r => r.ifModifiedSince === null));
+  check('it stopped after the short final page', pagesFor('synctA').length === 3, pagesFor('synctA').length);
+  check('and it asked Xero for the organisation\'s base currency',
+    requests.some(r => r.tenantId === 'synctA' && r.path === '/Organisation'),
+    requests.map(r => r.path));
 
   const stored = await db.getOne("SELECT COUNT(*) AS n FROM bills WHERE xero_tenant_id = 'synctA'");
   check('bills are stored', Number(stored.n) === 250, stored.n);
@@ -113,21 +116,25 @@ const requests = [];
   const connC = await db.getOne(`SELECT needs_reconnect, status FROM ${CONNECTIONS} WHERE xero_tenant_id = 'synctC'`);
   check('a failing org is not mutated in WazzOCR', connC.needs_reconnect === 0 && connC.status === 'active', connC);
 
-  const entA = await db.getOne("SELECT code, short_name FROM entities WHERE xero_tenant_id = 'synctA'");
+  const entA = await db.getOne("SELECT code, short_name, base_currency FROM entities WHERE xero_tenant_id = 'synctA'");
   check('sync seeds the entity code', entA.code === 'SOA' && entA.short_name === 'Sync Org A', entA);
+  check('and records the organisation\'s base currency', entA.base_currency === 'MYR', entA.base_currency);
 
   console.log('\nSecond run (incremental)');
   requests.length = 0;
   let served304 = false;
   xero.api = async (accountId, tenantId, path, opts = {}) => {
-    requests.push({ tenantId, ifModifiedSince: (opts.headers || {})['If-Modified-Since'] || null });
+    requests.push({ tenantId, path, ifModifiedSince: (opts.headers || {})['If-Modified-Since'] || null });
     served304 = true;
     return null; // Xero 304: nothing changed
   };
   const r2 = await sync.syncAccount(ACCOUNT, { tenantIds: ['synctA'] });
-  check('the second run sends If-Modified-Since', requests[0].ifModifiedSince !== null, requests[0]);
+  const firstPage = requests.find(r => String(r.path || '').startsWith('/Invoices'));
+  check('the second run sends If-Modified-Since', firstPage.ifModifiedSince !== null, firstPage);
   check('the cursor is rewound a minute to avoid dropping same-second updates',
-    requests[0].ifModifiedSince === '2026-09-03T12:33:56', requests[0].ifModifiedSince);
+    firstPage.ifModifiedSince === '2026-09-03T12:33:56', firstPage.ifModifiedSince);
+  check('and it does not re-ask for a currency it already knows',
+    !requests.some(r => r.path === '/Organisation'), requests.map(r => r.path));
   check('a 304 upserts nothing', served304 && r2.upserted === 0, r2.upserted);
 
   const stateA2 = await syncState.get(ACCOUNT, 'synctA');
@@ -137,11 +144,13 @@ const requests = [];
   console.log('\nThird run (full rebuild)');
   requests.length = 0;
   xero.api = async (accountId, tenantId, path, opts = {}) => {
-    requests.push({ tenantId, ifModifiedSince: (opts.headers || {})['If-Modified-Since'] || null });
+    requests.push({ tenantId, path, ifModifiedSince: (opts.headers || {})['If-Modified-Since'] || null });
+    if (path === '/Organisation') return { Organisations: [{ BaseCurrency: 'MYR' }] };
     return { Invoices: [invoice(0, tenantId, '2026-09-05T00:00:00Z')] };
   };
   await sync.syncAccount(ACCOUNT, { tenantIds: ['synctA'], full: true });
-  check('a full run ignores the cursor', requests[0].ifModifiedSince === null, requests[0]);
+  const fullFirst = requests.find(r => String(r.path || '').startsWith('/Invoices'));
+  check('a full run ignores the cursor', fullFirst.ifModifiedSince === null, fullFirst);
 
   const dupes = await db.getOne("SELECT COUNT(*) AS n FROM bills WHERE xero_tenant_id = 'synctA'");
   check('re-syncing the same invoice updates rather than duplicates', Number(dupes.n) === 250, dupes.n);

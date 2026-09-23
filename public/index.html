@@ -767,6 +767,10 @@
           <Tabs tabs={(data && data.statusTabs) || []} value={tab} onChange={setTab} variant="line" />
         </div>
 
+        {data && data.currencyNote && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--amber-500)', borderRadius: 10, padding: '14px 18px', marginBottom: 16, fontSize: 14, color: 'var(--text-body)' }}>
+          {data.currencyNote}
+        </div>}
+
         {data && data.hasBanner && <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--color-primary)', borderRadius: 10, padding: '14px 18px', marginBottom: 20 }}>
           <div style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}>
             <strong style={{ color: 'var(--text-heading)' }}>{data.bannerHead}</strong> {data.bannerTail}

@@ -21,6 +21,8 @@ const batches = require('../models/batches');
 const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
+const entities = require('../models/entities');
+const grantSource = require('../lib/grantSource');
 const vm = require('./viewModel');
 const { attachUser, requireAuth } = require('../auth/middleware');
 
@@ -32,6 +34,13 @@ function needAccount(req, res) {
 }
 
 // Same split as the bills router: a Xero auth problem is not a lost session.
+// The label for money on screen: the organisations' own base currency, or
+// nothing at all when they disagree — see models/entities.currencyFor.
+async function currencyFor(req) {
+  const connAccountId = await grantSource.connectionsAccountId(req.user.account_id);
+  return entities.currencyFor(req.user.account_id, connAccountId);
+}
+
 function fail(res, err, fallback = 500) {
   const xeroAuth = err.statusCode === 401;
   res.status(xeroAuth ? 424 : (err.statusCode || fallback))
@@ -43,7 +52,8 @@ function fail(res, err, fallback = 500) {
 router.get('/', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const currency = req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM');
+    const cur = await currencyFor(req);
+    const currency = cur.symbol;
     const [batchRows, stats, bankSummary, payeeSummary] = await Promise.all([
       batches.list(accountId, { status: req.query.status || null, limit: 100 }),
       batches.summary(accountId),
@@ -219,7 +229,8 @@ router.get('/batches/:id(\\d+)', async (req, res) => {
   try {
     const batch = await batches.getById(accountId, Number(req.params.id));
     if (!batch) return res.status(404).json({ error: 'Batch not found.' });
-    const currency = req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM');
+    const cur = await currencyFor(req);
+    const currency = cur.symbol;
     res.json({ batch: vm.batchCard(batch, await batches.lines(batch.id), currency) });
   } catch (err) { fail(res, err); }
 });

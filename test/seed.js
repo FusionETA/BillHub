@@ -137,6 +137,8 @@ async function seed({ quiet = false } = {}) {
       [CONN_ACCOUNT, grantId, tenantId, tenantName]
     );
     const e = await entities.ensure(ACCOUNT, tenantId, tenantName);
+    // A real sync reads this from Xero's Organisation endpoint.
+    await entities.setBaseCurrency(ACCOUNT, tenantId, 'MYR');
     log(`  ${e.code.padEnd(6)} ${e.shortName}`);
   }
 

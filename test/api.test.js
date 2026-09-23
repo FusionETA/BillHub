@@ -144,6 +144,31 @@ function check(name, ok, detail) {
   const noCookie = await req('GET', '/api/bills');
   check('no session is a 401', noCookie.status === 401, noCookie.status);
 
+  console.log('\nCurrency follows the organisations, not a setting');
+  const entitiesModel = require('../models/entities');
+  const gs = require('../lib/grantSource');
+  const connAcct = await gs.connectionsAccountId(1);
+
+  await db.execute("UPDATE entities SET base_currency = 'MYR' WHERE account_id = 1");
+  const myr = await req('GET', '/api/bills', { cookie });
+  check('a Malaysian organisation is labelled RM', myr.body.currency === 'RM', myr.body.currency);
+  check('and every figure carries it', myr.body.stats.every(c => c.amount.startsWith('RM ')), myr.body.stats.map(c => c.amount));
+  check('with no caution needed', myr.body.currencyNote === null);
+
+  await db.execute("UPDATE entities SET base_currency = 'USD' WHERE account_id = 1 AND xero_tenant_id = 'tenant-abkk'");
+  const mixed = await req('GET', '/api/bills', { cookie });
+  check('organisations in two currencies print no symbol at all',
+    mixed.body.currency === '' && mixed.body.stats.every(c => !/^[A-Z]/.test(c.amount)), mixed.body.stats.map(c => c.amount));
+  check('and the mismatch is stated rather than hidden',
+    /MYR and USD/.test(mixed.body.currencyNote || ''), mixed.body.currencyNote);
+
+  await db.execute("UPDATE entities SET base_currency = NULL WHERE account_id = 1");
+  const unknown = await req('GET', '/api/bills', { cookie });
+  check('an unsynced organisation claims no currency', unknown.body.currency === '' && unknown.body.currencyNote === null);
+  await db.execute("UPDATE entities SET base_currency = 'MYR' WHERE account_id = 1");
+
+  check('the resolver agrees', (await entitiesModel.currencyFor(1, connAcct)).symbol === 'RM');
+
   console.log('\nShared Xero grant');
   const status = await req('GET', '/api/xero/status', { cookie });
   check('status reports the borrowed grant', status.body.connected === true && status.body.count === 5, status.body);

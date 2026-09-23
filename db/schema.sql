@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS entities (
   short_name     VARCHAR(255) NOT NULL,
   position       INT DEFAULT 0,
   included       TINYINT(1) NOT NULL DEFAULT 1,   -- 0 = hide from Bills Hub
+  -- The organisation's own base currency, read from Xero. What the UI labels
+  -- figures with; NULL until the first sync has asked.
+  base_currency  VARCHAR(8) NULL,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_ent_tenant (account_id, xero_tenant_id),

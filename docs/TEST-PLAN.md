@@ -24,12 +24,10 @@ npm run db:migrate:test    # once, to create the suite's database
 npm test                   # never touches your working data
 ```
 
-**Check the currency.** The Demo Company (Global) reports in USD, not MYR. If
-the figures show the wrong symbol:
-
-```sql
-UPDATE accounts SET base_currency = 'USD' WHERE id = 1;
-```
+**Currency looks after itself.** Each organisation's base currency is read from
+Xero on the first sync, so a USD demo company shows USD and a Malaysian one
+shows RM without any configuration. Connect both and the Bills screen drops the
+symbol and warns you, rather than adding MYR to USD under one label.
 
 ---
 

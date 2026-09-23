@@ -145,6 +145,19 @@ Every variable is documented in `.env.example`. The ones that need care:
 `XERO_REDIRECT_URI` is needed in `own` mode and must match one registered on
 that Xero app. In `wazzocr` mode there is no consent, so no redirect URI.
 
+### Currency
+
+Each Xero organisation has its own base currency, read from `GET /Organisation`
+on the first sync and stored on `entities.base_currency`. The UI labels figures
+with it — `RM` for MYR, otherwise the code.
+
+When the included organisations **disagree**, no symbol is shown at all and the
+Bills screen says so, because a total that adds MYR to USD is not a number
+anyone should act on. Filter to one entity for a figure you can rely on.
+
+`accounts.base_currency` remains only as a fallback for a group with nothing
+synced yet.
+
 ### Scopes
 
 Bills Hub requests one granular scope per endpoint it calls:

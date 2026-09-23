@@ -33,11 +33,22 @@ function toXeroDateHeader(d) {
 }
 
 // Sync one organisation. Returns { tenantId, upserted, pages, skipped }.
-async function syncTenant(accountId, tenantId, tenantName, { full = false, intercoNames = new Set() } = {}) {
+async function syncTenant(accountId, tenantId, tenantName, { full = false, intercoNames = new Set(), knownCurrency = null } = {}) {
   await entities.ensure(accountId, tenantId, tenantName);
   await syncState.markRunning(accountId, tenantId);
 
   try {
+    // Each organisation has its own base currency and the UI labels figures
+    // with it. Asked once, then only on a full re-read — it changes ~never.
+    if (!knownCurrency || full) {
+      try {
+        const org = await xero.api(accountId, tenantId, '/Organisation');
+        const code = org?.Organisations?.[0]?.BaseCurrency;
+        if (code) await entities.setBaseCurrency(accountId, tenantId, code);
+      } catch (e) {
+        console.error(`[sync] could not read the base currency for ${tenantName || tenantId}: ${e.message}`);
+      }
+    }
     const state = await syncState.get(accountId, tenantId);
     // Re-read from a minute before the cursor: Xero's UpdatedDateUTC has
     // sub-second precision and If-Modified-Since is exclusive, so an exact
@@ -131,7 +142,8 @@ async function syncAccount(accountId, { full = false, tenantIds = null } = {}) {
     for (;;) {
       const t = queue.shift();
       if (!t) return;
-      results.push(await syncTenant(accountId, t.xero_tenant_id, t.tenant_name, { full, intercoNames }));
+      results.push(await syncTenant(accountId, t.xero_tenant_id, t.tenant_name,
+        { full, intercoNames, knownCurrency: t.base_currency }));
     }
   });
   await Promise.all(workers);

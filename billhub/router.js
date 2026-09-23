@@ -33,6 +33,13 @@ function needAccount(req, res) {
 // straight through would make the browser think the user had been signed out and
 // bounce them to the login page, when what they actually need is to reconnect
 // Xero. 424 keeps the two apart, and the flag tells the client which to say.
+// The label for money on screen: the organisations' own base currency, or
+// nothing at all when they disagree — see models/entities.currencyFor.
+async function currencyFor(req) {
+  const connAccountId = await grantSource.connectionsAccountId(req.user.account_id);
+  return entities.currencyFor(req.user.account_id, connAccountId);
+}
+
 function fail(res, err, fallback = 500) {
   const xeroAuth = err.statusCode === 401;
   res.status(xeroAuth ? 424 : (err.statusCode || fallback))
@@ -72,7 +79,8 @@ router.get('/', async (req, res) => {
       syncState.lastSyncedAt(accountId)
     ]);
 
-    const currency = req.account?.base_currency === 'MYR' ? 'RM' : (req.account?.base_currency || 'RM');
+    const cur = await currencyFor(req);
+    const currency = cur.symbol;
     const bannerData = vm.banner(stats, { currency });
 
     res.json({
@@ -86,6 +94,9 @@ router.get('/', async (req, res) => {
       entities: entityRows.map((e) => ({ code: e.code, short: e.short_name, tenantId: e.xero_tenant_id })),
       entityCount: entityRows.length,
       currency,
+      currencyNote: cur.mixed
+        ? `Your organisations report in ${cur.mixed.join(' and ')}. Totals below add them together — filter to one entity for a figure you can rely on.`
+        : null,
       lastSyncedAt: lastSynced,
       page: { limit, offset, total: meta.count, hasMore: offset + rows.length < meta.count }
     });

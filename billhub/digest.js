@@ -116,16 +116,17 @@ function buildMessage({ settings, summary, accountName, entityCount, currency = 
 async function previewFor(accountId, recipient = null, { now = new Date() } = {}) {
   const settings = await digestModel.getSettings(accountId);
   const account = await accounts.getById(accountId);
-  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId).catch(() => null);
-  const allEntities = wazzocrAccountId
-    ? await entities.listByAccount(accountId, wazzocrAccountId)
+  const connAccountId = await grantSource.connectionsAccountId(accountId).catch(() => null);
+  const allEntities = connAccountId
+    ? await entities.listByAccount(accountId, connAccountId)
     : [];
 
   const scoped = recipient && !recipient.all_entities;
   const tenantIds = scoped ? (recipient.entities || []).map((e) => e.tenantId) : null;
   const summary = await draftSummary(accountId, tenantIds);
 
-  const currency = account?.base_currency === 'MYR' ? 'RM' : (account?.base_currency || 'RM');
+  const cur = await entities.currencyFor(accountId, connAccountId);
+  const currency = cur.symbol || (account?.base_currency || '');
   const scopeLabel = scoped
     ? `${account?.name || 'Group'} · ${tenantIds.length} of ${allEntities.length} entities`
     : null;
