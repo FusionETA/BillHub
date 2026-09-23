@@ -74,7 +74,7 @@ public/
   index.html           The Bills Hub app (React via Babel standalone, single file)
   login.html
 scripts/               db-migrate, db-test, create-account, sync-bills,
-                       preflight, dev-local.sh
+                       entities, preflight, dev-local.sh
 test/                  api / sync / grant / openaccess tests, seed.js
 ```
 
@@ -112,6 +112,20 @@ AUTH_DISABLED=false
 
 Only expose the app on a network you control while this is on.
 
+### Keeping a deployment away from live organisations
+
+Bills Hub borrows a grant covering every connected organisation, so a test
+instance can reach all of them. Two independent guards:
+
+| Guard | Effect |
+| --- | --- |
+| `XERO_TENANT_ALLOWLIST` | Refuses every Xero **write** outside the list, before the request is built. Reads unaffected. |
+| `npm run entities only <CODE>` | Stops the other organisations being synced or shown at all. |
+
+The allowlist is the one that matters — it holds regardless of the UI or the
+database. The boot log says so when it is set. See
+[docs/TESTING-WITH-XERO.md](docs/TESTING-WITH-XERO.md).
+
 ### Environment
 
 Every variable is documented in `.env.example`. The ones that need care:
@@ -125,6 +139,8 @@ Every variable is documented in `.env.example`. The ones that need care:
 - `WAZZOCR_URL` — where the UI sends people to connect or reconnect Xero.
 - `AUTH_DISABLED` — see above. Defaults to `false`; only turn it on somewhere
   private.
+- `XERO_TENANT_ALLOWLIST` — comma-separated tenant ids. When set, Xero writes are
+  refused outside the list. Empty means no restriction.
 
 There is no `XERO_REDIRECT_URI`, because Bills Hub never starts a consent.
 
@@ -233,6 +249,10 @@ SELECT id, refresh_token FROM wazzocr.xero_grants;
 
 Then sync one organisation before all of them, so a surprise in Xero's response
 shape costs one org and not forty.
+
+For a full walkthrough of deploying and testing against the Xero Demo Company
+without any risk to the live organisations, see
+[docs/TESTING-WITH-XERO.md](docs/TESTING-WITH-XERO.md).
 
 ## The bill sync
 
@@ -470,7 +490,8 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/xero/verify` | Ask Xero which orgs the token can actually reach |
 | `GET` | `/api/xero/connect` | 409 — points at WazzOCR, never starts a consent |
 | `GET` | `/api/bills` | The whole view model: stats, tabs, rows, meta, banner |
-| `GET` | `/api/bills/entities` | Connected organisations with their short codes |
+| `GET` | `/api/bills/entities` | Connected organisations (`?all=true` includes excluded) |
+| `PATCH` | `/api/bills/entities/:tenantId` | Rename a code, or include/exclude an organisation |
 | `GET` | `/api/bills/contacts` | Distinct suppliers, for the filter |
 | `GET` | `/api/bills/:id` | One bill, with its Xero line items |
 | `POST` | `/api/bills/:id/submit` `/approve` | Push a status change to Xero |
@@ -557,6 +578,8 @@ server, no sign-in):
   refusal, both sides of the posting with their account codes and statuses
   asserted, idempotent re-posting, a half-failed line retrying only what is
   missing, settlement, rules and suggestions.
+- `safety.test.js` — the two guards: the write allowlist refusing before any
+  network call, and excluding an organisation from the sync and the lists.
 - `openaccess.test.js` — `AUTH_DISABLED`: requests work with no cookie, `/me`
   reports the mode, login is refused rather than issuing a dead session, and no
   stray user row is created.

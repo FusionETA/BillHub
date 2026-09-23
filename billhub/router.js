@@ -94,17 +94,42 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Rename an organisation's code, or take it out of Bills Hub entirely. Excluding
+// one stops it being synced and hides it everywhere — the soft counterpart to
+// XERO_TENANT_ALLOWLIST, which is the hard guard on writes.
+router.patch('/entities/:tenantId', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    const n = await entities.update(accountId, req.params.tenantId, req.body || {});
+    if (!n) return res.status(404).json({ error: 'That organisation is not in Bills Hub.' });
+    const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
+    const all = await entities.listByAccount(accountId, wazzocrAccountId, { includedOnly: false });
+    const row = all.find((e) => e.xero_tenant_id === req.params.tenantId);
+    res.json({
+      ok: true,
+      entity: row && {
+        tenantId: row.xero_tenant_id, code: row.code, short: row.short_name,
+        included: Boolean(row.included), name: row.tenant_name
+      }
+    });
+  } catch (err) { fail(res, err); }
+});
+
 // The entity list on its own, for the filter dropdown and the assign dialogs.
 router.get('/entities', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const rows = await entities.listByAccount(accountId, await accounts.wazzocrIdFor(accountId));
+    // ?all=true also returns the organisations that have been excluded, so an
+    // admin screen can show what is being left out.
+    const rows = await entities.listByAccount(accountId, await accounts.wazzocrIdFor(accountId),
+      { includedOnly: req.query.all !== 'true' });
     res.json({
       entities: rows.map((e) => ({
         tenantId: e.xero_tenant_id,
         code: e.code,
         short: e.short_name,
         name: e.tenant_name,
+        included: e.included == null ? true : Boolean(e.included),
         needsReconnect: Boolean(e.needs_reconnect)
       }))
     });

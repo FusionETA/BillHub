@@ -11,7 +11,7 @@
     "db:test": "node scripts/db-test.js",
     "create-account": "node scripts/create-account.js",
     "sync": "node scripts/sync-bills.js",
-    "test": "node test/api.test.js && node test/sync.test.js && node test/grant.test.js && node test/payments.test.js && node test/digest.test.js && node test/recharge.test.js && node test/openaccess.test.js",
+    "test": "node test/api.test.js && node test/sync.test.js && node test/grant.test.js && node test/payments.test.js && node test/digest.test.js && node test/recharge.test.js && node test/safety.test.js && node test/openaccess.test.js",
     "test:api": "node test/api.test.js",
     "test:sync": "node test/sync.test.js",
     "test:seed": "node test/seed.js",
@@ -21,7 +21,9 @@
     "preflight": "node scripts/preflight.js",
     "test:payments": "node test/payments.test.js",
     "test:digest": "node test/digest.test.js",
-    "test:recharge": "node test/recharge.test.js"
+    "test:recharge": "node test/recharge.test.js",
+    "test:safety": "node test/safety.test.js",
+    "entities": "node scripts/entities.js"
   },
   "engines": {
     "node": ">=18"
