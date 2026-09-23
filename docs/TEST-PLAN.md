@@ -35,8 +35,20 @@ UPDATE accounts SET base_currency = 'USD' WHERE id = 1;
 
 ## 1. Bills
 
-**Set up in Xero** — Business → Bills to pay → New bill. Make two or three, with
-a reference you will recognise, and leave them as drafts.
+**Set up** — either make bills by hand in Xero (Business → Bills to pay → New
+bill), or generate a spread of them:
+
+```bash
+npm run demo-bills                      # lists the organisations
+npm run demo-bills -- --tenant DCGLOBAL # creates 12 drafts
+```
+
+Twelve drafts across six suppliers, amounts from 129.95 to 7,400, and four
+already past their due date so the Overdue card has something in it. Repeat
+suppliers, so the contact filter and the recharge rules have something to match.
+
+It refuses any organisation that does not look like a demo or trial company
+unless you pass `--force` — these are real Xero documents.
 
 **Then in Bills Hub**
 

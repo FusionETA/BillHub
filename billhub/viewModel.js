@@ -93,13 +93,13 @@ function statCards(stats, currency = 'RM') {
   return [
     {
       label: 'Draft',
-      amount: money(stats.draft.amount),
+      amount: `${currency} ${money(stats.draft.amount)}`,
       sub: `${plural(stats.draft.count, 'bill')} · ${entityCount(stats.draft.entities)}`,
       color: 'var(--neutral-400)'
     },
-    { label: 'Awaiting approval', amount: money(stats.approval.amount), sub: plural(stats.approval.count, 'bill'), color: 'var(--amber-500)' },
-    { label: 'Awaiting payment',  amount: money(stats.payment.amount),  sub: plural(stats.payment.count, 'bill'),  color: 'var(--blue-500)' },
-    { label: 'Overdue',           amount: money(stats.overdue.amount),  sub: `${plural(stats.overdue.count, 'bill')} past due date`, color: 'var(--red-500)' }
+    { label: 'Awaiting approval', amount: `${currency} ${money(stats.approval.amount)}`, sub: plural(stats.approval.count, 'bill'), color: 'var(--amber-500)' },
+    { label: 'Awaiting payment',  amount: `${currency} ${money(stats.payment.amount)}`,  sub: plural(stats.payment.count, 'bill'),  color: 'var(--blue-500)' },
+    { label: 'Overdue',           amount: `${currency} ${money(stats.overdue.amount)}`,  sub: `${plural(stats.overdue.count, 'bill')} past due date`, color: 'var(--red-500)' }
   ];
 }
 

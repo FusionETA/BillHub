@@ -16,6 +16,7 @@ const router = express.Router();
 const digest = require('./digest');
 const digestModel = require('../models/digest');
 const entities = require('../models/entities');
+const grantSource = require('../lib/grantSource');
 const accounts = require('../models/accounts');
 const schedule = require('../lib/schedule');
 const vm = require('./viewModel');
@@ -45,8 +46,8 @@ router.get('/', async (req, res) => {
 
     let entityCount = 0;
     try {
-      const wazzocrAccountId = await accounts.wazzocrIdFor(accountId);
-      entityCount = (await entities.listByAccount(accountId, wazzocrAccountId)).length;
+      const connAccountId = await grantSource.connectionsAccountId(accountId);
+      entityCount = (await entities.listByAccount(accountId, connAccountId)).length;
     } catch { /* Xero not linked yet; the digest still previews as empty */ }
 
     const preview = await digest.previewFor(accountId, null);

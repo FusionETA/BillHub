@@ -26,7 +26,8 @@
     "entities": "node scripts/entities.js",
     "test:ownmode": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/ownmode.test.js",
     "db:migrate:test": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node scripts/db-migrate.js",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "demo-bills": "node scripts/demo-bills.js"
   },
   "engines": {
     "node": ">=18"
