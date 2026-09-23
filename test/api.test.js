@@ -144,6 +144,29 @@ function check(name, ok, detail) {
   const noCookie = await req('GET', '/api/bills');
   check('no session is a 401', noCookie.status === 401, noCookie.status);
 
+  console.log('\nThe organisations panel');
+  const panel = await req('GET', '/api/bills/entities?all=true', { cookie });
+  check('it lists every organisation with its own currency',
+    panel.body.entities.length === 5 && panel.body.entities.every(e => e.baseCurrency), panel.body.entities[0]);
+  check('and says where the grant comes from',
+    panel.body.grantSource === 'wazzocr' && panel.body.canConnectHere === false, panel.body.grantSource);
+  check('with the resolved currency alongside', panel.body.currency.symbol === 'RM', panel.body.currency);
+
+  const hidden = await req('PATCH', '/api/bills/entities/tenant-abkk', { cookie, body: { included: false } });
+  check('an organisation can be taken out of use from the panel',
+    hidden.status === 200 && hidden.body.entity.included === false, hidden.body);
+  const stillListed = await req('GET', '/api/bills/entities', { cookie });
+  check('and then it is not listed', stillListed.body.entities.length === 4, stillListed.body.entities.length);
+  const withAll = await req('GET', '/api/bills/entities?all=true', { cookie });
+  check('but ?all=true still shows it', withAll.body.entities.length === 5);
+
+  const renamed = await req('PATCH', '/api/bills/entities/tenant-abkk', { cookie, body: { code: 'kk2', included: true } });
+  check('a code can be renamed, and is upper-cased', renamed.body.entity.code === 'KK2', renamed.body.entity);
+  await req('PATCH', '/api/bills/entities/tenant-abkk', { cookie, body: { code: 'ABKK' } });
+
+  const noSuchOrg = await req('PATCH', '/api/bills/entities/not-a-tenant', { cookie, body: { included: false } });
+  check('an unknown organisation is a 404', noSuchOrg.status === 404, noSuchOrg.status);
+
   console.log('\nCurrency follows the organisations, not a setting');
   const entitiesModel = require('../models/entities');
   const gs = require('../lib/grantSource');

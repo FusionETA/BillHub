@@ -155,6 +155,12 @@ When the included organisations **disagree**, no symbol is shown at all and the
 Bills screen says so, because a total that adds MYR to USD is not a number
 anyone should act on. Filter to one entity for a figure you can rely on.
 
+The header badge carries the currency it settled on, and clicking it opens the
+**organisations panel**: every connected organisation, the currency each one
+reports in, whether Bills Hub is using it, and an editable short code. Switching
+one off stops it being synced and hides it everywhere — the same thing
+`npm run entities only` does from the command line.
+
 `accounts.base_currency` remains only as a fallback for a group with nothing
 synced yet.
 

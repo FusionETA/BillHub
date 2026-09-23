@@ -133,17 +133,27 @@ router.get('/entities', async (req, res) => {
   try {
     // ?all=true also returns the organisations that have been excluded, so an
     // admin screen can show what is being left out.
-    const rows = await entities.listByAccount(accountId, await grantSource.connectionsAccountId(accountId),
+    const connAccountId = await grantSource.connectionsAccountId(accountId);
+    const rows = await entities.listByAccount(accountId, connAccountId,
       { includedOnly: req.query.all !== 'true' });
+    const cur = await entities.currencyFor(accountId, connAccountId);
     res.json({
       entities: rows.map((e) => ({
         tenantId: e.xero_tenant_id,
         code: e.code,
         short: e.short_name,
         name: e.tenant_name,
+        baseCurrency: e.base_currency || null,
         included: e.included == null ? true : Boolean(e.included),
         needsReconnect: Boolean(e.needs_reconnect)
-      }))
+      })),
+      // Everything the organisations panel needs, in one call.
+      currency: { code: cur.code, symbol: cur.symbol, mixed: cur.mixed },
+      grantSource: grantSource.MODE,
+      canConnectHere: !grantSource.BORROWED,
+      manageAt: grantSource.BORROWED && process.env.WAZZOCR_URL
+        ? `${process.env.WAZZOCR_URL.replace(/\/$/, '')}/account.html`
+        : null
     });
   } catch (err) {
     fail(res, err);

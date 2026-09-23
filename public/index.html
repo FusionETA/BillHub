@@ -594,7 +594,7 @@
       </div>;
     }
 
-    function BillsView({ entities, xero, onToast, onSynced, onPaid }) {
+    function BillsView({ entities, xero, onToast, onSynced, onPaid, refreshKey = 0 }) {
       const [tab, setTab] = useState('all');
       const [filtersOpen, setFiltersOpen] = useState(false);
       const [f, setF] = useState(EMPTY_FILTERS);
@@ -635,7 +635,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [tab, entityKey, f.contact, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, nonce]);
+      }, [tab, entityKey, f.contact, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, nonce, refreshKey]);
 
       useEffect(() => {
         api.get('/api/bills/contacts').then(d => setContacts(d.contacts || [])).catch(() => {});
@@ -882,7 +882,7 @@
 
     /* ---------- Recharge view ---------- */
 
-    function RechargeView({ entities, onToast }) {
+    function RechargeView({ entities, onToast, refreshKey = 0 }) {
       const [tab, setTab] = useState('runs');
       const [data, setData] = useState(null);
       const [loading, setLoading] = useState(true);
@@ -902,7 +902,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [nonce]);
+      }, [nonce, refreshKey]);
 
       function toastError(e, title) {
         onToast({
@@ -1316,7 +1316,7 @@
       </span>;
     }
 
-    function BankView({ onToast }) {
+    function BankView({ onToast, refreshKey = 0 }) {
       const [data, setData] = useState(null);
       const [loading, setLoading] = useState(true);
       const [error, setError] = useState(null);
@@ -1334,7 +1334,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [nonce]);
+      }, [nonce, refreshKey]);
 
       useEffect(() => {
         api.get('/api/payments/formats').then(d => setFormats(d.formats || [])).catch(() => {});
@@ -1512,7 +1512,7 @@
     const ROLES = ['Accounts Payable', 'Finance Manager', 'Group Accountant', 'Director', 'Admin'];
     const TIMEZONES = ['Asia/Kuala_Lumpur', 'Asia/Singapore', 'Asia/Jakarta', 'Asia/Bangkok', 'Asia/Hong_Kong', 'Australia/Perth', 'UTC'];
 
-    function SettingsView({ entities, onToast }) {
+    function SettingsView({ entities, onToast, refreshKey = 0 }) {
       const [data, setData] = useState(null);
       const [loading, setLoading] = useState(true);
       const [error, setError] = useState(null);
@@ -1535,7 +1535,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [nonce]);
+      }, [nonce, refreshKey]);
 
       // The preview follows whichever recipient is selected, so you can see the
       // scoped message a branch accountant actually receives.
@@ -1855,11 +1855,120 @@
       </Dialog>;
     }
 
+    // What the header badge opens: every connected Xero organisation, the
+    // currency each one reports in, and which of them Bills Hub is working with.
+    function OrganisationsDialog({ open, onClose, onToast, onChanged }) {
+      const [data, setData] = useState(null);
+      const [error, setError] = useState(null);
+      const [busy, setBusy] = useState(null);
+      const [editing, setEditing] = useState(null);   // tenantId whose code is being renamed
+      const [draftCode, setDraftCode] = useState('');
+      const [nonce, setNonce] = useState(0);
+
+      useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        api.get('/api/bills/entities?all=true')
+          .then(d => { if (!cancelled) { setData(d); setError(null); } })
+          .catch(e => { if (!cancelled) setError(e.message); });
+        return () => { cancelled = true; };
+      }, [open, nonce]);
+
+      async function patch(tenantId, body) {
+        setBusy(tenantId);
+        try {
+          await request('/api/bills/entities/' + encodeURIComponent(tenantId), { method: 'PATCH', body });
+          setNonce(n => n + 1);
+          if (onChanged) onChanged();
+        } catch (e) {
+          onToast({ title: 'Could not update', message: e.message, tone: 'error' });
+        } finally { setBusy(null); }
+      }
+
+      const orgs = (data && data.entities) || [];
+      const cur = (data && data.currency) || {};
+      const included = orgs.filter(o => o.included).length;
+
+      return <Dialog open={open} onClose={onClose} title="Xero organisations"
+        description={data ? `${orgs.length} connected · ${included} in use by Bills Hub` : ''} size="md">
+        {error
+          ? <div style={{ background: 'var(--red-100)', borderRadius: 10, padding: '14px 16px', fontSize: 13.5, color: '#8d1f17' }}>{error}</div>
+          : !data
+            ? <div style={{ fontSize: 13.5, color: 'var(--text-muted)', padding: '8px 0' }}>Loading…</div>
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* What Bills Hub decided to label money with, and why. */}
+          <div style={{ background: cur.mixed ? 'var(--amber-100)' : 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: cur.mixed ? '#6b4d00' : 'var(--text-body)', lineHeight: 1.6 }}>
+            {cur.mixed
+              ? <span><strong>Figures are shown without a currency symbol.</strong> These organisations report in {cur.mixed.join(' and ')}, so a group total would be adding them together. Filter to one entity for a figure you can rely on.</span>
+              : cur.code
+                ? <span>Figures are shown in <strong>{cur.symbol}</strong>, taken from the organisations themselves — nothing to configure.</span>
+                : <span>No currency recorded yet. Run a sync and Bills Hub will read it from Xero.</span>}
+          </div>
+
+          <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '92px minmax(0,1fr) 84px 72px', gap: 10, padding: '9px 14px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              <div>Code</div><div>Organisation</div><div>Currency</div><div style={{ textAlign: 'right' }}>In use</div>
+            </div>
+            <div style={{ maxHeight: 300, overflow: 'auto' }}>
+              {orgs.length === 0 && <div style={{ padding: '18px 14px', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>Nothing connected yet.</div>}
+              {orgs.map(o => (
+                <div key={o.tenantId} style={{ display: 'grid', gridTemplateColumns: '92px minmax(0,1fr) 84px 72px', gap: 10, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13, opacity: o.included ? 1 : .5 }}>
+                  <div>
+                    {editing === o.tenantId
+                      ? <input autoFocus value={draftCode} onChange={e => setDraftCode(e.target.value)}
+                          onBlur={() => { const v = draftCode.trim(); setEditing(null); if (v && v.toUpperCase() !== o.code) patch(o.tenantId, { code: v }); }}
+                          onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditing(null); }}
+                          style={{ width: '100%', height: 26, border: '1.5px solid var(--color-primary)', borderRadius: 6, padding: '0 6px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, outline: 'none' }} />
+                      : <button onClick={() => { setEditing(o.tenantId); setDraftCode(o.code || ''); }}
+                          title="Rename this code" className="feta-hover"
+                          style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}><Code>{o.code || '—'}</Code></button>}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: 'var(--text-heading)', fontWeight: 600, ...Ellip }}>{o.name || o.short}</div>
+                    {o.needsReconnect && <div style={{ fontSize: 11, color: 'var(--amber-500)', fontWeight: 700 }}>needs reconnecting</div>}
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: o.baseCurrency ? 'var(--text-body)' : 'var(--text-subtle)' }}>
+                    {o.baseCurrency || 'not synced'}
+                  </div>
+                  <div style={{ textAlign: 'right', display: 'flex', justifyContent: 'flex-end' }}>
+                    <Switch checked={o.included} onChange={v => patch(o.tenantId, { included: v })} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            Switching one off stops it being synced and hides it everywhere — useful for
+            keeping a test deployment away from organisations you are not ready for.
+            Click a code to rename it.
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <Button variant="outline" size="md" onClick={onClose}>Close</Button>
+            {data.canConnectHere
+              ? <Button variant="primary" size="md" onClick={() => { window.location.href = '/api/xero/connect'; }}>
+                  {orgs.length ? 'Add or reconnect an organisation' : 'Connect Xero'}
+                </Button>
+              : data.manageAt
+                ? <Button variant="primary" size="md" onClick={() => window.open(data.manageAt, '_blank', 'noreferrer')}>Manage in WazzOCR</Button>
+                : null}
+          </div>
+        </div>}
+      </Dialog>;
+    }
+
     function App() {
       const [view, setView] = useState('bills');
       const [me, setMe] = useState(null);
       const [xero, setXero] = useState(null);
       const [entities, setEntities] = useState([]);
+      const [currency, setCurrency] = useState(null);
+      const [orgsOpen, setOrgsOpen] = useState(false);
+      // Bumped when the set of organisations changes, so the open view reloads
+      // rather than sitting on a stale currency or entity list.
+      const [dataNonce, setDataNonce] = useState(0);
       const [toasts, setToasts] = useState([]);
 
       const pushToast = useCallback((t) => {
@@ -1871,7 +1980,9 @@
       const loadContext = useCallback(() => {
         api.get('/api/auth/me').then(setMe).catch(() => {});
         api.get('/api/xero/status').then(setXero).catch(() => setXero({ connected: false, count: 0 }));
-        api.get('/api/bills/entities').then(d => setEntities(d.entities || [])).catch(() => {});
+        api.get('/api/bills/entities')
+          .then(d => { setEntities(d.entities || []); setCurrency(d.currency || null); })
+          .catch(() => {});
       }, []);
 
       useEffect(loadContext, [loadContext]);
@@ -1907,8 +2018,12 @@
       // In own mode the badge always reaches the consent: reconnecting is how you
       // add another organisation, so hiding it once connected leaves no route to
       // that at all.
-      const xeroHref = manageAt || (canConnectHere ? '/api/xero/connect' : null);
       const xeroProblem = (xero && xero.error) || null;
+      // The badge shows the currency it settled on, so the decision is visible
+      // rather than something you discover on the figures.
+      const currencyLabel = currency && currency.mixed
+        ? currency.mixed.join('/')
+        : (currency && currency.symbol) || '';
       const openAccess = Boolean(me && me.authDisabled);
 
       return <div style={{ minHeight: '100vh', background: 'var(--surface-page)' }}>
@@ -1919,16 +2034,14 @@
           <span style={{ whiteSpace: 'nowrap', fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--orange-400)' }}>{(me && me.account && me.account.name) || ''}</span>
           <span style={{ flex: 1 }} />
           <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
-          <a href={xeroHref || undefined} target={manageAt ? '_blank' : undefined} rel="noreferrer"
-            title={xeroProblem
-              || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting'
-                : canConnectHere ? (connected ? 'Connected. Click to add another organisation or reconnect.' : 'Connect Xero')
-                : 'Xero is connected through WazzOCR')}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', cursor: xeroHref ? 'pointer' : 'default' }}>
+          <button onClick={() => setOrgsOpen(true)}
+            title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting' : 'See the connected Xero organisations')}
+            className="feta-hover"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.82)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer' }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: needsReconnect ? 'var(--amber-500)' : connected ? 'var(--green-500)' : 'var(--red-500)' }} />
             <span>{orgCount === null ? 'Checking Xero…' : connected ? orgCount + ' Xero ' + (orgCount === 1 ? 'entity' : 'entities') + ' connected' : 'Connect Xero'}</span>
-            {canConnectHere && connected && <span style={{ opacity: .55, fontSize: 11 }}>· add</span>}
-          </a>
+            {currencyLabel && <span style={{ opacity: .6 }}>· {currencyLabel}</span>}
+          </button>
           {!openAccess && <div title={me && me.user ? me.user.email : ''} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700 }}>{(me && me.user && me.user.initials) || '–'}</div>}
         </header>
 
@@ -1939,10 +2052,14 @@
           <span>Anyone who can open this page can submit and approve bills in your Xero organisations.</span>
         </div>}
 
-        {view === 'bills' && <BillsView entities={entities} xero={xero} onToast={pushToast} onSynced={loadContext} onPaid={() => setView('bank')} />}
-        {view === 'recharge' && <RechargeView entities={entities} onToast={pushToast} />}
-        {view === 'bank' && <BankView onToast={pushToast} />}
-        {view === 'settings' && <SettingsView entities={entities} onToast={pushToast} />}
+        {view === 'bills' && <BillsView entities={entities} xero={xero} onToast={pushToast} refreshKey={dataNonce} onSynced={loadContext} onPaid={() => setView('bank')} />}
+        {view === 'recharge' && <RechargeView entities={entities} onToast={pushToast} refreshKey={dataNonce} />}
+        {view === 'bank' && <BankView onToast={pushToast} refreshKey={dataNonce} />}
+        {view === 'settings' && <SettingsView entities={entities} onToast={pushToast} refreshKey={dataNonce} />}
+
+        <OrganisationsDialog open={orgsOpen} onToast={pushToast}
+          onClose={() => setOrgsOpen(false)}
+          onChanged={() => { loadContext(); setDataNonce(n => n + 1); }} />
 
         <div style={{ position: 'fixed', right: 20, bottom: 20, zIndex: 120, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {toasts.map(t => <Toast key={t.id} title={t.title} message={t.message} tone={t.tone} onClose={() => setToasts(list => list.filter(x => x.id !== t.id))} />)}

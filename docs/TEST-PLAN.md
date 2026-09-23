@@ -24,6 +24,11 @@ npm run db:migrate:test    # once, to create the suite's database
 npm test                   # never touches your working data
 ```
 
+**The organisations panel** is the header badge — click it to see every
+connected organisation, its base currency, and which ones Bills Hub is using.
+Codes are editable there, and switching one off keeps a test deployment away
+from organisations you are not ready for.
+
 **Currency looks after itself.** Each organisation's base currency is read from
 Xero on the first sync, so a USD demo company shows USD and a Malaysian one
 shows RM without any configuration. Connect both and the Bills screen drops the
