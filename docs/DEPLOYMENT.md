@@ -21,6 +21,43 @@ Bills Hub is a plain Node 18+ Express app with its own MySQL database.
 
 ---
 
+## 0. Deploying next to WazzOCR — the short path
+
+If Bills Hub goes on the same droplet, most of the setup is already on the box.
+Four values have to match WazzOCR exactly, and retyping the encryption key is how
+you get a deployment that fails every organisation at once with nothing in the
+logs to explain it. So copy them off disk instead:
+
+```bash
+npm run adopt-env -- --from /srv/wazzocr/.env --db-name billhub --port 3311
+```
+
+It reads WazzOCR's `.env` and writes Bills Hub's: the encryption key, client id
+and secret, and the database credentials, verbatim. It never prints a value —
+the report shows a six-character fingerprint, which is enough to prove the two
+files agree. It also lifts WazzOCR's own `DB_NAME` into `WAZZOCR_DB_NAME` (the
+schema to read across into), refuses if you point Bills Hub's database at
+WazzOCR's, and writes the file `chmod 600`.
+
+Two things it sets deliberately:
+
+- `AUTH_DISABLED=false` — this one is reachable from the internet.
+- `XERO_TENANT_ALLOWLIST` to a value matching no tenant id, so **every Xero write
+  is refused and every read works**. The first boot is then a look around that
+  cannot change anything. Replace it when you have decided what may be written
+  to; § 7c has the rest.
+
+Use a second Xero client secret if you would rather the two apps be revocable
+independently:
+
+```bash
+npm run adopt-env -- --from /srv/wazzocr/.env --client-secret <your second secret>
+```
+
+Then carry on at § 1 for the database, § 5 for systemd and nginx.
+
+---
+
 ## 1. Database
 
 Create a **new database** — not inside WazzOCR's:
