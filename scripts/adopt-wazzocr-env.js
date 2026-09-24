@@ -29,6 +29,8 @@ const DB_NAME = arg('--db-name', 'billhub');
 const PORT = arg('--port', '3311');
 const SECRET_OVERRIDE = arg('--client-secret');
 const PUBLIC_URL = arg('--public-url');
+const DB_USER_OVERRIDE = arg('--db-user');
+const DB_PASS_OVERRIDE = arg('--db-password');
 
 if (!FROM || has('--help')) {
   console.log(`
@@ -45,6 +47,10 @@ Usage:
   --client-secret <value>  Use this instead of WazzOCR's, e.g. a second secret
                            generated for Bills Hub so the two are revocable
                            independently.
+  --db-user <name>         A MySQL user of Bills Hub's own, instead of reusing
+  --db-password <value>    WazzOCR's. Recommended: it only needs its own schema
+                           plus SELECT on two of WazzOCR's tables, where
+                           WazzOCR's user is usually an admin.
   --force                  Overwrite an existing output file.
 
 Nothing is generated and nothing is printed: values are copied verbatim and
@@ -98,6 +104,12 @@ if (missing.length) {
 }
 
 const clientSecret = SECRET_OVERRIDE || src.XERO_CLIENT_SECRET;
+const dbUser = DB_USER_OVERRIDE || src.DB_USER;
+const dbPassword = DB_USER_OVERRIDE ? (DB_PASS_OVERRIDE || '') : (DB_PASS_OVERRIDE || src.DB_PASSWORD);
+if (DB_USER_OVERRIDE && !DB_PASS_OVERRIDE) {
+  console.error('\n--db-user needs --db-password.\n');
+  process.exit(1);
+}
 
 // WazzOCR's own DB_NAME is the schema Bills Hub reads across into — a value
 // that is easy to guess wrong and produces a baffling error when you do.
@@ -152,8 +164,8 @@ APP_ENCRYPTION_KEY=${src.APP_ENCRYPTION_KEY}
 # ── Database — same cluster, Bills Hub's own schema ─────────────────────────
 DB_HOST=${src.DB_HOST}
 DB_PORT=${src.DB_PORT || '25060'}
-DB_USER=${src.DB_USER}
-DB_PASSWORD=${src.DB_PASSWORD}
+DB_USER=${dbUser}
+DB_PASSWORD=${dbPassword}
 DB_NAME=${DB_NAME}
 ${ca || caPem || '# DB_CA_CERT=certs/do-mysql-ca.crt   <- set one of these'}
 
@@ -176,19 +188,27 @@ console.log(`    APP_ENCRYPTION_KEY   fingerprint ${fingerprint(src.APP_ENCRYPTI
 console.log(`    XERO_CLIENT_ID       ${src.XERO_CLIENT_ID}`);
 console.log(`    XERO_CLIENT_SECRET   fingerprint ${fingerprint(clientSecret)}${SECRET_OVERRIDE ? '  (yours, not WazzOCR\'s)' : ''}`);
 console.log(`    DB_HOST              ${src.DB_HOST}:${src.DB_PORT || '25060'}`);
-console.log(`    DB_USER              ${src.DB_USER}`);
-console.log(`    DB_PASSWORD          fingerprint ${fingerprint(src.DB_PASSWORD)}`);
+console.log(`    DB_USER              ${dbUser}${DB_USER_OVERRIDE ? "  (its own)" : "  (shared with WazzOCR — see --db-user)"}`);
+console.log(`    DB_PASSWORD          fingerprint ${fingerprint(dbPassword)}`);
 console.log('\n  Set for Bills Hub:');
 console.log(`    DB_NAME              ${DB_NAME}          (its own; create it if you have not)`);
 if (PUBLIC_URL) console.log(`    PUBLIC_BASE_URL      ${PUBLIC_URL}`);
 console.log(`    WAZZOCR_DB_NAME      ${wazzocrSchema}          (read across into)`);
 console.log('    XERO_TENANT_ALLOWLIST  matches nothing — all writes refused');
 console.log('    AUTH_DISABLED        false');
+// A dedicated user has to be created and given its own schema first; a
+// borrowed one already has everything except the two cross-database reads.
+const userSetup = DB_USER_OVERRIDE
+  ? `    CREATE USER '${dbUser}'@'%' IDENTIFIED BY '<the password you just passed>';
+    GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${dbUser}'@'%';
+`
+  : '';
+
 console.log(`
   Next:
     CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-    GRANT SELECT, UPDATE ON \`${wazzocrSchema}\`.\`xero_grants\`       TO '${src.DB_USER}'@'%';
-    GRANT SELECT          ON \`${wazzocrSchema}\`.\`xero_connections\` TO '${src.DB_USER}'@'%';
+${userSetup}    GRANT SELECT, UPDATE ON \`${wazzocrSchema}\`.\`xero_grants\`       TO '${dbUser}'@'%';
+    GRANT SELECT          ON \`${wazzocrSchema}\`.\`xero_connections\` TO '${dbUser}'@'%';
 
     npm run db:migrate
     node scripts/preflight.js
