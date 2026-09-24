@@ -152,6 +152,7 @@ async function syncAccount(accountId, { full = false, tenantIds = null } = {}) {
     if (t.short_name) intercoNames.add(t.short_name.trim().toLowerCase());
   }
 
+  const startedAt = Date.now();
   const results = [];
   const queue = [...targets];
   const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
@@ -166,8 +167,13 @@ async function syncAccount(accountId, { full = false, tenantIds = null } = {}) {
 
   const upserted = results.reduce((sum, r) => sum + r.upserted, 0);
   const failed = results.filter((r) => !r.ok);
-  console.log(`[sync] account ${accountId}: ${results.length} org(s), ${upserted} bill(s)${failed.length ? `, ${failed.length} failed` : ''}`);
-  return { tenants: results.length, upserted, failed: failed.length, results };
+  // The duration is the number worth watching: a first run reads everything,
+  // an incremental one should be a fraction of it. Without it in the log there
+  // is no way to tell a slow sync from a large one.
+  const took = ((Date.now() - startedAt) / 1000).toFixed(1);
+  const skipped = results.reduce((sum, r) => sum + (r.skipped || 0), 0);
+  console.log(`[sync] account ${accountId}: ${results.length} org(s), ${upserted} bill(s) in ${took}s${skipped ? `, ${skipped} skipped` : ''}${failed.length ? `, ${failed.length} failed` : ''}`);
+  return { tenants: results.length, upserted, skipped, failed: failed.length, tookSeconds: Number(took), results };
 }
 
 // ── Background schedule ─────────────────────────────────────────────────────
