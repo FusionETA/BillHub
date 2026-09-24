@@ -155,6 +155,54 @@ const requests = [];
   const dupes = await db.getOne("SELECT COUNT(*) AS n FROM bills WHERE xero_tenant_id = 'synctA'");
   check('re-syncing the same invoice updates rather than duplicates', Number(dupes.n) === 250, dupes.n);
 
+  // ── Oversized fields ──────────────────────────────────────────────────────
+  // What actually happened on the first real sync: 24 of 41 organisations died
+  // with "Data too long for column 'reference'". MySQL does not fail one row,
+  // it aborts the statement — so a single long reference cost each of those
+  // organisations every bill it had.
+  console.log('\nFields longer than their columns');
+
+  const bills = require('../models/bills');
+  check('fit() cuts to the column width', bills.fit('x'.repeat(900), 'reference').length === 500);
+  check('and leaves anything shorter alone', bills.fit('SYNC-REF-1', 'reference') === 'SYNC-REF-1');
+  check('null stays null', bills.fit(null, 'reference') === null);
+  check('every width it knows about is a real column',
+    Object.keys(bills.WIDTHS).every((c) => /^[a-z_]+$/.test(c)), Object.keys(bills.WIDTHS));
+
+  await db.execute(
+    `INSERT INTO ${CONNECTIONS} (account_id, grant_id, xero_tenant_id, tenant_name, status) VALUES (?,?,?,?,'active')`,
+    [WAZZOCR_ACCOUNT, grantId, 'synctD', 'Sync Org D Sdn Bhd']
+  );
+
+  xero.api = async (accountId, tenantId, path) => {
+    if (path === '/Organisation') return { Organisations: [{ BaseCurrency: 'MYR' }] };
+    const page = Number(new URL('http://x' + path).searchParams.get('page'));
+    if (page !== 1) return { Invoices: [] };
+    const long = invoice(1, 'synctD', '2026-09-04T00:00:00Z');
+    long.Reference = 'R'.repeat(900);              // longer than the column
+    long.Contact = { ContactID: 'c1'.padEnd(36, '0'), Name: 'N'.repeat(400) };
+    const broken = invoice(2, 'synctD', '2026-09-04T00:01:00Z');
+    broken.InvoiceID = 'x'.repeat(80);             // too long for CHAR(36) — nothing can save this one
+    return { Invoices: [long, broken, invoice(3, 'synctD', '2026-09-04T00:02:00Z')] };
+  };
+
+  const rD = await sync.syncAccount(ACCOUNT, { tenantIds: ['synctD'] });
+  check('the organisation is no longer lost to one bad field', rD.failed === 0, rD);
+  check('the oversized bill is stored rather than dropped', rD.upserted === 2, rD.upserted);
+
+  const cut = await db.getOne(
+    "SELECT reference, contact_name FROM bills WHERE xero_tenant_id = 'synctD' AND invoice_number = 'SYNC-1'");
+  check('its reference was cut to fit', cut && cut.reference.length === 500, cut && cut.reference.length);
+  check('and so was the contact name', cut && cut.contact_name.length === 255, cut && cut.contact_name.length);
+
+  const stateD = await syncState.get(ACCOUNT, 'synctD');
+  check('a genuinely unstorable bill is skipped, not fatal', stateD.last_status === 'ok', stateD.last_status);
+  check('but the run says so rather than looking clean',
+    /1 bill\(s\) skipped/.test(stateD.last_error || ''), stateD.last_error);
+  check('and it names how to get it back', /--full/.test(stateD.last_error || ''), stateD.last_error);
+  check('the bills either side of it still landed',
+    Number((await db.getOne("SELECT COUNT(*) AS n FROM bills WHERE xero_tenant_id = 'synctD'")).n) === 2);
+
   // Clean up so the seeded demo data is what remains.
   await db.execute("DELETE FROM bills WHERE xero_tenant_id LIKE 'synct%'");
   await db.execute("DELETE FROM bill_sync_state WHERE xero_tenant_id LIKE 'synct%'");

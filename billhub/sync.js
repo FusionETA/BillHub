@@ -58,6 +58,8 @@ async function syncTenant(accountId, tenantId, tenantName, { full = false, inter
       : new Date(new Date(state.cursor_utc).getTime() - 60000);
 
     let upserted = 0;
+    let skipped = 0;
+    let firstSkip = null;
     let pages = 0;
     let maxUpdated = state?.cursor_utc ? new Date(state.cursor_utc) : null;
 
@@ -85,10 +87,21 @@ async function syncTenant(accountId, tenantId, tenantName, { full = false, inter
       for (const inv of list) {
         if (!inv.InvoiceID) continue;
         const contactName = inv.Contact?.Name || '';
-        await bills.upsertFromXero(accountId, tenantId, inv, {
-          isInterco: contactName ? intercoNames.has(contactName.trim().toLowerCase()) : false
-        });
-        upserted += 1;
+        try {
+          await bills.upsertFromXero(accountId, tenantId, inv, {
+            isInterco: contactName ? intercoNames.has(contactName.trim().toLowerCase()) : false
+          });
+          upserted += 1;
+        } catch (e) {
+          // Whatever is wrong with this one bill, it is not a reason to lose the
+          // other two thousand. Skip it, count it, and let the run finish —
+          // an organisation that syncs 1999 of 2000 bills is worth far more
+          // than one that reports a clean failure and holds nothing.
+          skipped += 1;
+          if (!firstSkip) firstSkip = `${inv.InvoiceID}: ${e.message}`;
+          console.error(`[sync] ${tenantName || tenantId}: skipped ${inv.InvoiceID} — ${e.message}`);
+          continue;
+        }
         const u = inv.UpdatedDateUTC ? parseXeroDate(inv.UpdatedDateUTC) : null;
         if (u && (!maxUpdated || u > maxUpdated)) maxUpdated = u;
       }
@@ -99,9 +112,12 @@ async function syncTenant(accountId, tenantId, tenantName, { full = false, inter
     await syncState.markOk(
       accountId, tenantId,
       maxUpdated ? maxUpdated.toISOString().slice(0, 19).replace('T', ' ') : null,
-      upserted
+      upserted,
+      // Recorded against a successful run, because the organisation did sync.
+      // The cursor has moved past these, so recovering them needs --full.
+      skipped ? `${skipped} bill(s) skipped; first was ${firstSkip}. Re-read with: node scripts/sync-bills.js --full` : null
     );
-    return { tenantId, tenantName, upserted, pages, ok: true };
+    return { tenantId, tenantName, upserted, skipped, pages, ok: true };
   } catch (err) {
     // A tenant whose grant has gone stale shouldn't fail the whole run — record
     // it here and let the other 39 finish. The needs_reconnect flag belongs to

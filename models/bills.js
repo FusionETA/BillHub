@@ -177,6 +177,20 @@ async function getManyByIds(accountId, ids = []) {
 }
 
 // Insert or refresh one bill from a Xero Invoice payload.
+// Widths of the VARCHAR columns that take free text straight from Xero. A
+// value longer than its column does not fail one row in MySQL — it aborts the
+// whole statement, and with it whatever the caller was part-way through. Xero's
+// documented maxima are not reliable (Reference is documented as 255 and comes
+// back longer), so cut to fit rather than trusting the source.
+const WIDTHS = { invoice_number: 255, reference: 500, contact_name: 255, currency_code: 8, xero_status: 16 };
+
+function fit(value, column) {
+  if (value == null) return null;
+  const s = String(value);
+  const max = WIDTHS[column];
+  return max && s.length > max ? s.slice(0, max) : s;
+}
+
 async function upsertFromXero(accountId, tenantId, inv, { isInterco = false, attachmentCount = null } = {}) {
   const num = (v) => (v == null || v === '' ? 0 : Number(v));
   // Xero dates arrive as "/Date(1693526400000+0000)/" on some endpoints and as
@@ -217,11 +231,11 @@ async function upsertFromXero(accountId, tenantId, inv, { isInterco = false, att
        is_interco = VALUES(is_interco), updated_date_utc = VALUES(updated_date_utc)`,
     [
       accountId, tenantId, inv.InvoiceID,
-      inv.InvoiceNumber || null, inv.Reference || null,
-      inv.Contact?.ContactID || null, inv.Contact?.Name || null,
-      inv.Status || 'DRAFT',
+      fit(inv.InvoiceNumber, 'invoice_number'), fit(inv.Reference, 'reference'),
+      inv.Contact?.ContactID || null, fit(inv.Contact?.Name, 'contact_name'),
+      fit(inv.Status, 'xero_status') || 'DRAFT',
       date(inv.Date), date(inv.DueDate), date(inv.FullyPaidOnDate),
-      inv.CurrencyCode || null, inv.CurrencyRate == null ? null : Number(inv.CurrencyRate),
+      fit(inv.CurrencyCode, 'currency_code'), inv.CurrencyRate == null ? null : Number(inv.CurrencyRate),
       num(inv.SubTotal), num(inv.TotalTax), num(inv.Total),
       num(inv.AmountPaid), num(inv.AmountDue), num(inv.AmountCredited),
       inv.HasAttachments ? 1 : 0, attachmentCount,
@@ -242,6 +256,6 @@ async function applyStatus(accountId, id, xeroStatus) {
 
 module.exports = {
   list, listMeta, tabCounts, stats, contacts,
-  getById, getManyByIds, upsertFromXero, applyStatus,
+  getById, getManyByIds, upsertFromXero, applyStatus, fit, WIDTHS,
   UI_STATUS_SQL
 };

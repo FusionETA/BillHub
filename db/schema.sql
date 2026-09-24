@@ -121,7 +121,10 @@ CREATE TABLE IF NOT EXISTS bills (
   xero_tenant_id   VARCHAR(64) NOT NULL,
   xero_invoice_id  CHAR(36) NOT NULL,
   invoice_number   VARCHAR(255),
-  reference        VARCHAR(255),
+  -- Xero's API documents Reference as 255, but real organisations return more
+  -- than that. Widened, and truncated on write as well — a field that is one
+  -- character too long must never cost an organisation its sync.
+  reference        VARCHAR(500),
   contact_id       CHAR(36),
   contact_name     VARCHAR(255),
   -- Xero's own status: DRAFT | SUBMITTED | AUTHORISED | PAID | VOIDED | DELETED

@@ -31,13 +31,16 @@ async function markRunning(accountId, tenantId) {
 }
 
 // cursorUtc is the new high-water mark (a JS Date or 'YYYY-MM-DD HH:MM:SS').
-async function markOk(accountId, tenantId, cursorUtc, upserted) {
+// `note` records something worth knowing about an otherwise successful run —
+// bills skipped, say. The status stays 'ok' because the organisation synced;
+// the note is how anyone finds out it was not the whole story.
+async function markOk(accountId, tenantId, cursorUtc, upserted, note = null) {
   await db.execute(
     `UPDATE bill_sync_state
-        SET last_status = 'ok', last_error = NULL, cursor_utc = ?,
+        SET last_status = 'ok', last_error = ?, cursor_utc = ?,
             bills_upserted = ?, last_run_at = NOW()
       WHERE account_id = ? AND xero_tenant_id = ?`,
-    [cursorUtc, Number(upserted) || 0, accountId, tenantId]
+    [note ? String(note).slice(0, 512) : null, cursorUtc, Number(upserted) || 0, accountId, tenantId]
   );
 }
 
