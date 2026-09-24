@@ -182,48 +182,37 @@ reason is shown on the recharge.
 
 Only once everything above is proven.
 
-> **Add `accounting.payments` to WazzOCR first.** WazzOCR's `XERO_SCOPES` is
-> currently
-> `openid profile email offline_access accounting.invoices accounting.contacts accounting.settings accounting.attachments`
-> — no payments scope, because WazzOCR never creates one. Bills Hub's batch
-> payments would fail on the borrowed grant.
->
-> Add `accounting.payments` to `XERO_SCOPES` in WazzOCR's `server.js` (or its
-> env), deploy, and **reconnect Xero in WazzOCR** so the grant is re-consented
-> with the wider scope. Scopes are additive, so nothing WazzOCR already has is
-> lost. Bills, recharge and the digest would work without this; only bank-file
-> posting needs it.
+> **Do it on the deployed server, not on a laptop.** A borrowed grant is read out
+> of `wazzocr.xero_grants`, which only exists on WazzOCR's MySQL cluster. There
+> is nothing to borrow against a local database, so the switch comes *after* the
+> deployment, not before it.
 
-1. Add the cross-database grants:
-   ```sql
-   GRANT SELECT, UPDATE ON `wazzocr`.`xero_grants`       TO '<user>'@'%';
-   GRANT SELECT          ON `wazzocr`.`xero_connections` TO '<user>'@'%';
-   ```
-2. Set the WazzOCR account id: `UPDATE accounts SET wazzocr_account_id = <id>;`
-3. In `.env`:
+The full runbook is [DEPLOYMENT.md § 7](DEPLOYMENT.md#7-switching-a-deployment-to-wazzocrs-grant).
+The shape of it:
+
+1. **Dry run first.** Add the cross-database GRANTs, set
+   `accounts.wazzocr_account_id`, put WazzOCR's client id, secret and
+   `APP_ENCRYPTION_KEY` in `.env` with `XERO_GRANT_SOURCE=wazzocr`, and run:
    ```bash
-   XERO_GRANT_SOURCE=wazzocr
-   WAZZOCR_DB_NAME=wazzocr
-   APP_ENCRYPTION_KEY=<WazzOCR's, copied>
-   XERO_CLIENT_ID=<WazzOCR's>
-   XERO_CLIENT_SECRET=<WazzOCR's>
-   XERO_TENANT_ALLOWLIST=<start restrictive>
+   node scripts/preflight.js
    ```
-4. `node scripts/preflight.js` — now checking the GRANTs and that the key
-   decrypts WazzOCR's token.
-5. `npm run sync`, then `npm run entities list`. **This is where the 41 real
-   organisations appear.** Fence off what you are not ready for:
-   ```bash
-   npm run entities only DEMO
-   ```
-   and paste the allowlist line it prints into `.env`, then restart. The boot log
-   must say:
-   ```
-   [xero] XERO_TENANT_ALLOWLIST is set — writes are limited to 1 organisation(s).
-   ```
-6. **Check the guard before trusting it.** Temporarily include a live
-   organisation, try to submit one of its bills, and confirm you get *"This
-   deployment may not write to Xero organisation …"*. Then exclude it again.
+   It makes **no Xero call**, so WazzOCR's refresh token is not rotated. It proves
+   the GRANTs, proves the key decrypts WazzOCR's token, and reads the granted
+   **scopes** straight off `xero_grants.scope`.
+
+2. **Expect `accounting.payments` to be missing.** WazzOCR never creates a
+   payment. Bills, recharge and the digest are unaffected; bank-file posting is
+   not. Adding it means editing WazzOCR's `XERO_SCOPES`, deploying WazzOCR, and
+   **reconnecting Xero in WazzOCR** — the new token supersedes the old one on
+   consent, so WazzOCR has to be the app that receives it. That is the riskiest
+   step in the switch; it is also skippable until you need bank files.
+
+3. **Set `XERO_TENANT_ALLOWLIST` before restarting.** Without it a borrowed grant
+   can write to all 41 live organisations, and the boot log says so in a banner.
+   `npm run entities only DEMO` prints the line to paste.
+
+4. **Watch the guard fire once.** Temporarily include a live organisation, try to
+   submit one of its bills, confirm the 403, and exclude it again.
 
 The Xero app from stage 1 can be left alone; it simply stops being used. Revoke
 its connection in Xero if you want it gone.
@@ -243,6 +232,6 @@ its connection in Xero if you want it gone.
 | `403 … may not write to Xero organisation` | The allowlist is doing its job. Add the tenant id, or you meant a different organisation. |
 | `Could not decrypt … refresh token` | In `wazzocr` mode, `APP_ENCRYPTION_KEY` was generated instead of copied from WazzOCR. In `own` mode, it changed since you connected — reconnect. |
 | `cannot start its own` consent | You are in `wazzocr` mode. That is deliberate; switch to `own` or connect in WazzOCR. |
-| `wazzocrGrantStore: unreadable` in `/api/health` | The cross-database GRANT is missing. |
+| `grantStore: unreadable` in `/api/health` | The cross-database GRANT is missing. |
 | Organisations missing after a sync | `GET /api/bills/entities?all=true` — they may be excluded. |
 | `invalid_grant` now and then | Bills Hub and WazzOCR refreshed the shared token at the same moment; it self-heals. See the README. |

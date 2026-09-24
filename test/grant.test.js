@@ -139,6 +139,42 @@ async function resetGrant(value = 'start-token') {
   check('an org WazzOCR has not connected fails with 401',
     tenantErr && tenantErr.statusCode === 401 && /WazzOCR/.test(tenantErr.message), tenantErr && tenantErr.message);
 
+  // ── What the grant carries ────────────────────────────────────────────────
+  // Read off xero_grants.scope, with no Xero call. This is the check that
+  // decides whether borrowing WazzOCR's grant silently costs a feature, so the
+  // rule it applies is worth pinning down.
+  console.log('\nScopes the grant covers');
+
+  const missing = (s) => xero.missingScopes(s).map(([scope]) => scope);
+
+  const full = 'openid profile email offline_access accounting.invoices '
+    + 'accounting.payments accounting.contacts accounting.settings.read';
+  check('the granular set Bills Hub asks for is complete', missing(full).length === 0, missing(full));
+
+  // WazzOCR's own scope string, verbatim. It never creates a payment, so this
+  // is the gap stage 2 has to either close or work around.
+  const wazzocr = 'openid profile email offline_access accounting.invoices '
+    + 'accounting.contacts accounting.settings accounting.attachments';
+  check("WazzOCR's grant is short exactly one scope",
+    missing(wazzocr).join() === 'accounting.payments', missing(wazzocr));
+  check('and the gap is reported with the feature it costs',
+    /bank-file/.test(xero.missingScopes(wazzocr)[0][1]), xero.missingScopes(wazzocr)[0]);
+
+  // Apps predating March 2026 hold the broad scope instead.
+  const broad = 'openid offline_access accounting.transactions accounting.settings.read';
+  check('accounting.transactions covers the three scopes it was split into',
+    missing(broad).length === 0, missing(broad));
+  check('but it does not cover settings.read on its own',
+    missing('openid offline_access accounting.transactions').join() === 'accounting.settings.read',
+    missing('openid offline_access accounting.transactions'));
+  check('and the settings WRITE scope covers the read one',
+    !missing('accounting.transactions accounting.settings').includes('accounting.settings.read'),
+    missing('accounting.transactions accounting.settings'));
+
+  check('a grant recording no scope makes no claim either way', missing('').length === 0, missing(''));
+  check('every required scope is documented with what it buys',
+    xero.SCOPES_REQUIRED.every(([s2, what]) => s2 && what && what.length > 10), xero.SCOPES_REQUIRED);
+
   // Leave the seed in a usable state.
   await resetGrant('fake-refresh-token-for-local-test');
   global.fetch = realFetch;

@@ -227,6 +227,18 @@ function check(name, ok, detail) {
   const cts = await req('GET', '/api/bills/contacts', { cookie });
   check('contacts endpoint lists distinct suppliers', cts.body.contacts.length === 10, cts.body.contacts.length);
 
+  // The first thing anyone curls after a deploy, so it has to say which grant
+  // the process is actually running on — the one setting that changes what the
+  // deployment can reach.
+  console.log('\nHealth');
+  const health = await req('GET', '/api/health');
+  check('health is served without a session', health.status === 200, health.status);
+  check('and reports the database up', health.body.db === 'up', health.body);
+  check('it names the grant mode', health.body.grantSource === 'wazzocr', health.body.grantSource);
+  check('the grant store is readable', health.body.grantStore === 'up', health.body.grantStore);
+  check("in borrowed mode it is also named as WazzOCR's",
+    health.body.wazzocrGrantStore === 'up', health.body);
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();

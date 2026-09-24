@@ -1,22 +1,37 @@
 # Bills Hub — DigitalOcean deployment
 
-Bills Hub is a plain Node 18+ Express app with its own MySQL database. It can sit
-on the same droplet as WazzOCR (different port) or on its own, but its database
-**must be on the same MySQL cluster as WazzOCR's**, because it reads WazzOCR's two
-Xero tables to share the Xero grant.
+Bills Hub is a plain Node 18+ Express app with its own MySQL database.
+
+## Pick the grant mode first — it changes the database requirement
+
+| | `XERO_GRANT_SOURCE=own` | `XERO_GRANT_SOURCE=wazzocr` |
+| --- | --- | --- |
+| Where the Xero token lives | Bills Hub's own `xero_grants` | `wazzocr.xero_grants` |
+| Consent | Bills Hub runs its own | Borrowed; **never** start one here |
+| Xero app | Its own client id and secret | WazzOCR's, copied |
+| `APP_ENCRYPTION_KEY` | Generate a fresh one | **Copy WazzOCR's**, or the token will not decrypt |
+| Database | Anywhere | **Same MySQL cluster as `wazzocr`**, with cross-database GRANTs |
+| Organisations reachable | Only what you consented to | All 41, live ones included |
+
+> **The database requirement is why the order matters.** A borrowed grant is
+> read out of `wazzocr.xero_grants`. Bills Hub can only reach that table from
+> the cluster it lives on, so `wazzocr` mode cannot be tried on a laptop against
+> a local MySQL — there is no grant there to borrow. **Deploy in `own` mode
+> first, then flip the variable on the server.** Section 7 is that switch.
+
+---
 
 ## 1. Database
 
-Create a **new database** on the same DigitalOcean MySQL cluster — not inside
-WazzOCR's:
+Create a **new database** — not inside WazzOCR's:
 
 ```sql
 CREATE DATABASE billhub CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 ```
 
-Give the Bills Hub user read access to WazzOCR's two Xero tables, plus the one
-write it cannot avoid — Xero invalidates a refresh token on use, so whoever
-refreshes must store the replacement:
+In `wazzocr` mode only, give the Bills Hub user read access to WazzOCR's two
+Xero tables, plus the one write it cannot avoid — Xero invalidates a refresh
+token on use, so whoever refreshes must store the replacement:
 
 ```sql
 GRANT SELECT, UPDATE ON `wazzocr`.`xero_grants`       TO '<billhub user>'@'%';
@@ -43,7 +58,8 @@ npm run db:test        # lists the tables and their row counts
 Copy `.env.example` to `.env` and fill it in. `.env` is gitignored — keep it out
 of the repo and out of chat.
 
-Three values must be **copied from WazzOCR's `.env`, not generated**:
+In `wazzocr` mode three values must be **copied from WazzOCR's `.env`, not
+generated**:
 
 | Variable | Why |
 | --- | --- |
@@ -69,8 +85,35 @@ basic auth at nginx.
 
 ## 3. Xero app
 
-**Nothing to change at developer.xero.com.** Bills Hub has no redirect URI and no
-consent flow, deliberately:
+### `own` mode
+
+Register the deployed callback at developer.xero.com — it must match
+`XERO_REDIRECT_URI` character for character:
+
+```
+https://<your-host>/api/xero/callback
+```
+
+Scopes, one per endpoint Bills Hub actually calls:
+
+```
+openid profile email offline_access
+accounting.invoices          GET/POST /Invoices      bills, submit/approve, recharge
+accounting.payments          POST /BatchPayments     paying a bank-file batch
+accounting.contacts          GET/POST /Contacts      payees, and recharge CREATES
+                                                     the counterparty contact
+accounting.settings.read     GET /Accounts           bank accounts to pay from
+```
+
+> These must be the **granular** scopes. Xero assigns them to every Web app
+> created since March 2026 and rejects the old broad `accounting.transactions`
+> with `invalid_scope` — the consent screen never appears. Override with
+> `XERO_SCOPES` only if your app is older and still on broad scopes.
+
+### `wazzocr` mode
+
+**Nothing to change at developer.xero.com**, and Bills Hub deliberately has no
+consent flow:
 
 > "If the authorisation process is repeated for the same combination of Xero user
 > and App, the newly issued set of tokens will supersede the previous set."
@@ -80,14 +123,18 @@ Authorising Bills Hub with the same Xero login on the same app would invalidate
 WazzOCR's token and stop its live bill pipeline. `GET /api/xero/connect` returns
 409 and points at WazzOCR so this cannot happen by accident.
 
-Bills Hub needs `accounting.transactions` (write) to submit and approve bills
-and to create batch payments, and `accounting.settings.read` to see the bank
-accounts it can pay from. If WazzOCR's app was authorised without it, reconnect **in WazzOCR** after
-adding the scope there; Bills Hub picks up the new grant automatically.
+What the borrowed grant must already carry is checked, read-only, by
+`node scripts/preflight.js` — see section 7.
 
 ## 4. First run
 
-Find the WazzOCR account id whose Xero grant to borrow:
+```bash
+npm run create-account "Ayu Borneo Group" you@example.com
+npm start
+```
+
+In `wazzocr` mode, pass the WazzOCR account id whose grant to borrow as a third
+argument:
 
 ```sql
 SELECT id, name FROM wazzocr.accounts;
@@ -95,12 +142,11 @@ SELECT id, name FROM wazzocr.accounts;
 
 ```bash
 npm run create-account "Ayu Borneo Group" you@example.com <wazzocrAccountId>
-npm start
 ```
 
-Sign in and press **Sync Xero** — Xero is already connected through WazzOCR, so
-there is nothing to authorise. `GET /api/xero/verify` confirms the borrowed token
-works and reports how many organisations Xero says it can reach.
+Then **Connect Xero** (own mode) or **Sync Xero** (wazzocr mode — already
+connected, nothing to authorise). `GET /api/xero/verify` confirms the token works
+and reports how many organisations Xero says it can reach.
 
 The first sync reads every organisation in full and can take a few minutes across
 40 orgs; later runs are incremental. To backfill from the command line instead:
@@ -154,37 +200,130 @@ would rather use cron, set `SYNC_INTERVAL_MINUTES=0` and:
 */15 * * * * cd /srv/billhub && /usr/bin/node scripts/sync-bills.js >> /var/log/billhub-sync.log 2>&1
 ```
 
+## 7. Switching a deployment to WazzOCR's grant
+
+Do this **on the server**, once it is running in `own` mode and the modules are
+proven. Xero tenant ids identify the organisation rather than the app
+connection, so `entities`, `bills` and everything keyed on them survive the
+switch.
+
+### 7a. Dry run — proves everything, changes nothing
+
+Add the GRANTs (section 1), set the mapping, and put WazzOCR's three values in
+`.env` alongside `XERO_GRANT_SOURCE=wazzocr`. Then:
+
+```bash
+UPDATE billhub.accounts SET wazzocr_account_id = <id> WHERE id = 1;
+```
+
+```bash
+node scripts/preflight.js
+```
+
+Read-only and **no Xero call at all**, so WazzOCR's refresh token is not rotated
+and its pipeline is untouched. It proves:
+
+- the cross-database `SELECT`, and the `UPDATE` (a no-op inside a rolled-back
+  transaction)
+- that `APP_ENCRYPTION_KEY` decrypts WazzOCR's stored token
+- **the scopes on the borrowed grant**, read out of `xero_grants.scope`, each
+  named with the feature it carries
+- the account mapping, and the entity codes the 41 organisations would get
+- whether `XERO_TENANT_ALLOWLIST` is set
+
+### 7b. The scope that is probably missing
+
+WazzOCR never creates a payment, so its grant is unlikely to carry
+`accounting.payments`. Bills, recharge and the digest work without it; **only
+bank-file posting fails**. The dry run says so by name.
+
+Fixing it is the single riskiest step in the whole switch, because it means
+re-consenting WazzOCR's live grant:
+
+1. Add `accounting.payments` to `XERO_SCOPES` in WazzOCR and deploy it. Scopes
+   are additive — nothing WazzOCR has is lost.
+2. **Reconnect Xero in WazzOCR**, not here. The new token set supersedes the old
+   one the moment consent completes, so WazzOCR must be the app that receives
+   and stores it.
+3. Re-run the dry run; the scope line turns `ok`.
+
+If you would rather not touch WazzOCR's grant yet, switch anyway and leave bank
+files on the `own`-mode instance until you do.
+
+### 7c. Flip it
+
+```bash
+XERO_GRANT_SOURCE=wazzocr
+WAZZOCR_DB_NAME=wazzocr
+APP_ENCRYPTION_KEY=<WazzOCR's, copied>
+XERO_CLIENT_ID=<WazzOCR's>
+XERO_CLIENT_SECRET=<WazzOCR's>
+XERO_TENANT_ALLOWLIST=<start restrictive>
+```
+
+Restart, then `npm run sync` and `npm run entities list` — **this is where the 41
+real organisations appear.** Fence off what you are not ready for:
+
+```bash
+npm run entities only DEMO
+```
+
+and paste the allowlist line it prints into `.env`, then restart again. The boot
+log must say:
+
+```
+[xero] XERO_TENANT_ALLOWLIST is set — writes are limited to 1 organisation(s).
+```
+
+If instead it prints the `no XERO_TENANT_ALLOWLIST` banner, the deployment can
+write to every live organisation. Fix that before doing anything else.
+
+### 7d. Check the guard before trusting it
+
+Temporarily add a live organisation to `entities`, try to submit one of its
+bills, and confirm you get *"This deployment may not write to Xero organisation
+…"*. Then exclude it again. A guard nobody has seen fire is not yet a guard.
+
 ## Health checks
 
 | Check | Expect |
 | --- | --- |
-| `curl localhost:3000/api/health` | `{"ok":true,"db":"up","wazzocrGrantStore":"up"}` |
-| Boot log | no `AUTH_DISABLED` warning block, unless you meant it |
+| `curl localhost:3000/api/health` | `{"ok":true,"db":"up","grantSource":"…","grantStore":"up"}` |
+| Boot log | no `AUTH_DISABLED` warning block, and no allowlist banner, unless you meant them |
 | `npm run db:test` | every table listed |
+| `node scripts/preflight.js` | all checks passed |
+| `node scripts/smoke.js` | each module ready, or a named blocker |
 | `GET /api/xero/status` (signed in) | `connected: true`, the org count, `needsReconnect: 0` |
-| `GET /api/xero/verify` (signed in) | `xeroSees` matches `wazzocrHas`, `missingLocally` empty |
+| `GET /api/xero/verify` (signed in) | `xeroSees` matches what is recorded, `missingLocally` empty |
 | `GET /api/bills/sync/status` | every organisation `ok`, with a recent `lastRunAt` |
 | `GET /api/payments` | `bankStats` present; `unconfiguredFormats` is 0 |
 | `GET /api/digest` | `settings.configured` is true; `nextRun` reads as expected |
 | Boot log | `[digest] scheduler checking every 60s` |
 
-`wazzocrGrantStore` anything other than `up` means the cross-database GRANT is
-missing — fix that before debugging anything else.
+`grantStore` anything other than `up` in `wazzocr` mode means the cross-database
+GRANT is missing — fix that before debugging anything else.
 
 ## Troubleshooting
 
-**`invalid_client`** — `XERO_CLIENT_SECRET` does not match WazzOCR's, or the
+**`invalid_client`** — `XERO_CLIENT_SECRET` does not match the app's, or the
 secret has been rotated in Xero.
 
-**"Could not decrypt WazzOCR's Xero refresh token"** — `APP_ENCRYPTION_KEY` is not
-the same value WazzOCR uses. Copy it across; do not generate a new one.
+**`invalid_scope` on consent** — the app is on granular scopes and `XERO_SCOPES`
+still asks for `accounting.transactions`. Use the granular list in section 3.
 
-**`wazzocrGrantStore: unreadable`, or every org fails at once** — the Bills Hub DB
-user is missing the GRANT on `wazzocr.xero_grants` / `wazzocr.xero_connections`,
-or `WAZZOCR_DB_NAME` names the wrong schema.
+**"Could not decrypt … refresh token"** — in `wazzocr` mode, `APP_ENCRYPTION_KEY`
+was generated instead of copied from WazzOCR. In `own` mode, it changed since you
+connected — reconnect.
+
+**`grantStore: unreadable`, or every org fails at once** — the Bills Hub DB user
+is missing the GRANT on `wazzocr.xero_grants` / `wazzocr.xero_connections`, or
+`WAZZOCR_DB_NAME` names the wrong schema.
 
 **"This account is not linked to a WazzOCR account"** — set the mapping:
 `UPDATE billhub.accounts SET wazzocr_account_id = <id> WHERE id = <id>;`
+
+**`cannot start its own` consent (409)** — you are in `wazzocr` mode. That is
+deliberate; switch to `own`, or connect in WazzOCR.
 
 **An organisation shows `needsReconnect`** — its grant was refused, usually because
 the refresh token went unused for 60 days or someone revoked the app in Xero.

@@ -140,6 +140,15 @@ function check(name, ok, detail) {
   await db.execute("DELETE FROM xero_connections WHERE xero_tenant_id = 'demo-tenant-1'");
   await db.execute('DELETE FROM xero_grants WHERE account_id = 1');
 
+  // Own mode reads its own table. Health must not call it WazzOCR's, or a
+  // deployment looks like it has proved a cross-database GRANT it never tried.
+  console.log('\nHealth does not overclaim');
+  const health = await req('GET', '/api/health');
+  check('it names own mode', health.body.grantSource === 'own', health.body.grantSource);
+  check('the grant store is readable', health.body.grantStore === 'up', health.body.grantStore);
+  check("and nothing is reported as WazzOCR's",
+    !('wazzocrGrantStore' in health.body), health.body);
+
   global.fetch = realFetch;
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();

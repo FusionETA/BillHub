@@ -287,12 +287,21 @@ real sync:
 node scripts/preflight.js
 ```
 
-Read-only and safe to point at production: it checks the config, both databases,
-the cross-database GRANTs (proving `UPDATE` with a no-op inside a rolled-back
-transaction), that `APP_ENCRYPTION_KEY` actually decrypts WazzOCR's token, the
-account mapping, and prints the entity codes it would derive from the real
-organisation names — so you can correct any that look wrong before they are
-created.
+Read-only and safe to point at production. It adapts to `XERO_GRANT_SOURCE`, so
+in `wazzocr` mode it doubles as the dry run for the switch. It checks:
+
+- the config, and — on a borrowed grant — whether `XERO_TENANT_ALLOWLIST` is set
+- both databases, and the cross-database GRANTs, proving `UPDATE` with a no-op
+  inside a rolled-back transaction
+- that `APP_ENCRYPTION_KEY` actually decrypts the stored token
+- **the scopes on the grant**, read straight off `xero_grants.scope` and reported
+  one per feature, so a missing `accounting.payments` is named as the bank files
+  it would cost rather than left as a string to decode
+- the account mapping, and the entity codes it would derive from the real
+  organisation names — so you can correct any that look wrong before they are
+  created
+
+None of that makes a single Xero call, so nothing is rotated.
 
 ```bash
 node scripts/preflight.js --xero

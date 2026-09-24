@@ -43,16 +43,24 @@ app.get('/api/health', async (req, res) => {
   } catch (err) {
     return res.status(503).json({ ok: false, db: 'down', error: err.message });
   }
-  // Bills Hub reads WazzOCR's Xero tables, so a missing GRANT is a deployment
-  // fault worth surfacing here rather than discovering it one sync at a time.
-  const { GRANTS } = require('./lib/grantSource');
+  // In wazzocr mode this reads across into WazzOCR's schema, so a missing
+  // cross-database GRANT is a deployment fault worth surfacing here rather than
+  // discovering it one sync at a time. In own mode it is just our own table —
+  // reported under a name that does not claim otherwise.
+  const grantSource = require('./lib/grantSource');
   let grantStore = 'up';
   try {
-    await db.getOne(`SELECT 1 FROM ${GRANTS} LIMIT 1`);
+    await db.getOne(`SELECT 1 FROM ${grantSource.GRANTS} LIMIT 1`);
   } catch (err) {
     grantStore = `unreadable: ${err.code || err.message}`;
   }
-  res.json({ ok: grantStore === 'up', db: 'up', wazzocrGrantStore: grantStore });
+  res.json({
+    ok: grantStore === 'up',
+    db: 'up',
+    grantSource: grantSource.MODE,
+    grantStore,
+    ...(grantSource.BORROWED ? { wazzocrGrantStore: grantStore } : {})
+  });
 });
 
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
