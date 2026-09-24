@@ -18,6 +18,7 @@ process.env.XERO_CLIENT_ID = 'test-client-id';
 process.env.XERO_CLIENT_SECRET = 'test-client-secret';
 const db = require('../db');
 const xero = require('../lib/xero');
+const xc = require('../models/xeroConnections');
 const accounts = require('../models/accounts');
 const { encrypt, decrypt } = require('../lib/crypto');
 const { GRANTS, CONNECTIONS, BORROWED } = require('../lib/grantSource');
@@ -138,6 +139,59 @@ async function resetGrant(value = 'start-token') {
   try { await xero.accessTokenFor(ACCOUNT, 'tenant-not-connected'); } catch (e) { tenantErr = e; }
   check('an org WazzOCR has not connected fails with 401',
     tenantErr && tenantErr.statusCode === 401 && /WazzOCR/.test(tenantErr.message), tenantErr && tenantErr.message);
+
+  // ── A rotation underneath us ──────────────────────────────────────────────
+  // Xero refresh tokens are single-use. Bills Hub locks the grant row before
+  // refreshing; WazzOCR does not, so it can spend the token between our read
+  // and our use of it. The failure is indistinguishable from a dead grant
+  // except for one thing: the stored token will have changed.
+  console.log('\nA rotation underneath us');
+
+  const realGet = xc.getGrantForTenant;
+  async function withWazzocrRacingUs(fn) {
+    let reads = 0;
+    xc.getGrantForTenant = async (a, t) => {
+      reads += 1;
+      // The second read is our recovery re-read, by which point WazzOCR's own
+      // UPDATE — blocked on the lock we just released — has landed.
+      if (reads === 2) {
+        await db.execute(`UPDATE ${GRANTS} SET refresh_token = ? WHERE account_id = ?`,
+          [encrypt('wazzocr-wrote-this'), WAZZOCR_ACCOUNT]);
+      }
+      return realGet.call(xc, a, t);
+    };
+    try { return await fn(); } finally { xc.getGrantForTenant = realGet; }
+  }
+
+  await resetGrant('race-token');
+  spent.add('race-token');            // WazzOCR got there first
+  let raced = null, racedErr = null;
+  try { raced = await withWazzocrRacingUs(() => xero.accessTokenFor(ACCOUNT, TENANT)); }
+  catch (e) { racedErr = e; }
+
+  check('it recovers instead of failing', racedErr === null && Boolean(raced), racedErr && racedErr.message);
+  check('the first attempt spent the token we had read', tokenCalls[0] === 'race-token', tokenCalls);
+  check('and the retry used what WazzOCR had stored', tokenCalls[1] === 'wazzocr-wrote-this', tokenCalls);
+  check('exactly one retry, not a loop', tokenCalls.length === 2, tokenCalls);
+
+  // The opposite case: the token has NOT moved, so nothing explains the
+  // failure and the grant really is dead. Retrying would just spend calls.
+  await resetGrant('dead-token');
+  spent.add('dead-token');
+  let deadErr = null;
+  try { await xero.accessTokenFor(ACCOUNT, TENANT); } catch (e) { deadErr = e; }
+  check('an unchanged token is reported as a real failure', deadErr !== null, deadErr);
+  check('and it is not retried', tokenCalls.length === 1, tokenCalls);
+  check('it surfaces as a 401 so the UI asks for a reconnect', deadErr && deadErr.statusCode === 401, deadErr && deadErr.statusCode);
+
+  // A failure that is not invalid_grant must not trigger the recovery at all.
+  await resetGrant('fine-token');
+  stubFetch({ failWith: { status: 401, body: { error: 'invalid_client', error_description: 'bad secret' } } });
+  let clientErr = null;
+  try { await xero.accessTokenFor(ACCOUNT, TENANT); } catch (e) { clientErr = e; }
+  check('a wrong client secret is not mistaken for a rotation',
+    clientErr !== null && tokenCalls.length === 1, { msg: clientErr && clientErr.message, tokenCalls });
+  stubFetch();
 
   // ── What the grant carries ────────────────────────────────────────────────
   // Read off xero_grants.scope, with no Xero call. This is the check that
