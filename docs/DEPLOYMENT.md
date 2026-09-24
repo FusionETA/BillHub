@@ -220,6 +220,23 @@ UPDATE billhub.accounts SET wazzocr_account_id = <id> WHERE id = 1;
 node scripts/preflight.js
 ```
 
+Every script and the server read `.env` by default and `$ENV_FILE` when it is
+set, so the two configurations can sit side by side instead of one overwriting
+the other:
+
+```bash
+ENV_FILE=.env.wazzocr node scripts/preflight.js
+```
+
+That matters because the dry run can be done from a laptop — Bills Hub's own
+tables have to be on WazzOCR's cluster, but the process reading them does not.
+Point `DB_*` at the cluster (your IP will need to be in its trusted sources) and
+the same checks run locally.
+
+Set `XERO_TENANT_ALLOWLIST` to a value that matches no tenant id for that run.
+Every write is then refused while every read still works, which is exactly what a
+verification wants.
+
 Read-only and **no Xero call at all**, so WazzOCR's refresh token is not rotated
 and its pipeline is untouched. It proves:
 

@@ -9,7 +9,7 @@
 // `only` is what makes a test deployment safe: point it at the Demo Company and
 // nothing else is synced or shown. Pair it with XERO_TENANT_ALLOWLIST, which
 // refuses Xero *writes* outside the list no matter what the database says.
-require('dotenv').config();
+require('../lib/env');
 const db = require('../db');
 const grantSource = require('../lib/grantSource');
 const entities = require('../models/entities');

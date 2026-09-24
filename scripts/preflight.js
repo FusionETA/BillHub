@@ -18,7 +18,7 @@
 // saved back, but run it when nobody is pushing bills through WazzOCR, and take
 // a backup first:
 //   SELECT id, refresh_token FROM wazzocr.xero_grants;
-require('dotenv').config();
+require('../lib/env');
 const db = require('../db');
 const entities = require('../models/entities');
 const grantSource = require('../lib/grantSource');
@@ -47,9 +47,16 @@ const STORE = BORROWED ? `WazzOCR's Xero tables (${DB_NAME})` : "Bills Hub's own
     if (process.env[key]) ok(`${key} is set`);
     else bad(`${key} is not set`, 'see .env.example');
   }
-  if (/not-real|placeholder|changeme/i.test(process.env.XERO_CLIENT_SECRET || '')) {
-    bad('XERO_CLIENT_SECRET looks like a placeholder',
-        BORROWED ? "copy the real one from WazzOCR's .env" : 'copy it from your own Xero app');
+  // Catch a half-filled config here, with the variable named, rather than as a
+  // DNS failure or a decryption error three sections later.
+  const PLACEHOLDER = /^PASTE-|not-real|placeholder|changeme/i;
+  for (const key of ['XERO_CLIENT_SECRET', 'APP_ENCRYPTION_KEY', 'DB_HOST', 'DB_USER', 'DB_PASSWORD']) {
+    if (PLACEHOLDER.test(process.env[key] || '')) {
+      bad(`${key} is still a placeholder`,
+          key === 'APP_ENCRYPTION_KEY' && BORROWED
+            ? "copy it VERBATIM from WazzOCR's .env — a generated one cannot decrypt its token"
+            : 'fill it in before running this');
+    }
   }
   if (String(process.env.AUTH_DISABLED).toLowerCase() === 'true') {
     warn('AUTH_DISABLED=true — no sign-in at all.', 'fine on localhost; never on a public host');

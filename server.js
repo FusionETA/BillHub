@@ -10,7 +10,7 @@
 // Module 3 (Notifications): the scheduled WhatsApp digest of draft bills.
 // Module 4 (Recharge): intercompany recharges — an AR invoice in the payer and
 // a mirror bill in the subsidiary, settled by intercompany transfer.
-require('dotenv').config();
+require('./lib/env');
 
 const path = require('path');
 const express = require('express');

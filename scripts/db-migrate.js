@@ -1,7 +1,7 @@
 // Applies db/schema.sql to the configured MySQL database (verified TLS).
 // Idempotent — every statement is CREATE TABLE IF NOT EXISTS.
 // Usage: node scripts/db-migrate.js
-require('dotenv').config();
+require('../lib/env');
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');

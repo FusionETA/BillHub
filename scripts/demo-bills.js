@@ -8,7 +8,7 @@
 // Guarded: it refuses any organisation whose name does not look like a Xero
 // demo or trial company, unless --force is given. These are real Xero
 // documents; creating a dozen of them in a live ledger is not a small mess.
-require('dotenv').config();
+require('../lib/env');
 const db = require('../db');
 const grantSource = require('../lib/grantSource');
 const xero = require('../lib/xero');

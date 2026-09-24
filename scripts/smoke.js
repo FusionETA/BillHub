@@ -5,7 +5,7 @@
 // Says what is working, what is missing, and what to do about it. Every call is
 // a GET — it creates nothing in Xero and changes nothing in the database, so it
 // is safe to run against production.
-require('dotenv').config();
+require('../lib/env');
 const db = require('../db');
 const grantSource = require('../lib/grantSource');
 const xero = require('../lib/xero');

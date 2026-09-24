@@ -1,6 +1,6 @@
 // Connectivity check: pings the database and lists the Bills Hub tables.
 // Usage: node scripts/db-test.js
-require('dotenv').config();
+require('../lib/env');
 const db = require('../db');
 
 (async () => {

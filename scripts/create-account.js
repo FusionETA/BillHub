@@ -9,7 +9,7 @@
 // The password is read from the OWNER_PASSWORD environment variable, or typed
 // at the prompt — never from argv, so it stays out of your shell history and
 // out of the process list.
-require('dotenv').config();
+require('../lib/env');
 const readline = require('readline');
 const db = require('../db');
 const accounts = require('../models/accounts');

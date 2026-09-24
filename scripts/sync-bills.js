@@ -3,7 +3,7 @@
 //   node scripts/sync-bills.js              all accounts, incremental
 //   node scripts/sync-bills.js --full       ignore cursors, re-read everything
 //   node scripts/sync-bills.js --account 1
-require('dotenv').config();
+require('../lib/env');
 const db = require('../db');
 const sync = require('../billhub/sync');
 
