@@ -28,6 +28,7 @@ const OUT = path.resolve(arg('--out', '.env'));
 const DB_NAME = arg('--db-name', 'billhub');
 const PORT = arg('--port', '3311');
 const SECRET_OVERRIDE = arg('--client-secret');
+const PUBLIC_URL = arg('--public-url');
 
 if (!FROM || has('--help')) {
   console.log(`
@@ -38,6 +39,9 @@ Usage:
   --out <path>             Where to write. Default .env
   --db-name <name>         Bills Hub's own database. Default billhub
   --port <n>               Port to listen on. Default 3311
+  --public-url <url>       Where Bills Hub is reached, e.g.
+                           https://billhub.example.com. Sets PUBLIC_BASE_URL and
+                           the digest's own callback URL.
   --client-secret <value>  Use this instead of WazzOCR's, e.g. a second secret
                            generated for Bills Hub so the two are revocable
                            independently.
@@ -116,7 +120,9 @@ const body = `# Bills Hub — written by scripts/adopt-wazzocr-env.js on ${new D
 
 PORT=${PORT}
 NODE_ENV=production
+# Behind nginx, so req.protocol and req.ip come from the forwarded headers.
 TRUST_PROXY_HOPS=1
+${PUBLIC_URL ? `PUBLIC_BASE_URL=${PUBLIC_URL}` : '# PUBLIC_BASE_URL=https://billhub.example.com   <- set this once TLS is up'}
 
 # Sign-in is ON. Bills Hub can submit, approve and pay in the connected Xero
 # organisations, so an open instance hands that to anyone who finds the URL.
@@ -156,6 +162,7 @@ ${ca || caPem || '# DB_CA_CERT=certs/do-mysql-ca.crt   <- set one of these'}
 # nothing syncs or sends while you are still looking around.
 SYNC_INTERVAL_MINUTES=0
 SYNC_CONCURRENCY=2
+${PUBLIC_URL ? `DIGEST_QUEUE_URL=${PUBLIC_URL}` : '# DIGEST_QUEUE_URL='}
 # WAZZUP_CHANNEL_ID=
 # WAZZUP_API_KEY=
 # WAZZUP_SENDER_PHONE=
@@ -173,6 +180,7 @@ console.log(`    DB_USER              ${src.DB_USER}`);
 console.log(`    DB_PASSWORD          fingerprint ${fingerprint(src.DB_PASSWORD)}`);
 console.log('\n  Set for Bills Hub:');
 console.log(`    DB_NAME              ${DB_NAME}          (its own; create it if you have not)`);
+if (PUBLIC_URL) console.log(`    PUBLIC_BASE_URL      ${PUBLIC_URL}`);
 console.log(`    WAZZOCR_DB_NAME      ${wazzocrSchema}          (read across into)`);
 console.log('    XERO_TENANT_ALLOWLIST  matches nothing — all writes refused');
 console.log('    AUTH_DISABLED        false');
