@@ -1684,7 +1684,22 @@
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)' }}>
             {s.frequency === 'daily' && <Switch label="Skip weekends" checked={s.workingDaysOnly} onChange={v => save({ workingDaysOnly: v })} />}
-            <Switch label={'Include a per-entity breakdown of the top ' + s.breakdownLimit} checked={s.includeBreakdown} onChange={v => save({ includeBreakdown: v })} />
+            <Switch label="Include a per-entity breakdown" checked={s.includeBreakdown} onChange={v => save({ includeBreakdown: v })} />
+            {s.includeBreakdown && <div style={{ maxWidth: 300, marginLeft: 52 }}>
+              <Select label="How many entities to list" value={String(s.breakdownLimit)}
+                onChange={v => save({ breakdownLimit: Number(v) })}
+                options={[
+                  { label: 'Every entity with a draft', value: '0' },
+                  { label: 'The top 3', value: '3' },
+                  { label: 'The top 5', value: '5' },
+                  { label: 'The top 10', value: '10' },
+                  { label: 'The top 20', value: '20' }
+                ]} />
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+                WhatsApp caps a message at 4,096 characters. If the full list would not fit,
+                the message keeps the totals and the link and says how many entities it left out.
+              </div>
+            </div>}
             <Switch label="Send even when there are no draft bills" checked={s.sendWhenEmpty} onChange={v => save({ sendWhenEmpty: v })} />
           </div>
         </div>

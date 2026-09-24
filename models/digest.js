@@ -58,6 +58,9 @@ async function updateSettings(accountId, fields = {}) {
     if (BOOLS.has(key)) params.push(fields[key] ? 1 : 0);
     else if (key === 'sendTime') params.push(normaliseTime(fields[key]));
     else if (key === 'senderPhone') params.push(normalisePhone(fields[key]));
+    // 0 means "every entity". A ceiling anyway, so a typo cannot build a
+    // message that takes minutes to render and gets truncated regardless.
+    else if (key === 'breakdownLimit') params.push(Math.min(200, Math.max(0, Math.trunc(Number(fields[key]) || 0))));
     else params.push(fields[key]);
   }
   // A key arriving as null clears it; an absent key leaves it alone, so saving

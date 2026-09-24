@@ -244,6 +244,58 @@ const at = (iso) => new Date(iso);
   check('their history survives them',
     (await req('GET', '/api/digest/runs', { cookie })).body.runs.length > 0);
 
+  // ── How many entities the breakdown lists ─────────────────────────────────
+  console.log('\nThe per-entity breakdown');
+
+  const digestLib = require('../billhub/digest');
+  const fakeSummary = (n, nameLength = 18) => ({
+    count: n * 2,
+    total: n * 1000,
+    entities: n,
+    byEntity: Array.from({ length: n }, (_, i) => ({
+      name: ('Entity ' + (i + 1)).padEnd(nameLength, 'x'),
+      count: 2,
+      total: 1000
+    })),
+    oldest: '2026-09-02',
+    oldestEntity: 'Entity 1'
+  });
+  const build = (limit, summary) => digestLib.buildMessage({
+    settings: { include_breakdown: 1, breakdown_limit: limit, timezone: 'Asia/Kuala_Lumpur',
+                queue_url: 'https://billhub.example.com' },
+    summary, accountName: 'Ayu Borneo Group', entityCount: 41, currency: 'RM'
+  });
+
+  const all = build(0, fakeSummary(25));
+  check('0 lists every entity', (all.match(/^• Entity /gm) || []).length === 25,
+    (all.match(/^• Entity /gm) || []).length);
+  check('and adds no "more entities" line', !/more entit/.test(all));
+
+  const top3 = build(3, fakeSummary(25));
+  check('a top-N still lists only N', (top3.match(/^• Entity /gm) || []).length === 3);
+  check('and says how many it left out', /• …and 22 more entities/.test(top3), top3);
+
+  // The reason 0 needs a ceiling at all: nothing stops an account having
+  // hundreds of entities, and WhatsApp rejects a message over 4,096.
+  const huge = build(0, fakeSummary(400, 60));
+  check('a list too long for WhatsApp is trimmed', huge.length <= 4000, huge.length);
+  check('the trimmed message still says how many were left out',
+    /• …and \d+ more entities/.test(huge), huge.slice(-200));
+  check('and it keeps the link, which matters more than the last rows',
+    /Open the queue: https:\/\/billhub\.example\.com/.test(huge));
+  check('and keeps the oldest draft', /Oldest draft:/.test(huge));
+
+  // The whole point: the setting is reachable from the UI, not hardcoded.
+  await req('PATCH', '/api/digest/settings', { cookie, body: { breakdownLimit: 0 } });
+  const everything = await req('GET', '/api/digest/preview', { cookie });
+  check('the API accepts 0 and the preview then lists every entity',
+    !/more entit/.test(everything.body.text), everything.body.text);
+
+  const back = await req('PATCH', '/api/digest/settings', { cookie, body: { breakdownLimit: 999 } });
+  check('an absurd limit is clamped rather than stored', back.body.settings.breakdownLimit === 200,
+    back.body.settings.breakdownLimit);
+  await req('PATCH', '/api/digest/settings', { cookie, body: { breakdownLimit: 3 } });
+
   // Disarm. These are invented numbers on what may be a real Wazzup channel,
   // and the scheduler would try them at the next send time.
   await db.execute('DELETE FROM digest_recipient_entities');

@@ -74,9 +74,18 @@ async function draftSummary(accountId, tenantIds = null) {
 
 // ── The message ─────────────────────────────────────────────────────────────
 
+// WhatsApp caps a text message at 4096 characters. 41 entities at roughly 45
+// characters each fits comfortably, but "every entity" has no natural ceiling —
+// so the breakdown is trimmed to whatever the budget allows rather than being
+// allowed to produce a message the API will reject.
+const MAX_MESSAGE = 4000;
+
 // WhatsApp treats *text* as bold.
 function buildMessage({ settings, summary, accountName, entityCount, currency = 'RM', now = new Date(), scopeLabel = null }) {
   const lines = [];
+  const tail = [];          // oldest draft, the link — kept whatever else is cut
+  let breakdown = [];       // one line per entity
+  let omitted = 0;          // entities a deliberate top-N left out
   lines.push('*Bills Hub · Draft bills*');
   lines.push(`${schedule.describeNow(settings.timezone, now)}`);
   lines.push(scopeLabel || `${accountName} · ${entityCount} Xero ${entityCount === 1 ? 'entity' : 'entities'}`);
@@ -90,25 +99,48 @@ function buildMessage({ settings, summary, accountName, entityCount, currency = 
     lines.push(`Total value: *${currency} ${money(summary.total)}*`);
 
     if (settings.include_breakdown && summary.byEntity.length) {
-      lines.push('');
-      const limit = Math.max(1, Number(settings.breakdown_limit || 3));
-      for (const e of summary.byEntity.slice(0, limit)) {
-        lines.push(`• ${e.name} — ${e.count} bill${e.count === 1 ? '' : 's'} · ${currency} ${money(e.total)}`);
-      }
-      const rest = summary.byEntity.length - limit;
-      if (rest > 0) lines.push(`• …and ${rest} more ${rest === 1 ? 'entity' : 'entities'}`);
+      // 0 means every entity. Anything else is a deliberate top-N.
+      const configured = Number(settings.breakdown_limit);
+      const limit = Number.isFinite(configured) && configured > 0 ? configured : summary.byEntity.length;
+      breakdown = summary.byEntity.slice(0, limit).map((e) =>
+        `• ${e.name} — ${e.count} bill${e.count === 1 ? '' : 's'} · ${currency} ${money(e.total)}`);
+      omitted = summary.byEntity.length - breakdown.length;
     }
 
     if (summary.oldest) {
-      lines.push('');
-      lines.push(`Oldest draft: ${shortDate(summary.oldest)}${summary.oldestEntity ? ` · ${summary.oldestEntity}` : ''}`);
+      tail.push('');
+      tail.push(`Oldest draft: ${shortDate(summary.oldest)}${summary.oldestEntity ? ` · ${summary.oldestEntity}` : ''}`);
     }
   }
 
   if (settings.queue_url) {
-    lines.push('');
-    lines.push(`Open the queue: ${settings.queue_url}`);
+    tail.push('');
+    tail.push(`Open the queue: ${settings.queue_url}`);
   }
+
+  // Fit the breakdown into what is left of the message budget. Everything else
+  // — the totals, the oldest draft, the link — matters more than the last few
+  // entity lines, so those are reserved first and the list gives way.
+  if (breakdown.length) {
+    const fixed = [...lines, '', ...tail].join('\n').length;
+    const more = (n) => `• …and ${n} more ${n === 1 ? 'entity' : 'entities'}`;
+    let budget = MAX_MESSAGE - fixed;
+    let shown = 0;
+    let used = 0;
+    for (const line of breakdown) {
+      // Keep room for the "…and N more" line we may still have to add.
+      const reserve = shown + 1 < breakdown.length ? more(breakdown.length - shown - 1).length + 1 : 0;
+      if (used + line.length + 1 + reserve > budget) break;
+      used += line.length + 1;
+      shown += 1;
+    }
+    const dropped = omitted + (breakdown.length - shown);
+    lines.push('');
+    lines.push(...breakdown.slice(0, shown));
+    if (dropped > 0) lines.push(more(dropped));
+  }
+
+  lines.push(...tail);
   return lines.join('\n');
 }
 
