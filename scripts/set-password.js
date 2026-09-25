@@ -11,7 +11,7 @@ require('../lib/env');
 const db = require('../db');
 const users = require('../models/users');
 const { hashPassword } = require('../auth/passwords');
-const { askHidden, rejectWeak } = require('../lib/prompt');
+const { askHidden, rejectWeak, MIN_PASSWORD } = require('../lib/prompt');
 
 (async () => {
   const email = process.argv[2];
@@ -29,7 +29,7 @@ const { askHidden, rejectWeak } = require('../lib/prompt');
     process.exit(1);
   }
 
-  const password = process.env.NEW_PASSWORD || await askHidden('New password (min 12 chars): ');
+  const password = process.env.NEW_PASSWORD || await askHidden(`New password (min ${MIN_PASSWORD} chars): `);
   const weak = rejectWeak(password);
   if (weak) { console.error(`\n${weak}\n`); process.exit(1); }
   if (!process.env.NEW_PASSWORD) {

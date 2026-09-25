@@ -95,7 +95,11 @@ function check(name, ok, detail) {
   const state = url.searchParams.get('state');
   check('the state is signed and parses back to the account',
     xero.parseState(state).accountId === 1, xero.parseState(state));
-  check('a tampered state is rejected', xero.parseState(state.slice(0, -1) + '0') === null);
+  // Flip the last character to something it is not. Hardcoding '0' made this
+  // pass fifteen times in sixteen: the signature is hex, so one run in sixteen
+  // ends in '0' already and the tampered state was the real one.
+  const tampered = state.slice(0, -1) + (state.endsWith('0') ? '1' : '0');
+  check('a tampered state is rejected', xero.parseState(tampered) === null, tampered.slice(-8));
   check('a forged state is rejected', xero.parseState('bh.1.deadbeef.00000000000000000000000000000000') === null);
 
   const cb = await req('GET', `/api/xero/callback?code=abc123&state=${encodeURIComponent(state)}`);
