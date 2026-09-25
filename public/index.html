@@ -410,6 +410,8 @@
       { key: 'action',    label: '',          width: 110, min: 80 }
     ];
     const COLUMN_STORE = 'billhub.bills.columns';
+    const COLUMN_GAP = 8;       // between columns
+    const ROW_PAD_X = 16;       // each side of a row
 
     // Remembered per browser. Storage can throw or come back empty in a private
     // window, so every read and write is guarded and the defaults still work.
@@ -426,7 +428,9 @@
       }, []);
       const widthOf = (c) => Math.round(widths[c.key] || c.width);
       const template = BILL_COLUMNS.map((c) => widthOf(c) + 'px').join(' ');
-      const totalWidth = BILL_COLUMNS.reduce((n, c) => n + widthOf(c), 0) + 32;
+      const totalWidth = BILL_COLUMNS.reduce((n, c) => n + widthOf(c), 0)
+        + COLUMN_GAP * (BILL_COLUMNS.length - 1)
+        + ROW_PAD_X * 2;
       return { widths, save, widthOf, template, totalWidth };
     }
 
@@ -1077,7 +1081,7 @@
                   ? <Button variant="outline" size="md" onClick={() => { setF(EMPTY_FILTERS); setTab('all'); }}>Clear filters</Button>
                   : <Button variant="primary" size="md" onClick={() => runSync(true)} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>{syncing ? 'Syncing…' : 'Sync from Xero'}</Button>} />
             : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto', overflowY: 'hidden', opacity: loading ? .55 : 1, transition: 'opacity var(--dur-fast)' }}>
-          <div style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: 8, padding: '11px 16px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+          <div style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: COLUMN_GAP, padding: `11px ${ROW_PAD_X}px`, background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
             {BILL_COLUMNS.map(c => c.key === 'sel'
               ? <div key="sel"><Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map(r => r.id))} /></div>
               : <HeaderCell key={c.key} col={c} width={cols.widthOf(c)} sort={sort} dir={dir}
@@ -1086,7 +1090,7 @@
                   onResetWidth={() => { const next = { ...cols.widths }; delete next[c.key]; cols.save(next); }} />)}
           </div>
           {rows.map(r => (
-            <div key={r.id} className="feta-hover" style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: selected.includes(r.id) ? 'var(--orange-50)' : 'var(--surface-card)' }}>
+            <div key={r.id} className="feta-hover" style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: COLUMN_GAP, padding: `13px ${ROW_PAD_X}px`, borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: selected.includes(r.id) ? 'var(--orange-50)' : 'var(--surface-card)' }}>
               <div><Checkbox checked={selected.includes(r.id)} onChange={() => toggleRow(r.id)} /></div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{r.entityCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.entityShort}</span></div>
               <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.contact}</div>
