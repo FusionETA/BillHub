@@ -34,8 +34,16 @@ function buildWhere(accountId, f = {}) {
     params.push(f.status);
   }
   if (f.contact) {
-    where.push('b.contact_name = ?');
-    params.push(f.contact);
+    // One name or several. Kept as separate values rather than a joined string
+    // because supplier names contain commas often enough to matter.
+    const names = (Array.isArray(f.contact) ? f.contact : [f.contact]).filter(Boolean);
+    if (names.length === 1) {
+      where.push('b.contact_name = ?');
+      params.push(names[0]);
+    } else if (names.length > 1) {
+      where.push(`b.contact_name IN (${names.map(() => '?').join(',')})`);
+      params.push(...names);
+    }
   }
   // Free-text box: matches a reference, an invoice number, a supplier, or an
   // exact amount, because the UI offers one field for all four.

@@ -476,7 +476,6 @@ than sent an empty digest, unless *"send even when there are no draft bills"* is
 on. Every attempt is recorded in `digest_runs` **with the exact text**, so
 "what did finance actually receive on Tuesday?" has an answer.
 
-`POST /api/digest/test` sends one message to one number to check the channel.
 `POST /api/digest/send` sends the real digest immediately without touching
 `last_sent_for`, so the scheduled run still happens.
 
@@ -588,7 +587,6 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/digest` | Settings, recipients, preview and recent sends |
 | `PATCH` | `/api/digest/settings` | Schedule, content and channel |
 | `GET` | `/api/digest/preview` | The message (`?recipientId=` to scope it) |
-| `POST` | `/api/digest/test` | One message to one number |
 | `POST` | `/api/digest/send` | Send the real digest now |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/digest/recipients[/:id]` | Recipients and their entities |
 | `GET` | `/api/digest/runs` | The send log |

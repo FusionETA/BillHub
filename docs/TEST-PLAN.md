@@ -107,7 +107,6 @@ WhatsApp number.
 
 | Do | Expect |
 | --- | --- |
-| **Send test message** to your own number | A WhatsApp arrives. The run log shows it as `test` |
 | Look at **Message preview** | Real figures, matching the Bills screen |
 | Add a second recipient, **Assign** them one entity | The preview, switched to them, is scoped to that entity |
 | **Send digest now** | Each recipient gets their own scoped message |

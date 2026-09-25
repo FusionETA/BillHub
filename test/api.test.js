@@ -227,6 +227,49 @@ function check(name, ok, detail) {
   const cts = await req('GET', '/api/bills/contacts', { cookie });
   check('contacts endpoint lists distinct suppliers', cts.body.contacts.length === 10, cts.body.contacts.length);
 
+  // ── Filtering by contact ──────────────────────────────────────────────────
+  // Expected counts come from the database rather than from me counting the
+  // fixture by eye, which is how a test ends up asserting the wrong number
+  // and being "fixed" by changing the code.
+  console.log('\nContact filter');
+  const top = (await req('GET', '/api/bills/contacts', { cookie })).body.contacts.slice(0, 2);
+  const countFor = async (names) => Number((await db.getOne(
+    `SELECT COUNT(*) AS n FROM bills WHERE account_id = 1 AND contact_name IN (${names.map(() => '?').join(',')})`,
+    names)).n);
+
+  const one = await req('GET', '/api/bills?limit=500&contact=' + encodeURIComponent(top[0].name), { cookie });
+  check('one contact filters to just that supplier',
+    one.body.rows.length === await countFor([top[0].name]), { got: one.body.rows.length, name: top[0].name });
+  check('and every row really is theirs',
+    one.body.rows.every((r) => r.contact === top[0].name), one.body.rows.map((r) => r.contact));
+
+  const both = await req('GET', '/api/bills?limit=500'
+    + '&contact=' + encodeURIComponent(top[0].name)
+    + '&contact=' + encodeURIComponent(top[1].name), { cookie });
+  check('two contacts return both suppliers, not neither',
+    both.body.rows.length === await countFor([top[0].name, top[1].name]),
+    { got: both.body.rows.length, names: top.map((c) => c.name) });
+  check('and it is genuinely wider than one of them',
+    both.body.rows.length > one.body.rows.length, { one: one.body.rows.length, both: both.body.rows.length });
+  check('the rows are drawn from both',
+    new Set(both.body.rows.map((r) => r.contact)).size === 2,
+    [...new Set(both.body.rows.map((r) => r.contact))]);
+
+  // A supplier name with a comma used to be split in two by the old
+  // comma-joined query string, matching nothing.
+  await db.execute(
+    "UPDATE bills SET contact_name = 'A TO Z CARPET, SDN BHD' WHERE account_id = 1 AND contact_name = ? LIMIT 1",
+    [top[0].name]);
+  const comma = await req('GET', '/api/bills?limit=500&contact=' + encodeURIComponent('A TO Z CARPET, SDN BHD'), { cookie });
+  check('a comma in a supplier name is just a comma',
+    comma.body.rows.length === 1 && comma.body.rows[0].contact === 'A TO Z CARPET, SDN BHD',
+    comma.body.rows.map((r) => r.contact));
+  await db.execute("UPDATE bills SET contact_name = ? WHERE account_id = 1 AND contact_name = 'A TO Z CARPET, SDN BHD'", [top[0].name]);
+
+  const none = await req('GET', '/api/bills?limit=500', { cookie });
+  check('no contact parameter still returns everything',
+    none.body.rows.length > both.body.rows.length, none.body.rows.length);
+
   // The first thing anyone curls after a deploy, so it has to say which grant
   // the process is actually running on — the one setting that changes what the
   // deployment can reach.

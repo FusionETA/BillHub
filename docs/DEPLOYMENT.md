@@ -405,8 +405,7 @@ accounts. Then set each one's `formatKey`, or it falls back to `generic-csv`.
 **The digest does not arrive** — check `GET /api/digest` first: `enabled`,
 `configured`, and what `nextRun` says. Then `GET /api/digest/runs` — a `failed`
 row carries Wazzup's own error, and a `skipped` row means that recipient had no
-drafts in scope. `POST /api/digest/test` proves the channel independently of the
-schedule.
+drafts in scope.
 
 **The digest arrives at the wrong hour** — `send_time` is local to
 `digest_settings.timezone`, not the server clock. Check the timezone before the

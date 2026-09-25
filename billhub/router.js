@@ -52,7 +52,10 @@ function filtersFrom(query) {
   return {
     status: query.status || 'all',
     tenantIds,
-    contact: query.contact || null,
+    // Tenant ids are GUIDs so they travel comma-joined; supplier names are
+    // not, and "A TO Z CARPET & FURNISHINGS, SDN BHD" would split in two. So
+    // contacts arrive as repeated ?contact= parameters instead.
+    contact: [].concat(query.contact || []).map(String).filter(Boolean),
     search: query.q || null,
     amountFrom: query.amountFrom || null,
     amountTo: query.amountTo || null,

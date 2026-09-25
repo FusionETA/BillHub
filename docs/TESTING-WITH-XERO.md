@@ -160,7 +160,7 @@ the bank account.
 > customer registration.
 
 ### Notifications — fully testable
-Add your own number, **Send test message**, then **Send digest now**. Leave the
+Add your own number, then **Send digest now**. Leave the
 schedule off until the recipient list is right; `last_sent_for` prevents repeats
 but not a digest to the wrong people.
 

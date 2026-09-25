@@ -3,7 +3,6 @@
 //   GET    /api/digest                  settings, recipients, preview, history
 //   PATCH  /api/digest/settings         schedule, content and channel
 //   GET    /api/digest/preview          the message as it would be sent
-//   POST   /api/digest/test             one message to one number
 //   POST   /api/digest/send             send now, to everyone
 //   GET    /api/digest/recipients
 //   POST   /api/digest/recipients
@@ -109,18 +108,6 @@ router.get('/preview', async (req, res) => {
       recipient: recipient ? vm.recipientRow(recipient) : null
     });
   } catch (err) { fail(res, err); }
-});
-
-router.post('/test', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
-  const phone = (req.body || {}).phone;
-  if (!phone) return res.status(400).json({ error: 'A WhatsApp number is required.' });
-  try {
-    res.json(await digest.sendTest(accountId, phone));
-  } catch (err) {
-    console.error('[digest] test send failed:', err.message);
-    fail(res, err, 502);
-  }
 });
 
 // Send the real digest now, outside the schedule. Does not touch

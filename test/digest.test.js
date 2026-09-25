@@ -230,14 +230,6 @@ const at = (iso) => new Date(iso);
   await digest.tick({ now: at('2026-09-26T01:30:00Z') });  // Saturday
   check('the scheduler respects working days', sends.length === 0, sends.length);
 
-  console.log('\nTest message');
-  sends.length = 0;
-  const test = await req('POST', '/api/digest/test', { cookie, body: { phone: '+60 3-1234 5678' } });
-  check('a test goes to the number given', test.status === 200 && sends[0].phone === '60312345678', sends[0] && sends[0].phone);
-  check('and is marked as a test', /test message from Bills Hub/.test(sends[0].text));
-  const testRun = (await req('GET', '/api/digest/runs', { cookie })).body.runs[0];
-  check('the log distinguishes it from a real digest', testRun.trigger === 'test', testRun.trigger);
-
   console.log('\nDeleting');
   const del = await req('DELETE', '/api/digest/recipients/' + off.body.recipient.id, { cookie });
   check('a recipient can be removed', del.status === 200);

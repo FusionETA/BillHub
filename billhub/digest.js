@@ -228,33 +228,6 @@ async function sendDigest(accountId, { triggerType = 'manual', now = new Date(),
   };
 }
 
-// One message to one number, to check the channel works. Logged as a test so it
-// never looks like a real digest in the history.
-async function sendTest(accountId, phone, { now = new Date() } = {}) {
-  const config = await digestModel.getSendingConfig(accountId);
-  if (!config.channel_id || !config.apiKey) {
-    throw Object.assign(new Error('The Wazzup channel is not configured yet.'), { statusCode: 400 });
-  }
-  // Normalise once, so the number sent, the number logged and the number
-  // reported back are the same value.
-  const to = wazzup.normalisePhone(phone);
-  if (!to) throw Object.assign(new Error('That is not a WhatsApp number I can read.'), { statusCode: 400 });
-
-  const { text, summary } = await previewFor(accountId, null, { now });
-  const body = `${text}\n\n_(test message from Bills Hub)_`;
-  const out = await wazzup.sendMessage({
-    channelId: config.channel_id, apiKey: config.apiKey, phone: to, text: body
-  });
-  await digestModel.logRun(accountId, {
-    phone: to, triggerType: 'test',
-    status: out.ok ? 'sent' : 'failed',
-    draftCount: summary.count, draftTotal: summary.total,
-    message: body, error: out.ok ? null : out.error
-  });
-  if (!out.ok) throw Object.assign(new Error(out.error), { statusCode: 502 });
-  return { ok: true, phone: to };
-}
-
 // ── Scheduler ───────────────────────────────────────────────────────────────
 
 let timer = null;
@@ -300,6 +273,6 @@ function stopScheduler() {
 }
 
 module.exports = {
-  draftSummary, buildMessage, previewFor, sendDigest, sendTest,
+  draftSummary, buildMessage, previewFor, sendDigest,
   tick, startScheduler, stopScheduler
 };

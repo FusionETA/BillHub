@@ -537,7 +537,7 @@
       { label: 'Due date', value: 'due' },
       { label: 'Paid date', value: 'paid' }
     ];
-    const EMPTY_FILTERS = { entities: [], contact: '', q: '', dateType: '', dateFrom: '', dateTo: '', amountFrom: '', amountTo: '' };
+    const EMPTY_FILTERS = { entities: [], contacts: [], q: '', dateType: '', dateFrom: '', dateTo: '', amountFrom: '', amountTo: '' };
     const TRIGGER = { width: '100%', height: 46, display: 'flex', alignItems: 'center', gap: 8, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 14px', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer' };
 
     // Multi-select over the connected Xero orgs. No selection means "all", which
@@ -583,6 +583,56 @@
       </div>;
     }
 
+    // The same shape as EntityPicker, because the two sit side by side and
+    // behaving differently would be the surprise. The search box is not
+    // optional here: an account of this size has hundreds of suppliers.
+    function ContactPicker({ contacts, selected, onChange }) {
+      const [open, setOpen] = useState(false);
+      const [q, setQ] = useState('');
+      const ref = useClickOutside(open, useCallback(() => setOpen(false), []));
+
+      const shown = contacts.filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase()));
+      const label = selected.length === 0
+        ? (contacts.length ? 'All contacts' : 'No contacts yet')
+        : selected.length === 1 ? selected[0] : selected.length + ' contacts';
+      const toggle = (name) => onChange(selected.includes(name) ? selected.filter(x => x !== name) : selected.concat(name));
+
+      return <div ref={ref} style={{ position: 'relative' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>Contact</div>
+        <button className="feta-hover" onClick={() => setOpen(o => !o)} style={TRIGGER}>
+          <span style={{ flex: 1, ...Ellip, textAlign: 'left' }}>{label}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>▾</span>
+        </button>
+        {open && <div style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', left: 0, width: 380, maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: 12 }}>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search contacts"
+            style={{ width: '100%', height: 38, border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '0 12px', fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600, color: 'var(--text-body)', outline: 'none', marginBottom: 10 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {selected.length ? selected.length + ' selected' : 'All contacts'}
+              {q && ' · ' + shown.length + ' of ' + contacts.length + ' shown'}
+            </span>
+            <span style={{ flex: 1 }} />
+            {/* Selecting the filtered set is the whole point of searching for
+                "BIRD NEST" when the same supplier is spelled three ways. */}
+            {q && shown.length > 0 && <button
+              onClick={() => onChange(Array.from(new Set(selected.concat(shown.map(c => c.name)))))}
+              style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Add these {shown.length}</button>}
+            <button onClick={() => onChange([])} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Clear</button>
+          </div>
+          <div style={{ maxHeight: 260, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {shown.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>No contacts match.</div>}
+            {shown.map(c => (
+              <div key={c.name} onClick={() => toggle(c.name)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', minWidth: 0 }}>
+                <Checkbox checked={selected.includes(c.name)} onChange={() => toggle(c.name)} />
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-body)', ...Ellip }}>{c.name}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}>{c.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>}
+      </div>;
+    }
+
     // Full-width message card used for the loading, error, empty and
     // not-connected states, so the table area never just goes blank.
     function Placeholder({ title, message, action, tone }) {
@@ -616,13 +666,15 @@
       const dAmountFrom = useDebounced(f.amountFrom);
       const dAmountTo = useDebounced(f.amountTo);
       const entityKey = f.entities.join(',');
+      const contactKey = f.contacts.join('\u0000');   // NUL: cannot occur in a Xero contact name
 
       useEffect(() => {
         let cancelled = false;
         setLoading(true);
         const qs = new URLSearchParams({ status: tab, limit: '200' });
         if (entityKey) qs.set('entities', entityKey);
-        if (f.contact) qs.set('contact', f.contact);
+        // Repeated rather than joined, so a comma in a supplier name is just a comma.
+        for (const c of f.contacts) qs.append('contact', c);
         if (dq) qs.set('q', dq);
         if (f.dateType) qs.set('dateType', f.dateType);
         if (f.dateFrom) qs.set('dateFrom', f.dateFrom);
@@ -635,7 +687,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [tab, entityKey, f.contact, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, nonce, refreshKey]);
+      }, [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, nonce, refreshKey]);
 
       useEffect(() => {
         api.get('/api/bills/contacts').then(d => setContacts(d.contacts || [])).catch(() => {});
@@ -723,7 +775,7 @@
         URL.revokeObjectURL(url);
       }
 
-      const activeFilters = Boolean(f.entities.length || f.contact || f.q || f.dateFrom || f.dateTo || f.amountFrom || f.amountTo);
+      const activeFilters = Boolean(f.entities.length || f.contacts.length || f.q || f.dateFrom || f.dateTo || f.amountFrom || f.amountTo);
       const notConnected = xero && xero.connected === false;
       const lastSynced = data && data.lastSyncedAt
         ? new Date(data.lastSyncedAt).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -789,8 +841,7 @@
               <EntityPicker entities={entities} selected={f.entities} onChange={v => set({ entities: v })} />
             </div>
             <div style={{ flex: '1 1 220px', minWidth: 200 }}>
-              <Select label="Contact" value={f.contact} onChange={v => set({ contact: v })}
-                options={[{ label: 'All contacts', value: '' }].concat(contacts.map(c => ({ label: c.name + ' (' + c.count + ')', value: c.name })))} />
+              <ContactPicker contacts={contacts} selected={f.contacts} onChange={v => set({ contacts: v })} />
             </div>
             <div style={{ flex: '1 1 220px', minWidth: 200 }}>
               <Input label="Amount or reference" placeholder="e.g. 246.15 or MYIN26" value={f.q} onChange={v => set({ q: v })} />
@@ -1521,7 +1572,6 @@
       const [assignFor, setAssignFor] = useState(null);
       const [previewFor, setPreviewFor] = useState('');       // '' = the group digest
       const [previewText, setPreviewText] = useState('');
-      const [testPhone, setTestPhone] = useState('');
       // A new recipient being typed in the bottom row.
       const [draft, setDraft] = useState({ name: '', phone: '', role: ROLES[0], allEntities: true, tenantIds: [] });
 
@@ -1593,19 +1643,6 @@
         } catch (e) {
           onToast({ title: 'Could not remove', message: e.message, tone: 'error' });
         }
-      }
-
-      async function sendTest() {
-        const phone = testPhone.trim() || (s && s.senderPhone) || '';
-        if (!phone) { onToast({ title: 'No number', message: 'Enter a WhatsApp number to send the test to.', tone: 'error' }); return; }
-        setBusy(true);
-        try {
-          const r = await api.post('/api/digest/test', { phone });
-          onToast({ title: 'Test sent', message: 'Check WhatsApp on ' + r.phone + '.' });
-          reload();
-        } catch (e) {
-          onToast({ title: 'Test failed', message: e.message, tone: 'error' });
-        } finally { setBusy(false); }
       }
 
       async function sendNow() {
@@ -1787,10 +1824,6 @@
         </div>}
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div style={{ width: 210 }}>
-            <Input label="Send a test to" placeholder={s.senderPhoneFmt || '+60 12-345 6789'} value={testPhone} onChange={setTestPhone} />
-          </div>
-          <Button variant="ghost" size="md" onClick={sendTest} style={busy || !s.configured ? { opacity: .5, pointerEvents: 'none' } : null}>Send test message</Button>
           <Button variant="primary" size="md" onClick={sendNow}
             style={busy || !s.configured || !recipients.some(r => r.on) ? { opacity: .5, pointerEvents: 'none' } : null}>
             Send digest now
