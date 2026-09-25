@@ -46,35 +46,55 @@ async function refreshContactNames(accountId, tenantId, cursor, full) {
   const db = require('../db');
   const since = full || !cursor ? null : new Date(new Date(cursor).getTime() - 60000);
 
-  let corrected = 0;
+  const changed = new Map();          // contactId -> current name in Xero
   let newest = cursor ? new Date(cursor) : null;
+  let readSomething = false;
 
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const payload = await xero.api(accountId, tenantId, `/Contacts?page=${page}`, {
       headers: since ? { 'If-Modified-Since': toXeroDateHeader(since) } : {}
     });
     if (payload === null) break;                 // 304: nothing has changed
+    readSomething = true;
     const list = payload.Contacts || [];
     if (!list.length) break;
-
     for (const c of list) {
       if (!c.ContactID || !c.Name) continue;
-      const name = bills.fit(c.Name, 'contact_name');
-      // The <> is what keeps this cheap: the overwhelming majority of contacts
-      // in a page have not actually changed name.
-      const res = await db.execute(
-        `UPDATE bills SET contact_name = ?
-          WHERE account_id = ? AND xero_tenant_id = ? AND contact_id = ? AND contact_name <> ?`,
-        [name, accountId, tenantId, c.ContactID, name]
-      );
-      corrected += res.affectedRows;
+      changed.set(c.ContactID, bills.fit(c.Name, 'contact_name'));
       const u = c.UpdatedDateUTC ? parseXeroDate(c.UpdatedDateUTC) : null;
       if (u && (!newest || u > newest)) newest = u;
     }
-    if (list.length < 100) break;                // Xero pages contacts at 100
+    if (list.length < PAGE_SIZE) break;
   }
 
-  return { corrected, cursor: newest };
+  // Compare in memory against one query, rather than sending an UPDATE per
+  // contact to a database that is a network hop away. On a first run that is
+  // one SELECT instead of several hundred round trips, and on a normal run the
+  // 304 above means neither happens.
+  let corrected = 0;
+  if (changed.size) {
+    const held = await db.query(
+      `SELECT DISTINCT contact_id, contact_name FROM bills
+        WHERE account_id = ? AND xero_tenant_id = ? AND contact_id IS NOT NULL`,
+      [accountId, tenantId]
+    );
+    for (const row of held) {
+      const name = changed.get(row.contact_id);
+      if (!name || name === row.contact_name) continue;
+      const res = await db.execute(
+        `UPDATE bills SET contact_name = ?
+          WHERE account_id = ? AND xero_tenant_id = ? AND contact_id = ?`,
+        [name, accountId, tenantId, row.contact_id]
+      );
+      corrected += res.affectedRows;
+    }
+  }
+
+  // Move the cursor after any clean read — including one that found no
+  // contacts, or contacts Xero gave no UpdatedDateUTC for. Leaving it unset
+  // there is what turned a one-off catch-up into every sync re-reading every
+  // contact, for good.
+  return { corrected, cursor: newest || (readSomething ? new Date() : null) };
 }
 
 async function syncTenant(accountId, tenantId, tenantName, { full = false, intercoNames = new Set(), knownCurrency = null } = {}) {

@@ -267,6 +267,34 @@ const requests = [];
   check('a later run corrects nothing', quiet.renamed === 0, quiet.renamed);
   check('and asks Xero for contacts just once', contactsCalls - callsBefore === 1, contactsCalls - callsBefore);
 
+  // An organisation whose contacts carry no UpdatedDateUTC used to leave the
+  // cursor unset, so every sync re-read every contact in it — turning a one-off
+  // catch-up into a permanent cost. The symptom was "why is syncing slow now",
+  // which is not a symptom that points anywhere near this line.
+  console.log('\nAn organisation that gives Xero no dates to go on');
+
+  await db.execute("UPDATE bill_sync_state SET contacts_cursor_utc = NULL WHERE xero_tenant_id = 'synctE'");
+  let datelessCalls = 0;
+  xero.api = async (accountId, tenantId, path, opts = {}) => {
+    if (path === '/Organisation') return { Organisations: [{ BaseCurrency: 'MYR' }] };
+    if (path.startsWith('/Contacts')) {
+      datelessCalls += 1;
+      if ((opts.headers || {})['If-Modified-Since']) return null;   // 304 once a cursor exists
+      return { Contacts: [{ ContactID: CONTACT, Name: 'Renamed Sdn. Bhd.' }] };  // no UpdatedDateUTC
+    }
+    return null;
+  };
+
+  await sync.syncAccount(ACCOUNT, { tenantIds: ['synctE'] });
+  const datelessCursor = await db.getOne("SELECT contacts_cursor_utc FROM bill_sync_state WHERE xero_tenant_id = 'synctE'");
+  check('the cursor is set even with no date to take it from',
+    Boolean(datelessCursor.contacts_cursor_utc), datelessCursor);
+
+  const callsAfterFirst = datelessCalls;
+  await sync.syncAccount(ACCOUNT, { tenantIds: ['synctE'] });
+  check('so the next run is one call, not a full re-read',
+    datelessCalls - callsAfterFirst === 1, datelessCalls - callsAfterFirst);
+
   await db.execute("DELETE FROM bills WHERE xero_tenant_id = 'synctE'");
   await db.execute("DELETE FROM bill_sync_state WHERE xero_tenant_id = 'synctE'");
   await db.execute("DELETE FROM entities WHERE xero_tenant_id = 'synctE'");
