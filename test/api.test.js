@@ -227,6 +227,52 @@ function check(name, ok, detail) {
   const cts = await req('GET', '/api/bills/contacts', { cookie });
   check('contacts endpoint lists distinct suppliers', cts.body.contacts.length === 10, cts.body.contacts.length);
 
+  // ── Sorting ───────────────────────────────────────────────────────────────
+  console.log('\nSorting');
+  // No limit of its own: two limit parameters in one URL parse to NaN and
+  // silently fall back to the default, which made this look like a code bug.
+  const sorted = (q) => req('GET', '/api/bills?' + (/(^|&)limit=/.test(q) ? q : 'limit=50&' + q), { cookie }).then((r) => r.body);
+
+  const byContactAsc = await sorted('sort=contact&dir=asc');
+  const byContactDesc = await sorted('sort=contact&dir=desc');
+  check('it echoes what it sorted by', byContactAsc.page.sort === 'contact' && byContactAsc.page.dir === 'asc', byContactAsc.page);
+  check('ascending really is ascending',
+    byContactAsc.rows.map((r) => r.contact).join('|') ===
+    byContactAsc.rows.map((r) => r.contact).sort((a, b) => a.localeCompare(b)).join('|'),
+    byContactAsc.rows.slice(0, 4).map((r) => r.contact));
+  check('and descending is its reverse',
+    byContactDesc.rows[0].contact === byContactAsc.rows[byContactAsc.rows.length - 1].contact,
+    { first: byContactDesc.rows[0].contact, last: byContactAsc.rows[byContactAsc.rows.length - 1].contact });
+
+  const byOut = await sorted('sort=outstanding&dir=desc');
+  const outs = byOut.rows.map((r) => Number(String(r.outFmt).replace(/,/g, '')));
+  check('amounts sort as numbers, not as text',
+    outs.every((v, i) => i === 0 || outs[i - 1] >= v), outs.slice(0, 6));
+
+  // Status ordered by where a bill is in its life, not alphabetically —
+  // otherwise "sort by status" puts approval before draft.
+  const byStatus = await sorted('sort=status&dir=asc');
+  const rank = { draft: 1, approval: 2, payment: 3, paid: 4 };
+  const ranks = byStatus.rows.map((r) => rank[r.uiStatus] || 5);
+  check('status sorts by workflow order', ranks.every((v, i) => i === 0 || ranks[i - 1] <= v), ranks.slice(0, 8));
+
+  check('an unknown column falls back rather than erroring',
+    (await sorted('sort=deleteFromBills&dir=asc')).page.sort === 'date');
+  check('and an unknown direction falls back too',
+    (await sorted('sort=date&dir=sideways')).page.dir === 'desc');
+
+  // The reason ORDER BY always ends with b.id: without a deterministic
+  // tiebreaker two pages of equal-valued rows can repeat and skip.
+  const s1 = (await sorted('sort=status&dir=asc&limit=5&offset=0')).rows.map((r) => r.id);
+  const s2 = (await sorted('sort=status&dir=asc&limit=5&offset=5')).rows.map((r) => r.id);
+  check('paging a heavily-tied sort does not repeat a row',
+    s2.every((id) => !s1.includes(id)), { s1, s2 });
+  const s1again = (await sorted('sort=status&dir=asc&limit=5&offset=0')).rows.map((r) => r.id);
+  check('and the same query twice gives the same page', s1.join() === s1again.join(), { s1, s1again });
+
+  check('sorting does not change how many there are',
+    byContactAsc.page.total === byOut.page.total, { a: byContactAsc.page.total, b: byOut.page.total });
+
   // ── Paging ────────────────────────────────────────────────────────────────
   // The list used to stop at the first 200 with "narrow the filters to see the
   // rest", which is not an answer when the rest is 36,000 bills.

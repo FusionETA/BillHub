@@ -75,8 +75,33 @@ function buildWhere(accountId, f = {}) {
   return { sql: where.join(' AND '), params };
 }
 
+// What the table may be sorted by. A whitelist rather than interpolation:
+// the value arrives from a query string, and ORDER BY cannot be parameterised.
+//
+// Status sorts by where a bill is in its life rather than alphabetically —
+// "approval, draft, paid, payment" is the wrong answer to "sort by status".
+const SORTS = {
+  entity: 'e.code',
+  contact: 'b.contact_name',
+  status: "CASE ui_status WHEN 'draft' THEN 1 WHEN 'approval' THEN 2 WHEN 'payment' THEN 3 WHEN 'paid' THEN 4 ELSE 5 END",
+  reference: 'b.reference',
+  date: 'b.bill_date',
+  dueDate: 'b.due_date',
+  paid: 'b.amount_paid',
+  outstanding: 'b.amount_due',
+  files: 'b.attachment_count'
+};
+
+function orderBy(sort, dir) {
+  const col = SORTS[sort] || SORTS.date;
+  const way = String(dir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  // b.id last, always: two bills with the same date must come back in the same
+  // order every time, or paging quietly repeats and skips rows.
+  return `${col} ${way}, b.id DESC`;
+}
+
 // One page of bills, newest bill date first, decorated with entity code/name.
-async function list(accountId, wazzocrAccountId, filters = {}, { limit = 100, offset = 0 } = {}) {
+async function list(accountId, wazzocrAccountId, filters = {}, { limit = 100, offset = 0, sort = 'date', dir = 'desc' } = {}) {
   const { sql, params } = buildWhere(accountId, filters);
   const rows = await db.query(
     `SELECT b.*, ${UI_STATUS_SQL} AS ui_status,
@@ -87,7 +112,7 @@ async function list(accountId, wazzocrAccountId, filters = {}, { limit = 100, of
        LEFT JOIN ${CONNECTIONS} c
          ON c.account_id = ? AND c.xero_tenant_id = b.xero_tenant_id
       WHERE ${sql}
-      ORDER BY b.bill_date DESC, b.id DESC
+      ORDER BY ${orderBy(sort, dir)}
       LIMIT ? OFFSET ?`,
     [wazzocrAccountId, ...params, Number(limit), Number(offset)]
   );
@@ -263,7 +288,7 @@ async function applyStatus(accountId, id, xeroStatus) {
 }
 
 module.exports = {
-  list, listMeta, tabCounts, stats, contacts,
+  list, listMeta, tabCounts, stats, contacts, SORTS,
   getById, getManyByIds, upsertFromXero, applyStatus, fit, WIDTHS,
   UI_STATUS_SQL
 };

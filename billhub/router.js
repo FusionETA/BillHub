@@ -71,10 +71,14 @@ router.get('/', async (req, res) => {
     const filters = filtersFrom(req.query);
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
+    // Unknown column names fall back to the default rather than erroring: a
+    // stale bookmark should show you bills, not a 400.
+    const sort = bills.SORTS[req.query.sort] ? req.query.sort : 'date';
+    const dir = String(req.query.dir).toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
     const [rows, meta, counts, stats, entityRows, lastSynced] = await Promise.all([
-      bills.list(accountId, wazzocrAccountId, filters, { limit, offset }),
+      bills.list(accountId, wazzocrAccountId, filters, { limit, offset, sort, dir }),
       bills.listMeta(accountId, filters),
       bills.tabCounts(accountId, filters),
       bills.stats(accountId, filters),
@@ -101,7 +105,7 @@ router.get('/', async (req, res) => {
         ? `Your organisations report in ${cur.mixed.join(' and ')}. Totals below add them together — filter to one entity for a figure you can rely on.`
         : null,
       lastSyncedAt: lastSynced,
-      page: { limit, offset, total: meta.count, hasMore: offset + rows.length < meta.count }
+      page: { limit, offset, total: meta.count, hasMore: offset + rows.length < meta.count, sort, dir }
     });
   } catch (err) {
     console.error('[bills] list failed:', err.message);

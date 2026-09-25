@@ -391,7 +391,95 @@
     }
     const Code = ({ children }) => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--blue-600)', background: 'var(--blue-50)', padding: '2px 5px', borderRadius: 4, flex: '0 0 auto' }}>{children}</span>;
     const Ellip = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
-    const GRID = '44px 172px minmax(150px,1.1fr) 148px minmax(150px,1.1fr) 92px 92px 92px 96px 46px 104px';
+    // The bills table, as data. Widths are plain pixels rather than fr units so
+    // that dragging one edge moves that edge and nothing else — with fr, every
+    // other column shifts and the drag feels broken.
+    // `sort` is the key the API understands; a column without one cannot be
+    // sorted by (a checkbox and a button are not orderings).
+    const BILL_COLUMNS = [
+      { key: 'sel',       label: '',          width: 44,  min: 44,  max: 44 },
+      { key: 'entity',    label: 'Entity',    width: 172, sort: 'entity' },
+      { key: 'contact',   label: 'From',      width: 196, sort: 'contact' },
+      { key: 'status',    label: 'Status',    width: 148, sort: 'status' },
+      { key: 'reference', label: 'Reference', width: 196, sort: 'reference' },
+      { key: 'date',      label: 'Date',      width: 100, sort: 'date' },
+      { key: 'dueDate',   label: 'Due date',  width: 104, sort: 'dueDate' },
+      { key: 'paid',      label: 'Paid',      width: 96,  sort: 'paid', align: 'right' },
+      { key: 'out',       label: 'Due',       width: 100, sort: 'outstanding', align: 'right' },
+      { key: 'files',     label: 'Files',     width: 58,  sort: 'files', align: 'center' },
+      { key: 'action',    label: '',          width: 110, min: 80 }
+    ];
+    const COLUMN_STORE = 'billhub.bills.columns';
+
+    // Remembered per browser. Storage can throw or come back empty in a private
+    // window, so every read and write is guarded and the defaults still work.
+    function useColumnWidths() {
+      const [widths, setWidths] = useState(() => {
+        try {
+          const saved = JSON.parse(localStorage.getItem(COLUMN_STORE) || '{}');
+          return saved && typeof saved === 'object' ? saved : {};
+        } catch { return {}; }
+      });
+      const save = useCallback((next) => {
+        setWidths(next);
+        try { localStorage.setItem(COLUMN_STORE, JSON.stringify(next)); } catch { /* not worth failing over */ }
+      }, []);
+      const widthOf = (c) => Math.round(widths[c.key] || c.width);
+      const template = BILL_COLUMNS.map((c) => widthOf(c) + 'px').join(' ');
+      const totalWidth = BILL_COLUMNS.reduce((n, c) => n + widthOf(c), 0) + 32;
+      return { widths, save, widthOf, template, totalWidth };
+    }
+
+    // One header: click the label to sort, drag the right edge to resize,
+    // double-click that edge to put the column back to its default.
+    function HeaderCell({ col, width, sort, dir, onSort, onResize, onResetWidth }) {
+      const dragging = useRef(false);
+      const active = col.sort && sort === col.sort;
+
+      const startDrag = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragging.current = true;
+        const startX = e.clientX;
+        const startWidth = width;
+        const min = col.min || 60;
+        const max = col.max || 600;
+        const move = (ev) => onResize(Math.min(max, Math.max(min, startWidth + ev.clientX - startX)));
+        const up = () => {
+          window.removeEventListener('mousemove', move);
+          window.removeEventListener('mouseup', up);
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          // Let the click that ends the drag pass before re-arming the sort.
+          setTimeout(() => { dragging.current = false; }, 0);
+        };
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', up);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+      };
+
+      // Both defined and equal. Comparing them raw made every column that
+      // sets neither look pinned, because undefined === undefined.
+      const fixedWidth = col.min != null && col.min === col.max;
+      return <div style={{ position: 'relative', minWidth: 0, textAlign: col.align || 'left' }}>
+        {col.sort
+          ? <button onClick={() => { if (!dragging.current) onSort(col.sort); }}
+              title={'Sort by ' + col.label}
+              style={{ border: 'none', background: 'none', padding: 0, font: 'inherit', letterSpacing: 'inherit',
+                textTransform: 'inherit', cursor: 'pointer', color: active ? 'var(--color-primary)' : 'inherit',
+                display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%' }}>
+              <span style={{ ...Ellip }}>{col.label}</span>
+              <span style={{ fontSize: 9, opacity: active ? 1 : .35 }}>{active ? (dir === 'asc' ? '▲' : '▼') : '▾'}</span>
+            </button>
+          : <span>{col.label}</span>}
+        {!fixedWidth && <span onMouseDown={startDrag} onDoubleClick={(e) => { e.stopPropagation(); onResetWidth(); }}
+          title="Drag to resize · double-click to reset"
+          style={{ position: 'absolute', top: -11, right: -12, width: 12, height: 34, cursor: 'col-resize', zIndex: 2 }} />}
+      </div>;
+    }
+
+
 
     // Pay a selection of approved bills. Everything shown here comes from
     // /api/payments/preview, which runs the same checks the real create does —
@@ -725,6 +813,30 @@
       const [nonce, setNonce] = useState(0);
       const [page, setPage] = useState(1);
       const [pageSize, setPageSize] = useState(100);
+      const [sort, setSort] = useState('date');
+      const [dir, setDir] = useState('desc');
+      const cols = useColumnWidths();
+
+      // Ascending means nothing to a reader. Say what the order actually is,
+      // in the vocabulary of the column: dates are old/new, money is small/large.
+      const SORT_WORDS = {
+        date: ['oldest first', 'newest first'],
+        dueDate: ['soonest first', 'latest first'],
+        paid: ['smallest first', 'largest first'],
+        outstanding: ['smallest first', 'largest first'],
+        files: ['fewest first', 'most first'],
+        status: ['drafts first', 'paid first']
+      };
+      const sortedCol = BILL_COLUMNS.find(c => c.sort === sort);
+      const sortLabel = 'Sorted by ' + (sortedCol ? sortedCol.label.toLowerCase() : 'bill date')
+        + ', ' + (SORT_WORDS[sort] || ['A to Z', 'Z to A'])[dir === 'asc' ? 0 : 1];
+
+      // Clicking the column you are already sorted by reverses it; a new column
+      // starts descending, which is what you want for dates and amounts.
+      const applySort = (key) => {
+        if (key === sort) setDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        else { setSort(key); setDir('desc'); }
+      };
 
       const set = (patch) => setF(prev => ({ ...prev, ...patch }));
       const reload = () => setNonce(n => n + 1);
@@ -739,7 +851,7 @@
       // result set is usually empty. Held in a ref as well as state so the fetch
       // below can skip the doomed request rather than scanning 36,000 rows for a
       // page we are about to leave.
-      const filterKey = [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo].join('|');
+      const filterKey = [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, sort, dir].join('|');
       const lastFilterKey = useRef(filterKey);
       const filtersJustChanged = lastFilterKey.current !== filterKey;
       useEffect(() => {
@@ -753,7 +865,7 @@
         let cancelled = false;
         setLoading(true);
         const qs = new URLSearchParams({
-          status: tab, limit: String(pageSize), offset: String((page - 1) * pageSize)
+          status: tab, limit: String(pageSize), offset: String((page - 1) * pageSize), sort, dir
         });
         if (entityKey) qs.set('entities', entityKey);
         // Repeated rather than joined, so a comma in a supplier name is just a comma.
@@ -770,7 +882,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, page, pageSize, nonce, refreshKey]);
+      }, [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, page, pageSize, sort, dir, nonce, refreshKey]);
 
       useEffect(() => {
         api.get('/api/bills/contacts').then(d => setContacts(d.contacts || [])).catch(() => {});
@@ -949,7 +1061,7 @@
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 4px 10px', minHeight: 20 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(data && data.metaText) || (loading ? 'Loading…' : '')}</span>
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sorted by bill date, newest first</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sortLabel}</span>
         </div>
 
         {error
@@ -965,20 +1077,23 @@
                   ? <Button variant="outline" size="md" onClick={() => { setF(EMPTY_FILTERS); setTab('all'); }}>Clear filters</Button>
                   : <Button variant="primary" size="md" onClick={() => runSync(true)} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>{syncing ? 'Syncing…' : 'Sync from Xero'}</Button>} />
             : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto', overflowY: 'hidden', opacity: loading ? .55 : 1, transition: 'opacity var(--dur-fast)' }}>
-          <div style={{ minWidth: 1290, display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 8, padding: '11px 16px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-            <div><Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map(r => r.id))} /></div>
-            <div>Entity</div><div>From</div><div>Status</div><div>Reference</div><div>Date</div><div>Due date</div>
-            <div style={{ textAlign: 'right' }}>Paid</div><div style={{ textAlign: 'right' }}>Due</div><div style={{ textAlign: 'center' }}>Files</div><div />
+          <div style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: 8, padding: '11px 16px', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            {BILL_COLUMNS.map(c => c.key === 'sel'
+              ? <div key="sel"><Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map(r => r.id))} /></div>
+              : <HeaderCell key={c.key} col={c} width={cols.widthOf(c)} sort={sort} dir={dir}
+                  onSort={applySort}
+                  onResize={(w) => cols.save({ ...cols.widths, [c.key]: w })}
+                  onResetWidth={() => { const next = { ...cols.widths }; delete next[c.key]; cols.save(next); }} />)}
           </div>
           {rows.map(r => (
-            <div key={r.id} className="feta-hover" style={{ minWidth: 1290, display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: selected.includes(r.id) ? 'var(--orange-50)' : 'var(--surface-card)' }}>
+            <div key={r.id} className="feta-hover" style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: selected.includes(r.id) ? 'var(--orange-50)' : 'var(--surface-card)' }}>
               <div><Checkbox checked={selected.includes(r.id)} onChange={() => toggleRow(r.id)} /></div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{r.entityCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.entityShort}</span></div>
               <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.contact}</div>
-              <div><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span></div>
+              <div style={{ minWidth: 0, ...Ellip }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span></div>
               <div style={{ minWidth: 0, ...Ellip }}><span style={{ color: 'var(--text-body)' }}>{r.reference}</span><span style={{ color: 'var(--text-subtle)' }}>{r.refNote}</span></div>
-              <div style={{ color: 'var(--text-body)' }}>{r.dateFmt}</div>
-              <div style={{ color: r.dueColor, fontWeight: r.dueWeight }}>{r.dueFmt}</div>
+              <div style={{ color: 'var(--text-body)', ...Ellip }}>{r.dateFmt}</div>
+              <div style={{ color: r.dueColor, fontWeight: r.dueWeight, ...Ellip }}>{r.dueFmt}</div>
               <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>{r.paidFmt}</div>
               <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{r.outFmt}</div>
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{r.filesFmt}</div>
