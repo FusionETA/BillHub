@@ -142,6 +142,16 @@ async function markPosted(accountId, id, { xeroBatchPaymentId, payments = [], st
   });
 }
 
+// Written per payment rather than in one go at the end, so a run that dies
+// halfway leaves an honest record: the bills already paid in Xero are marked
+// here too, and a retry can tell them from the ones still owing.
+async function recordLinePayment(batchId, xeroInvoiceId, paymentId) {
+  await db.execute(
+    'UPDATE payment_batch_lines SET xero_payment_id = ? WHERE batch_id = ? AND xero_invoice_id = ?',
+    [paymentId, batchId, xeroInvoiceId]
+  );
+}
+
 async function markPostFailed(accountId, id, message) {
   await db.execute(
     'UPDATE payment_batches SET post_error = ? WHERE account_id = ? AND id = ?',
@@ -183,6 +193,7 @@ async function summary(accountId) {
 }
 
 module.exports = {
+  recordLinePayment,
   list, getById, lines, billsInLiveBatches, nextReference, create,
   markDownloaded, markPosted, markPostFailed, cancel, summary, LIVE_STATUSES
 };

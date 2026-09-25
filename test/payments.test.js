@@ -19,6 +19,8 @@ const db = require('../db');
 const xeroCalls = [];
 let batchPaymentCounter = 0;
 let failNextBatchPayment = null;
+let paymentCounter = 0;
+let failPaymentForRef = null;   // fail the single payment whose Reference matches
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   xeroCalls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
@@ -45,6 +47,24 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
         }))
       }]
     };
+  }
+  // Individual payments: the fallback used when an organisation's Xero edition
+  // has no bill batch payments.
+  if (opts.method === 'POST' && path === '/Payments') {
+    const sent = opts.body.Payments[0];
+    if (failPaymentForRef && String(sent.Reference || '').includes(failPaymentForRef)) {
+      failPaymentForRef = null;
+      const err = new Error('Payment amount exceeds the amount outstanding on this invoice.');
+      err.statusCode = 400;
+      throw err;
+    }
+    paymentCounter += 1;
+    return { Payments: [{
+      PaymentID: `single-${paymentCounter}`.padEnd(36, '0'),
+      Status: 'AUTHORISED',
+      Amount: sent.Amount,
+      Invoice: { InvoiceID: sent.Invoice.InvoiceID }
+    }] };
   }
   if (path.startsWith('/Accounts')) {
     return { Accounts: [{ AccountID: 'acct-synced-1', Code: '092', Name: 'HSBC Collections 2201', BankAccountNumber: '220199887766', CurrencyCode: 'MYR', Status: 'ACTIVE', BankAccountType: 'BANK' }] };
@@ -286,6 +306,84 @@ function check(name, ok, detail) {
     posted.canUpload === false && posted.postedNote, posted);
   check('its lines carry payee, account and amount',
     posted.lines.length >= 1 && posted.lines[0].hasAccount, posted.lines[0]);
+
+  // ── When Xero has no bill batch payments ──────────────────────────────────
+  // Verified against a real GLOBAL organisation: POST /BatchPayments is refused
+  // with "Batch payment status not valid for update" while POST /Payments for
+  // the same bill and bank account is accepted seconds later. Malaysian orgs
+  // are GLOBAL, so for this deployment the fallback is the normal path, not the
+  // exception — it gets the same scrutiny as the batch path.
+  console.log('\nFalling back to individual payments');
+
+  // Two bills in one organisation, forced payable. The resume case needs a
+  // second line to still be owing after the first one fails.
+  const twoBills = await db.query(
+    "SELECT id, reference FROM bills WHERE account_id = 1 AND xero_tenant_id = 'tenant-abm' ORDER BY id LIMIT 2");
+  const ids = twoBills.map((r) => r.id);
+  // Earlier cases in this suite left these bills sitting in a posted batch, and
+  // a bill may only be in one live batch at a time.
+  await db.execute("UPDATE payment_batches SET status = 'cancelled' WHERE account_id = 1");
+  const repay = () => db.execute(
+    `UPDATE bills SET xero_status = 'AUTHORISED', amount_due = 500, amount_paid = 0 WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  await repay();
+  const mkBatch = async () => (await req('POST', '/api/payments/batches', { cookie, body: {
+    billIds: twoBills.map((r) => r.id), bankAccountId: abmBank.id, paymentDate: '2026-09-25'
+  } })).body;
+
+  const b1 = await mkBatch();
+  failNextBatchPayment = 'Batch payment status not valid for update';
+  xeroCalls.length = 0;
+  const fb = await req('POST', '/api/payments/batches/' + b1.id + '/uploaded', { cookie, body: {} });
+
+  check('the refusal is not surfaced as a failure', fb.status === 200, fb.body);
+  check('it says it fell back', fb.body.method === 'individual', fb.body);
+  check('one Xero payment per bill', fb.body.payments === twoBills.length, fb.body);
+  check('and it used /Payments, not /BatchPayments',
+    xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length === twoBills.length,
+    xeroCalls.map((c) => c.method + ' ' + c.path));
+  check('the note explains why, in words a person can act on',
+    /does not accept bill batch payments/.test(fb.body.note || ''), fb.body.note);
+
+  const b1lines = await db.query('SELECT xero_payment_id FROM payment_batch_lines WHERE batch_id = ?', [b1.id]);
+  check('every line records the payment that settled it',
+    b1lines.every((l) => l.xero_payment_id), b1lines);
+  const b1row = await db.getOne('SELECT status, xero_batch_payment_id FROM payment_batches WHERE id = ?', [b1.id]);
+  check('the batch is uploaded with no batch-payment id', b1row.status === 'uploaded' && !b1row.xero_batch_payment_id, b1row);
+  const paidNow = await db.getOne(
+    `SELECT COUNT(*) AS n FROM bills WHERE xero_status = 'PAID' AND id IN (${ids.map(() => '?').join(',')})`, ids);
+  check('the bills show as paid without waiting for a sync', Number(paidNow.n) === ids.length, paidNow);
+
+  // The one that must never go wrong.
+  const again = await req('POST', '/api/payments/batches/' + b1.id + '/uploaded', { cookie, body: {} });
+  check('posting it a second time is refused, not paid twice', again.status === 409, again.body);
+  check('and no further payment was sent',
+    xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length === twoBills.length,
+    xeroCalls.filter((c) => c.path === '/Payments').length);
+
+  console.log('\nResuming a run that died halfway');
+  // Reset the bills so a second batch is possible.
+  await repay();
+  await db.execute("UPDATE payment_batches SET status = 'cancelled' WHERE account_id = 1");
+  const b2 = await mkBatch();
+  failNextBatchPayment = 'Batch payment status not valid for update';
+  failPaymentForRef = twoBills[1].reference || 'nothing-matches';
+  xeroCalls.length = 0;
+  const partial = await req('POST', '/api/payments/batches/' + b2.id + '/uploaded', { cookie, body: {} });
+  check('a mid-run refusal is reported, not swallowed', partial.status >= 400, partial.status);
+
+  const b2lines = await db.query('SELECT xero_invoice_id, xero_payment_id FROM payment_batch_lines WHERE batch_id = ? ORDER BY id', [b2.id]);
+  const done = b2lines.filter((l) => l.xero_payment_id).length;
+  check('the payments that succeeded are recorded', done >= 1 && done < b2lines.length, b2lines);
+
+  const sentBefore = xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length;
+  const resumed = await req('POST', '/api/payments/batches/' + b2.id + '/uploaded', { cookie, body: {} });
+  const sentAfter = xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length;
+  check('retrying finishes the job', resumed.status === 200, resumed.body);
+  check('and only pays what was still owing, not the whole batch again',
+    sentAfter - sentBefore === b2lines.length - done, { sentBefore, sentAfter, done, total: b2lines.length });
+  check('every line is settled now',
+    (await db.query('SELECT xero_payment_id FROM payment_batch_lines WHERE batch_id = ?', [b2.id]))
+      .every((l) => l.xero_payment_id));
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();

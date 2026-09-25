@@ -246,6 +246,75 @@ async function renderFile(accountId, batchId) {
 
 // Records the batch in Xero as a BatchPayment. Refuses a second attempt when one
 // already exists, so a retry after a network wobble can't double-pay.
+// One Xero payment per bill, for organisations whose edition has no bill batch
+// payments. The outcome is the same — every bill reaches Paid — but Xero shows
+// one payment per bill instead of a single batch, which is worth knowing when
+// the bank statement shows one lump sum to reconcile against.
+//
+// Each id is saved the instant Xero returns it. If the tenth of twenty fails,
+// the nine that succeeded are recorded as paid and a retry starts at the tenth.
+async function payIndividually(accountId, batch, unpaid, details, status, allLines) {
+  const paid = [];
+  for (const line of unpaid) {
+    let out;
+    try {
+      out = await xero.api(accountId, batch.xero_tenant_id, '/Payments', {
+        method: 'POST',
+        body: { Payments: [{
+          Invoice: { InvoiceID: line.xero_invoice_id },
+          Account: { AccountID: batch.xero_account_id },
+          Date: batch.payment_date instanceof Date
+            ? batch.payment_date.toISOString().slice(0, 10)
+            : String(batch.payment_date).slice(0, 10),
+          Amount: Number(line.amount),
+          Reference: String(line.reference || details || '').slice(0, DETAILS_MAX)
+        }] }
+      });
+    } catch (e) {
+      const message = paid.length
+        ? `Paid ${paid.length} of ${unpaid.length} bill(s), then Xero refused ${line.contact_name || line.xero_invoice_id}: ${e.message}. Marking uploaded again will resume from there.`
+        : `Xero refused the payment for ${line.contact_name || line.xero_invoice_id}: ${e.message}`;
+      await batches.markPostFailed(accountId, batch.id, message);
+      throw err(message, e.statusCode || 502);
+    }
+    const payment = out?.Payments?.[0];
+    if (!payment?.PaymentID) {
+      const message = `Xero accepted a payment for ${line.contact_name || line.xero_invoice_id} but returned no id.`;
+      await batches.markPostFailed(accountId, batch.id, message);
+      throw err(message, 502);
+    }
+    await batches.recordLinePayment(batch.id, line.xero_invoice_id, payment.PaymentID);
+    paid.push({ paymentId: payment.PaymentID, xeroInvoiceId: line.xero_invoice_id });
+  }
+
+  // No batch id exists in this mode; the line ids above are the record.
+  await batches.markPosted(accountId, batch.id, { xeroBatchPaymentId: null, status, payments: [] });
+  await applyPaidLocally(accountId, batch, unpaid);
+
+  return {
+    method: 'individual',
+    payments: paid.length,
+    total: Number(batch.total),
+    note: `This Xero organisation does not accept bill batch payments, so ${paid.length} individual payment(s) were recorded instead.`
+  };
+}
+
+// Reflect new balances locally so the Bills list is right immediately rather
+// than after the next sync.
+async function applyPaidLocally(accountId, batch, lines) {
+  const db = require('../db');
+  for (const l of lines) {
+    await db.execute(
+      `UPDATE bills
+          SET amount_paid = amount_paid + ?, amount_due = GREATEST(amount_due - ?, 0),
+              xero_status = IF(amount_due - ? <= 0, 'PAID', xero_status),
+              fully_paid_on = IF(amount_due - ? <= 0, ?, fully_paid_on)
+        WHERE account_id = ? AND id = ?`,
+      [l.amount, l.amount, l.amount, l.amount, batch.payment_date, accountId, l.bill_id]
+    );
+  }
+}
+
 async function postToXero(accountId, batchId, { reference = null, status = 'uploaded' } = {}) {
   const batch = await batches.getById(accountId, batchId);
   if (!batch) throw err('Batch not found.', 404);
@@ -257,9 +326,22 @@ async function postToXero(accountId, batchId, { reference = null, status = 'uplo
   const lineRows = await batches.lines(batchId);
   if (!lineRows.length) throw err('That batch has no lines.');
 
+  // A batch posted as individual payments has no batch id to check, so its
+  // lines carry the record instead. Getting this wrong pays bills twice.
+  const unpaid = lineRows.filter((l) => !l.xero_payment_id);
+  if (!unpaid.length) {
+    throw err(`Every bill in ${batch.reference} is already recorded as paid in Xero.`, 409);
+  }
+
   // Xero truncates or rejects a long Details; do it here so the value we send is
   // the value we stored.
   const details = String(reference || batch.reference || '').slice(0, DETAILS_MAX);
+
+  // Part-way through an individual run: finish the rest rather than retrying
+  // the batch, which would pay the ones that already went through again.
+  if (unpaid.length < lineRows.length) {
+    return payIndividually(accountId, batch, unpaid, details, status, lineRows);
+  }
 
   const body = {
     BatchPayments: [{
@@ -286,16 +368,14 @@ async function postToXero(accountId, batchId, { reference = null, status = 'uplo
     // which reads like a bug in the request rather than a missing feature.
     // Verified against a GLOBAL organisation: the same bill and the same bank
     // account are accepted by POST /Payments moments later.
+    // Xero rejects PAYBATCH on editions without bill batch payments — GLOBAL
+    // among them — with "Batch payment status not valid for update", which
+    // reads like a malformed request rather than a missing feature. Verified
+    // against a GLOBAL organisation: the same bill and the same bank account
+    // are accepted by POST /Payments moments later. So do that instead.
     if (/status not valid for update/i.test(e.message || '')) {
-      const better = err(
-        'Xero refused a batch payment for this organisation. Bill batch payments are not '
-        + 'available on every Xero edition, and this one appears not to have them — the same '
-        + 'bill can still be paid individually. The bank file is unaffected and already '
-        + 'downloaded; what fails here is only recording the payment back in Xero.',
-        422
-      );
-      await batches.markPostFailed(accountId, batchId, better.message);
-      throw better;
+      console.warn(`[payments] ${batch.reference}: Xero refused a batch payment; paying the ${unpaid.length} bill(s) individually.`);
+      return payIndividually(accountId, batch, unpaid, details, status, lineRows);
     }
     await batches.markPostFailed(accountId, batchId, e.message);
     throw e;
@@ -317,21 +397,13 @@ async function postToXero(accountId, batchId, { reference = null, status = 'uplo
     }))
   });
 
-  // Reflect the new balances locally so the Bills list is right immediately
-  // rather than after the next sync.
-  const db = require('../db');
-  for (const l of lineRows) {
-    await db.execute(
-      `UPDATE bills
-          SET amount_paid = amount_paid + ?, amount_due = GREATEST(amount_due - ?, 0),
-              xero_status = IF(amount_due - ? <= 0, 'PAID', xero_status),
-              fully_paid_on = IF(amount_due - ? <= 0, ?, fully_paid_on)
-        WHERE account_id = ? AND id = ?`,
-      [l.amount, l.amount, l.amount, l.amount, batch.payment_date, accountId, l.bill_id]
-    );
-  }
+  await applyPaidLocally(accountId, batch, lineRows);
 
-  return { batchPaymentId: created.BatchPaymentID, total: Number(created.TotalAmount || batch.total) };
+  return {
+    method: 'batch',
+    batchPaymentId: created.BatchPaymentID,
+    total: Number(created.TotalAmount || batch.total)
+  };
 }
 
 module.exports = {
