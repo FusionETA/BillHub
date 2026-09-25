@@ -117,7 +117,8 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
   if (wrongOrg.length) {
     throw err(
       `${wrongOrg.length} bill(s) belong to a different Xero organisation from ${bank.name}. `
-      + 'A batch payment cannot span organisations — pay them separately, or use a recharge once that module lands.'
+      + 'A batch payment is paid from one bank account, and a bank account belongs to one organisation, '
+      + 'so Xero cannot span them. Pay each organisation in its own run.'
     );
   }
 
@@ -280,6 +281,22 @@ async function postToXero(accountId, batchId, { reference = null, status = 'uplo
   try {
     payload = await xero.api(accountId, batch.xero_tenant_id, '/BatchPayments', { method: 'POST', body });
   } catch (e) {
+    // Xero rejects PAYBATCH on editions that do not carry bill batch payments —
+    // GLOBAL among them — with "Batch payment status not valid for update",
+    // which reads like a bug in the request rather than a missing feature.
+    // Verified against a GLOBAL organisation: the same bill and the same bank
+    // account are accepted by POST /Payments moments later.
+    if (/status not valid for update/i.test(e.message || '')) {
+      const better = err(
+        'Xero refused a batch payment for this organisation. Bill batch payments are not '
+        + 'available on every Xero edition, and this one appears not to have them — the same '
+        + 'bill can still be paid individually. The bank file is unaffected and already '
+        + 'downloaded; what fails here is only recording the payment back in Xero.',
+        422
+      );
+      await batches.markPostFailed(accountId, batchId, better.message);
+      throw better;
+    }
     await batches.markPostFailed(accountId, batchId, e.message);
     throw e;
   }
