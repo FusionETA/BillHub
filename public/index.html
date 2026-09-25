@@ -633,6 +633,71 @@
       </div>;
     }
 
+    // 36,000 bills is 363 pages. A row of every page number is unusable, so show
+    // the ends, a window around where you are, and a box to jump. Ellipses mark
+    // the gaps rather than pretending the numbers are contiguous.
+    function pageNumbers(current, last) {
+      if (last <= 7) return Array.from({ length: last }, (_, i) => i + 1);
+      const near = [current - 1, current, current + 1].filter(n => n > 1 && n < last);
+      const out = [1, ...near, last];
+      const withGaps = [];
+      for (let i = 0; i < out.length; i += 1) {
+        if (i && out[i] - out[i - 1] > 1) withGaps.push('…');
+        withGaps.push(out[i]);
+      }
+      return withGaps;
+    }
+
+    function Pager({ page, pageSize, total, onPage, onPageSize }) {
+      const last = Math.max(1, Math.ceil(total / pageSize));
+      if (total === 0) return null;
+      const from = (page - 1) * pageSize + 1;
+      const to = Math.min(page * pageSize, total);
+      const [jump, setJump] = useState('');
+
+      const btn = (active, disabled) => ({
+        minWidth: 34, height: 34, padding: '0 9px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+        fontFamily: 'var(--font-body)', cursor: disabled ? 'default' : 'pointer',
+        border: '1.5px solid ' + (active ? 'var(--color-primary)' : 'var(--border-default)'),
+        background: active ? 'var(--color-primary)' : 'var(--surface-card)',
+        color: active ? '#fff' : disabled ? 'var(--text-subtle)' : 'var(--text-body)',
+        opacity: disabled ? .45 : 1
+      });
+
+      const go = (n) => {
+        const target = Math.min(Math.max(1, n), last);
+        if (target !== page) onPage(target);
+      };
+
+      return <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '14px 16px', borderTop: '1px solid var(--neutral-100)' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+          Showing <strong style={{ color: 'var(--text-body)' }}>{from.toLocaleString()}–{to.toLocaleString()}</strong> of {total.toLocaleString()}
+        </span>
+        <span style={{ flex: 1 }} />
+
+        <select value={String(pageSize)} onChange={e => onPageSize(Number(e.target.value))}
+          style={{ height: 34, border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '0 8px', fontFamily: 'var(--font-body)', fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', cursor: 'pointer' }}>
+          {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n} per page</option>)}
+        </select>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <button onClick={() => go(page - 1)} disabled={page === 1} style={btn(false, page === 1)}>‹</button>
+          {pageNumbers(page, last).map((n, i) => n === '…'
+            ? <span key={'gap' + i} style={{ color: 'var(--text-subtle)', fontSize: 13, padding: '0 2px' }}>…</span>
+            : <button key={n} onClick={() => go(n)} style={btn(n === page, false)}>{n}</button>)}
+          <button onClick={() => go(page + 1)} disabled={page === last} style={btn(false, page === last)}>›</button>
+        </div>
+
+        {last > 7 && <form onSubmit={e => { e.preventDefault(); const n = Number(jump); if (n) { go(n); setJump(''); } }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input value={jump} onChange={e => setJump(e.target.value.replace(/\D/g, ''))}
+            placeholder={'1–' + last} aria-label="Go to page"
+            style={{ width: 74, height: 34, border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '0 8px', fontFamily: 'var(--font-body)', fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)', outline: 'none' }} />
+          <button type="submit" style={{ ...btn(false, false), minWidth: 44 }}>Go</button>
+        </form>}
+      </div>;
+    }
+
     // Full-width message card used for the loading, error, empty and
     // not-connected states, so the table area never just goes blank.
     function Placeholder({ title, message, action, tone }) {
@@ -658,6 +723,8 @@
       // The bills a pay run is being built from — one row, or the whole selection.
       const [payFor, setPayFor] = useState([]);
       const [nonce, setNonce] = useState(0);
+      const [page, setPage] = useState(1);
+      const [pageSize, setPageSize] = useState(100);
 
       const set = (patch) => setF(prev => ({ ...prev, ...patch }));
       const reload = () => setNonce(n => n + 1);
@@ -668,10 +735,26 @@
       const entityKey = f.entities.join(',');
       const contactKey = f.contacts.join('\u0000');   // NUL: cannot occur in a Xero contact name
 
+      // Changing a filter has to send you back to page 1 — page 40 of a narrower
+      // result set is usually empty. Held in a ref as well as state so the fetch
+      // below can skip the doomed request rather than scanning 36,000 rows for a
+      // page we are about to leave.
+      const filterKey = [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo].join('|');
+      const lastFilterKey = useRef(filterKey);
+      const filtersJustChanged = lastFilterKey.current !== filterKey;
       useEffect(() => {
+        if (lastFilterKey.current === filterKey) return;
+        lastFilterKey.current = filterKey;
+        setPage(1);
+      }, [filterKey]);
+
+      useEffect(() => {
+        if (filtersJustChanged && page !== 1) return;   // the reset above is about to re-run this
         let cancelled = false;
         setLoading(true);
-        const qs = new URLSearchParams({ status: tab, limit: '200' });
+        const qs = new URLSearchParams({
+          status: tab, limit: String(pageSize), offset: String((page - 1) * pageSize)
+        });
         if (entityKey) qs.set('entities', entityKey);
         // Repeated rather than joined, so a comma in a supplier name is just a comma.
         for (const c of f.contacts) qs.append('contact', c);
@@ -687,7 +770,7 @@
           .catch(e => { if (!cancelled) setError(e.message); })
           .finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-      }, [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, nonce, refreshKey]);
+      }, [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, page, pageSize, nonce, refreshKey]);
 
       useEffect(() => {
         api.get('/api/bills/contacts').then(d => setContacts(d.contacts || [])).catch(() => {});
@@ -907,9 +990,10 @@
               </div>
             </div>
           ))}
-          {data && data.page && data.page.hasMore && <div style={{ padding: '14px 16px', textAlign: 'center', fontSize: 12.5, color: 'var(--text-muted)' }}>
-            Showing the first {rows.length} of {data.page.total}. Narrow the filters to see the rest.
-          </div>}
+          {data && data.page && <Pager
+            page={page} pageSize={pageSize} total={data.page.total}
+            onPage={n => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onPageSize={n => { setPageSize(n); setPage(1); }} />}
         </div>}
 
         {/* Selection action bar — floats above the table while bills are ticked. */}

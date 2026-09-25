@@ -227,6 +227,44 @@ function check(name, ok, detail) {
   const cts = await req('GET', '/api/bills/contacts', { cookie });
   check('contacts endpoint lists distinct suppliers', cts.body.contacts.length === 10, cts.body.contacts.length);
 
+  // ── Paging ────────────────────────────────────────────────────────────────
+  // The list used to stop at the first 200 with "narrow the filters to see the
+  // rest", which is not an answer when the rest is 36,000 bills.
+  console.log('\nPaging');
+  const p1 = await req('GET', '/api/bills?limit=3&offset=0', { cookie });
+  const p2 = await req('GET', '/api/bills?limit=3&offset=3', { cookie });
+  check('a page returns exactly the limit', p1.body.rows.length === 3, p1.body.rows.length);
+  check('the total counts every match, not the page', p1.body.page.total > 3, p1.body.page);
+  check('the total does not move between pages', p1.body.page.total === p2.body.page.total);
+  check('offset reports itself back', p2.body.page.offset === 3, p2.body.page);
+
+  const ids1 = p1.body.rows.map((r) => r.id);
+  const ids2 = p2.body.rows.map((r) => r.id);
+  check('page 2 is different bills', ids2.every((id) => !ids1.includes(id)), { ids1, ids2 });
+  check('and no bill is skipped between them', (await req('GET', '/api/bills?limit=6&offset=0', { cookie }))
+    .body.rows.map((r) => r.id).join() === ids1.concat(ids2).join());
+
+  const lastPage = await req('GET', '/api/bills?limit=3&offset=' + (p1.body.page.total - 1), { cookie });
+  check('the final page is short rather than padded', lastPage.body.rows.length === 1, lastPage.body.rows.length);
+  check('and hasMore is false there', lastPage.body.page.hasMore === false, lastPage.body.page);
+
+  // What the pager does if someone types a page number past the end.
+  const past = await req('GET', '/api/bills?limit=3&offset=99999', { cookie });
+  check('past the end is empty, not an error', past.status === 200 && past.body.rows.length === 0, past.status);
+  check('and still reports the real total', past.body.page.total === p1.body.page.total, past.body.page);
+
+  // Paging must not quietly widen the filter it is paging through.
+  const draftsP1 = await req('GET', '/api/bills?status=draft&limit=2&offset=0', { cookie });
+  const draftsP2 = await req('GET', '/api/bills?status=draft&limit=2&offset=2', { cookie });
+  check('a filtered list pages within the filter',
+    draftsP1.body.rows.concat(draftsP2.body.rows).every((r) => r.uiStatus === 'draft'),
+    draftsP1.body.rows.concat(draftsP2.body.rows).map((r) => r.uiStatus));
+  check('and its total is the filtered total',
+    draftsP1.body.page.total < p1.body.page.total, { draft: draftsP1.body.page.total, all: p1.body.page.total });
+
+  const capped = await req('GET', '/api/bills?limit=9999', { cookie });
+  check('an absurd limit is capped rather than served', capped.body.page.limit === 500, capped.body.page.limit);
+
   // ── Filtering by contact ──────────────────────────────────────────────────
   // Expected counts come from the database rather than from me counting the
   // fixture by eye, which is how a test ends up asserting the wrong number
