@@ -203,6 +203,75 @@ const requests = [];
   check('the bills either side of it still landed',
     Number((await db.getOne("SELECT COUNT(*) AS n FROM bills WHERE xero_tenant_id = 'synctD'")).n) === 2);
 
+  // ── Contacts renamed in Xero ──────────────────────────────────────────────
+  // A bill carries a copy of its supplier's name, so the copy only refreshes
+  // when the invoice does. Renaming or merging a contact in Xero need not touch
+  // the invoices that reference it — and then the copy is wrong for good. The
+  // contacts pass exists for that, and the test parks the invoice cursor so
+  // nothing else can be responsible for the fix.
+  console.log('\nA contact renamed in Xero');
+
+  await db.execute(
+    `INSERT INTO ${CONNECTIONS} (account_id, grant_id, xero_tenant_id, tenant_name, status) VALUES (?,?,?,?,'active')`,
+    [WAZZOCR_ACCOUNT, grantId, 'synctE', 'Sync Org E Sdn Bhd']);
+
+  const CONTACT = 'cE'.padEnd(36, '0');
+  let contactName = 'Original Name Sdn Bhd';
+  let contactsCalls = 0;
+
+  xero.api = async (accountId, tenantId, path, opts = {}) => {
+    if (path === '/Organisation') return { Organisations: [{ BaseCurrency: 'MYR' }] };
+    if (path.startsWith('/Contacts')) {
+      contactsCalls += 1;
+      // Contacts changed on 10 Sep; a cursor at or after that gets a 304.
+      const since = (opts.headers || {})['If-Modified-Since'];
+      if (since && new Date(since + 'Z') >= new Date('2026-09-10T00:00:00Z')) return null;
+      return { Contacts: [{ ContactID: CONTACT, Name: contactName, UpdatedDateUTC: xdate('2026-09-10T00:00:00Z') }] };
+    }
+    // The invoice last changed on 5 Sep. Honour the header the way Xero does,
+    // or the test cannot tell the contacts pass from the invoice upsert.
+    const since = (opts.headers || {})['If-Modified-Since'];
+    if (since && new Date(since + 'Z') >= new Date('2026-09-05T00:00:00Z')) return null;
+    const page = Number(new URL('http://x' + path).searchParams.get('page'));
+    if (page !== 1) return { Invoices: [] };
+    const inv = invoice(1, 'synctE', '2026-09-05T00:00:00Z');
+    inv.Contact = { ContactID: CONTACT, Name: contactName };
+    return { Invoices: [inv] };
+  };
+
+  await sync.syncAccount(ACCOUNT, { tenantIds: ['synctE'] });
+  const first = await db.getOne("SELECT contact_id, contact_name FROM bills WHERE xero_tenant_id = 'synctE'");
+  check('the bill starts with the name it was created under',
+    first.contact_name === 'Original Name Sdn Bhd', first);
+  check('and keeps the contact id, which is what makes a rename fixable',
+    first.contact_id === CONTACT, first.contact_id);
+
+  // Rename the contact, and park the invoice cursor so the invoice cannot come
+  // back — exactly the situation the pass is for.
+  contactName = 'Renamed Sdn. Bhd.';
+  await db.execute("UPDATE bill_sync_state SET cursor_utc = NOW(), contacts_cursor_utc = NULL WHERE xero_tenant_id = 'synctE'");
+
+  const after = await sync.syncAccount(ACCOUNT, { tenantIds: ['synctE'] });
+  const fixed = await db.getOne("SELECT contact_name FROM bills WHERE xero_tenant_id = 'synctE'");
+  check('no invoice came back', after.upserted === 0, after.upserted);
+  check('and the name was corrected anyway', fixed.contact_name === 'Renamed Sdn. Bhd.', fixed.contact_name);
+  check('the run reports what it corrected', after.renamed === 1, after.renamed);
+
+  const cur = await db.getOne("SELECT contacts_cursor_utc FROM bill_sync_state WHERE xero_tenant_id = 'synctE'");
+  check('the contacts cursor moved', Boolean(cur.contacts_cursor_utc), cur);
+
+  // The pass has to be nearly free on a normal run, or 41 organisations every
+  // 15 minutes becomes expensive.
+  const callsBefore = contactsCalls;
+  const quiet = await sync.syncAccount(ACCOUNT, { tenantIds: ['synctE'] });
+  check('a later run corrects nothing', quiet.renamed === 0, quiet.renamed);
+  check('and asks Xero for contacts just once', contactsCalls - callsBefore === 1, contactsCalls - callsBefore);
+
+  await db.execute("DELETE FROM bills WHERE xero_tenant_id = 'synctE'");
+  await db.execute("DELETE FROM bill_sync_state WHERE xero_tenant_id = 'synctE'");
+  await db.execute("DELETE FROM entities WHERE xero_tenant_id = 'synctE'");
+  await db.execute(`DELETE FROM ${CONNECTIONS} WHERE xero_tenant_id = 'synctE'`);
+
   // Clean up so the seeded demo data is what remains.
   await db.execute("DELETE FROM bills WHERE xero_tenant_id LIKE 'synct%'");
   await db.execute("DELETE FROM bill_sync_state WHERE xero_tenant_id LIKE 'synct%'");

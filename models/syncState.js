@@ -55,6 +55,17 @@ async function markError(accountId, tenantId, message) {
   );
 }
 
+// The contacts high-water mark, kept apart from the invoice one so a failed
+// invoice page cannot rewind contacts or the other way round.
+async function markContactsCursor(accountId, tenantId, cursorUtc) {
+  if (!cursorUtc) return;
+  await db.execute(
+    `UPDATE bill_sync_state SET contacts_cursor_utc = ?
+      WHERE account_id = ? AND xero_tenant_id = ?`,
+    [cursorUtc, accountId, tenantId]
+  );
+}
+
 // Newest successful run across all tenants, for the "last synced" label.
 async function lastSyncedAt(accountId) {
   const row = await db.getOne(
@@ -64,4 +75,4 @@ async function lastSyncedAt(accountId) {
   return row?.at || null;
 }
 
-module.exports = { get, listByAccount, markRunning, markOk, markError, lastSyncedAt };
+module.exports = { get, listByAccount, markRunning, markOk, markError, markContactsCursor, lastSyncedAt };

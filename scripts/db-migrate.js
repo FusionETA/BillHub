@@ -27,7 +27,17 @@ const width = (table, column) => `
   SELECT CHARACTER_MAXIMUM_LENGTH AS n FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`;
 
+const hasColumn = (table, column) => `
+  SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`;
+
 const ADJUSTMENTS = [
+  {
+    why: 'bill_sync_state.contacts_cursor_utc — contact changes need their own high-water mark',
+    check: hasColumn('bill_sync_state', 'contacts_cursor_utc'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE bill_sync_state ADD COLUMN contacts_cursor_utc DATETIME NULL AFTER cursor_utc'
+  },
   {
     // Found the hard way: 24 of 41 organisations failed their first sync with
     // "Data too long for column 'reference'". Xero documents Reference as 255

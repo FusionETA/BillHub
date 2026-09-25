@@ -161,6 +161,10 @@ CREATE TABLE IF NOT EXISTS bill_sync_state (
   account_id     BIGINT UNSIGNED NOT NULL,
   xero_tenant_id VARCHAR(64) NOT NULL,
   cursor_utc     DATETIME NULL,
+  -- Contacts move independently of the invoices that reference them: renaming
+  -- one does not have to touch every bill it is on. So they get their own
+  -- high-water mark rather than riding on the invoice cursor.
+  contacts_cursor_utc DATETIME NULL,
   last_run_at    DATETIME NULL,
   last_status    ENUM('ok','error','running') DEFAULT 'ok',
   last_error     VARCHAR(512),

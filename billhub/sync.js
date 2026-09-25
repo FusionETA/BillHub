@@ -33,6 +33,50 @@ function toXeroDateHeader(d) {
 }
 
 // Sync one organisation. Returns { tenantId, upserted, pages, skipped }.
+// A bill carries its supplier's name as a copy, taken when the bill last
+// changed. That is what makes the list fast — no join across 36,000 rows — but
+// it means the name only refreshes when the *invoice* does. A contact renamed
+// or merged in Xero need not touch the invoices that reference it, and then the
+// copy is wrong for good.
+//
+// So contacts get a pass of their own, with their own cursor: ask Xero which
+// ones changed, and correct the copies. Usually a single call answering 304.
+async function refreshContactNames(accountId, tenantId, cursor, full) {
+  const bills = require('../models/bills');
+  const db = require('../db');
+  const since = full || !cursor ? null : new Date(new Date(cursor).getTime() - 60000);
+
+  let corrected = 0;
+  let newest = cursor ? new Date(cursor) : null;
+
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const payload = await xero.api(accountId, tenantId, `/Contacts?page=${page}`, {
+      headers: since ? { 'If-Modified-Since': toXeroDateHeader(since) } : {}
+    });
+    if (payload === null) break;                 // 304: nothing has changed
+    const list = payload.Contacts || [];
+    if (!list.length) break;
+
+    for (const c of list) {
+      if (!c.ContactID || !c.Name) continue;
+      const name = bills.fit(c.Name, 'contact_name');
+      // The <> is what keeps this cheap: the overwhelming majority of contacts
+      // in a page have not actually changed name.
+      const res = await db.execute(
+        `UPDATE bills SET contact_name = ?
+          WHERE account_id = ? AND xero_tenant_id = ? AND contact_id = ? AND contact_name <> ?`,
+        [name, accountId, tenantId, c.ContactID, name]
+      );
+      corrected += res.affectedRows;
+      const u = c.UpdatedDateUTC ? parseXeroDate(c.UpdatedDateUTC) : null;
+      if (u && (!newest || u > newest)) newest = u;
+    }
+    if (list.length < 100) break;                // Xero pages contacts at 100
+  }
+
+  return { corrected, cursor: newest };
+}
+
 async function syncTenant(accountId, tenantId, tenantName, { full = false, intercoNames = new Set(), knownCurrency = null } = {}) {
   await entities.ensure(accountId, tenantId, tenantName);
   await syncState.markRunning(accountId, tenantId);
@@ -109,6 +153,21 @@ async function syncTenant(accountId, tenantId, tenantName, { full = false, inter
       if (list.length < PAGE_SIZE) break;
     }
 
+    // Not fatal: a bill with last week's spelling of a supplier is worth far
+    // more than a sync that refused to finish over it.
+    let renamed = 0;
+    try {
+      const out = await refreshContactNames(accountId, tenantId, state?.contacts_cursor_utc, full);
+      renamed = out.corrected;
+      if (out.cursor) {
+        await syncState.markContactsCursor(accountId, tenantId,
+          out.cursor.toISOString().slice(0, 19).replace('T', ' '));
+      }
+    } catch (e) {
+      console.error(`[sync] ${tenantName || tenantId}: contact names not refreshed — ${e.message}`);
+    }
+    if (renamed) console.log(`[sync] ${tenantName || tenantId}: ${renamed} bill(s) had a supplier name corrected.`);
+
     await syncState.markOk(
       accountId, tenantId,
       maxUpdated ? maxUpdated.toISOString().slice(0, 19).replace('T', ' ') : null,
@@ -117,7 +176,7 @@ async function syncTenant(accountId, tenantId, tenantName, { full = false, inter
       // The cursor has moved past these, so recovering them needs --full.
       skipped ? `${skipped} bill(s) skipped; first was ${firstSkip}. Re-read with: node scripts/sync-bills.js --full` : null
     );
-    return { tenantId, tenantName, upserted, skipped, pages, ok: true };
+    return { tenantId, tenantName, upserted, skipped, renamed, pages, ok: true };
   } catch (err) {
     // A tenant whose grant has gone stale shouldn't fail the whole run — record
     // it here and let the other 39 finish. The needs_reconnect flag belongs to
@@ -172,8 +231,9 @@ async function syncAccount(accountId, { full = false, tenantIds = null } = {}) {
   // is no way to tell a slow sync from a large one.
   const took = ((Date.now() - startedAt) / 1000).toFixed(1);
   const skipped = results.reduce((sum, r) => sum + (r.skipped || 0), 0);
-  console.log(`[sync] account ${accountId}: ${results.length} org(s), ${upserted} bill(s) in ${took}s${skipped ? `, ${skipped} skipped` : ''}${failed.length ? `, ${failed.length} failed` : ''}`);
-  return { tenants: results.length, upserted, skipped, failed: failed.length, tookSeconds: Number(took), results };
+  const renamed = results.reduce((sum, r) => sum + (r.renamed || 0), 0);
+  console.log(`[sync] account ${accountId}: ${results.length} org(s), ${upserted} bill(s) in ${took}s${renamed ? `, ${renamed} renamed` : ''}${skipped ? `, ${skipped} skipped` : ''}${failed.length ? `, ${failed.length} failed` : ''}`);
+  return { tenants: results.length, upserted, skipped, renamed, failed: failed.length, tookSeconds: Number(took), results };
 }
 
 // ── Background schedule ─────────────────────────────────────────────────────
