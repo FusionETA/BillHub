@@ -30,7 +30,8 @@
     "demo-bills": "node scripts/demo-bills.js",
     "adopt-env": "node scripts/adopt-wazzocr-env.js",
     "set-password": "node scripts/set-password.js",
-    "add-user": "node scripts/add-user.js"
+    "add-user": "node scripts/add-user.js",
+    "test:setup": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node scripts/test-setup.js"
   },
   "engines": {
     "node": ">=18"
