@@ -1727,6 +1727,16 @@
                   style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, display: 'flex', borderRadius: 6 }}><Icon name="trash-2" size={16} /></button>}
               </div>
 
+              {/* Excel reads a long account number as a number: 345678901234 shows
+                  as 3.45679E+11 and, once saved, is written back rounded. The file
+                  itself is correct — opening it in Excel is what breaks it. */}
+              {b.canUpload && <div style={{ padding: '10px 18px', background: 'var(--amber-100)', color: '#6b4d00', fontSize: 12.5, lineHeight: 1.55 }}>
+                <strong>Send this file to the bank as it downloaded.</strong> Opening it in Excel and
+                saving rewrites long account numbers — 345678901234 becomes 3.45679E+11 — and the
+                payment then goes nowhere. To read it, use a text editor, or Excel's
+                Data → From Text import with every column set to Text.
+              </div>}
+
               {b.postError && <div style={{ padding: '10px 18px', background: 'var(--red-100)', color: '#8d1f17', fontSize: 13 }}>
                 <strong>Xero rejected this batch:</strong> {b.postError}
               </div>}
