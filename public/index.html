@@ -1655,6 +1655,28 @@
         } finally { setBusy(null); }
       }
 
+      // The bank's acknowledgement for a whole batch, put on every bill it paid.
+      // Sent as raw bytes with the name in a header — no multipart to build.
+      async function attachReceipt(batch, file) {
+        setBusy(batch.id);
+        try {
+          const res = await fetch('/api/payments/batches/' + batch.id + '/receipt', {
+            method: 'POST', credentials: 'same-origin', body: file,
+            headers: { 'Content-Type': file.type || 'application/pdf', 'X-File-Name': file.name }
+          });
+          const out = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(out.error || ('Upload failed (' + res.status + ')'));
+          onToast({
+            title: 'Receipt attached',
+            message: out.attached + ' bill' + (out.attached === 1 ? '' : 's') + ' in ' + batch.reference
+              + ' now carry ' + out.fileName + ' in Xero.'
+          });
+          reload();
+        } catch (e) {
+          onToast({ title: 'Could not attach the receipt', message: e.message, tone: 'error' });
+        } finally { setBusy(null); }
+      }
+
       async function cancelBatch(batch) {
         setBusy(batch.id);
         try {
@@ -1723,6 +1745,11 @@
                   <Icon name="download" size={15} color="#fff" />Download file
                 </Button>}
                 {b.canUpload && <Button variant="outline" size="sm" onClick={() => markUploaded(b)} style={busy === b.id ? { opacity: .6, pointerEvents: 'none' } : null}>Mark uploaded</Button>}
+                {b.canAttachReceipt && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 12px', height: 36, fontSize: 13, fontWeight: 700, color: 'var(--color-secondary)', cursor: busy === b.id ? 'default' : 'pointer', opacity: busy === b.id ? .6 : 1, whiteSpace: 'nowrap' }}>
+                  <Icon name="paperclip" size={14} />{b.receiptName ? 'Replace receipt' : 'Attach bank receipt'}
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*" style={{ display: 'none' }}
+                    onChange={e => { const file = e.target.files && e.target.files[0]; e.target.value = ''; if (file) attachReceipt(b, file); }} />
+                </label>}
                 {b.canCancel && <button onClick={() => cancelBatch(b)} title="Cancel this batch and release its bills"
                   style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, display: 'flex', borderRadius: 6 }}><Icon name="trash-2" size={16} /></button>}
               </div>
@@ -1735,6 +1762,10 @@
                 saving rewrites long account numbers — 345678901234 becomes 3.45679E+11 — and the
                 payment then goes nowhere. To read it, use a text editor, or Excel's
                 Data → From Text import with every column set to Text.
+              </div>}
+
+              {b.receiptNote && <div style={{ padding: '8px 18px', background: 'var(--green-100)', color: '#126b42', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <Icon name="paperclip" size={13} />{b.receiptNote} — <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.receiptName}</span>, on every bill in this batch
               </div>}
 
               {b.postError && <div style={{ padding: '10px 18px', background: 'var(--red-100)', color: '#8d1f17', fontSize: 13 }}>

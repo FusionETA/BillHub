@@ -152,6 +152,21 @@ async function recordLinePayment(batchId, xeroInvoiceId, paymentId) {
   );
 }
 
+async function markLineReceipted(batchId, xeroInvoiceId) {
+  await db.execute(
+    'UPDATE payment_batch_lines SET receipt_attached = 1 WHERE batch_id = ? AND xero_invoice_id = ?',
+    [batchId, xeroInvoiceId]
+  );
+}
+
+async function markReceiptAttached(accountId, id, fileName) {
+  await db.execute(
+    `UPDATE payment_batches SET receipt_name = ?, receipt_attached_at = NOW()
+      WHERE account_id = ? AND id = ?`,
+    [String(fileName).slice(0, 255), accountId, id]
+  );
+}
+
 async function markPostFailed(accountId, id, message) {
   await db.execute(
     'UPDATE payment_batches SET post_error = ? WHERE account_id = ? AND id = ?',
@@ -193,7 +208,7 @@ async function summary(accountId) {
 }
 
 module.exports = {
-  recordLinePayment,
+  recordLinePayment, markLineReceipted, markReceiptAttached,
   list, getById, lines, billsInLiveBatches, nextReference, create,
   markDownloaded, markPosted, markPostFailed, cancel, summary, LIVE_STATUSES
 };

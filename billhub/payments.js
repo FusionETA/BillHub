@@ -406,7 +406,76 @@ async function postToXero(accountId, batchId, { reference = null, status = 'uplo
   };
 }
 
+// Xero caps an attachment at 25MB; stay well under it, and refuse early rather
+// than after uploading most of a batch.
+const RECEIPT_MAX_BYTES = 10 * 1024 * 1024;
+
+// Xero rejects a filename with a path separator or a colon, and the name is
+// what makes this idempotent: PUT .../Attachments/<name> REPLACES by name, so
+// attaching the same receipt twice cannot leave two copies on a bill.
+function receiptFileName(batch, uploadedName) {
+  const ext = (String(uploadedName || '').match(/\.[A-Za-z0-9]{1,8}$/) || ['.pdf'])[0].toLowerCase();
+  return `${batch.reference}-bank-receipt${ext}`;
+}
+
+// The bank's acknowledgement for a batch, attached to every bill it paid.
+//
+// One document, many bills: Xero stores attachments per invoice, so the same
+// bytes go up once per line. Each is recorded as it lands, so a run that stops
+// halfway resumes instead of re-uploading what already arrived.
+async function attachReceipt(accountId, batchId, { fileName, contentType, bytes }) {
+  if (!Buffer.isBuffer(bytes) || !bytes.length) throw err('No file was uploaded.');
+  if (bytes.length > RECEIPT_MAX_BYTES) {
+    throw err(`That file is ${(bytes.length / 1048576).toFixed(1)}MB. Xero will not take more than 10MB.`);
+  }
+
+  const batch = await batches.getById(accountId, batchId);
+  if (!batch) throw err('Batch not found.', 404);
+  if (batch.status === 'cancelled') throw err(`Batch ${batch.reference} was cancelled.`, 409);
+  // The receipt only exists once the bank has processed the file.
+  if (!['uploaded', 'posted'].includes(batch.status)) {
+    throw err(`Batch ${batch.reference} has not been marked uploaded yet, so there is nothing for the bank to have acknowledged.`, 409);
+  }
+
+  const lineRows = await batches.lines(batchId);
+  const pending = lineRows.filter((l) => !l.receipt_attached);
+  if (!pending.length) throw err(`Every bill in ${batch.reference} already has this batch's receipt.`, 409);
+
+  const name = receiptFileName(batch, fileName);
+  const type = contentType && contentType !== 'application/octet-stream' ? contentType : 'application/pdf';
+
+  let attached = 0;
+  for (const line of pending) {
+    try {
+      await xero.api(accountId, batch.xero_tenant_id,
+        `/Invoices/${line.xero_invoice_id}/Attachments/${encodeURIComponent(name)}`,
+        { method: 'PUT', body: bytes, headers: { 'Content-Type': type } });
+    } catch (e) {
+      const message = attached
+        ? `Attached to ${attached} of ${pending.length} bill(s), then Xero refused ${line.contact_name || line.xero_invoice_id}: ${e.message}. Uploading the same file again will resume.`
+        : `Xero refused the attachment: ${e.message}`;
+      throw err(message, e.statusCode || 502);
+    }
+    await batches.markLineReceipted(batchId, line.xero_invoice_id);
+    attached += 1;
+  }
+
+  await batches.markReceiptAttached(accountId, batchId, name);
+  // Bills Hub's own copy of the count, so the Files column is right before the
+  // next sync rather than after it.
+  const db = require('../db');
+  for (const line of pending) {
+    await db.execute(
+      `UPDATE bills SET has_attachments = 1, attachment_count = COALESCE(attachment_count, 0) + 1
+        WHERE account_id = ? AND id = ?`,
+      [accountId, line.bill_id]
+    );
+  }
+
+  return { fileName: name, attached, bills: lineRows.length };
+}
+
 module.exports = {
   syncBankAccounts, syncPayees, syncAll,
-  planBatch, createBatch, renderFile, postToXero, formatFor, DETAILS_MAX
+  planBatch, createBatch, renderFile, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
 };

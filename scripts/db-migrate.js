@@ -33,6 +33,18 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: 'payment_batches.receipt_name — the bank acknowledgement attached to a batch',
+    check: hasColumn('payment_batches', 'receipt_name'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE payment_batches ADD COLUMN receipt_name VARCHAR(255) NULL, ADD COLUMN receipt_attached_at DATETIME NULL'
+  },
+  {
+    why: 'payment_batch_lines.receipt_attached — so attaching can resume',
+    check: hasColumn('payment_batch_lines', 'receipt_attached'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE payment_batch_lines ADD COLUMN receipt_attached TINYINT(1) NOT NULL DEFAULT 0'
+  },
+  {
     why: 'bill_sync_state.contacts_cursor_utc — contact changes need their own high-water mark',
     check: hasColumn('bill_sync_state', 'contacts_cursor_utc'),
     needed: (row) => Number(row.n) === 0,

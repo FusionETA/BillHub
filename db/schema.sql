@@ -275,6 +275,10 @@ CREATE TABLE IF NOT EXISTS payment_batches (
   -- Set once Xero has accepted the batch payment. Its presence is what stops a
   -- batch being posted twice.
   xero_batch_payment_id CHAR(36) NULL,
+  -- The bank's acknowledgement for this batch, once it has been attached to
+  -- every bill in it. Xero holds the file; this is only the record that it went.
+  receipt_name       VARCHAR(255) NULL,
+  receipt_attached_at DATETIME NULL,
   xero_posted_at   DATETIME NULL,
   post_error       VARCHAR(512),
   downloaded_at    DATETIME NULL,
@@ -300,6 +304,8 @@ CREATE TABLE IF NOT EXISTS payment_batch_lines (
   amount          DECIMAL(16,2) NOT NULL,
   reference       VARCHAR(255),
   xero_payment_id CHAR(36) NULL,
+  -- Per line, so attaching to twenty bills can resume rather than start over.
+  receipt_attached TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY uq_line_bill (batch_id, bill_id),
   -- A bill may only sit in one live batch at a time; enforced in the model,
   -- since a cancelled batch must not block a retry.

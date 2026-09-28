@@ -20,6 +20,8 @@ const xeroCalls = [];
 let batchPaymentCounter = 0;
 let failNextBatchPayment = null;
 let paymentCounter = 0;
+const attachments = [];
+let failNextAttachment = null;
 let failPaymentForRef = null;   // fail the single payment whose Reference matches
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
@@ -66,6 +68,13 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
       Invoice: { InvoiceID: sent.Invoice.InvoiceID }
     }] };
   }
+  // PUT /Invoices/{id}/Attachments/{name} — raw bytes, not JSON.
+  if (opts.method === 'PUT' && /^\/Invoices\/[^/]+\/Attachments\//.test(path)) {
+    if (failNextAttachment) { const e = new Error(failNextAttachment); e.statusCode = 400; failNextAttachment = null; throw e; }
+    attachments.push({ path, bytes: Buffer.isBuffer(opts.body) ? opts.body.length : null,
+                       type: (opts.headers || {})['Content-Type'] });
+    return { Attachments: [{ AttachmentID: 'att-'.padEnd(36, '0'), FileName: decodeURIComponent(path.split('/').pop()) }] };
+  }
   if (path.startsWith('/Accounts')) {
     return { Accounts: [{ AccountID: 'acct-synced-1', Code: '092', Name: 'HSBC Collections 2201', BankAccountNumber: '220199887766', CurrencyCode: 'MYR', Status: 'ACTIVE', BankAccountType: 'BANK' }] };
   }
@@ -99,6 +108,23 @@ function req(method, path, { body, cookie, raw = false } = {}) {
     });
     r.on('error', reject);
     if (data) r.write(data);
+    r.end();
+  });
+}
+
+function rawPost(path, buf, { cookie, fileName = 'receipt.pdf', type = 'application/pdf' } = {}) {
+  return new Promise((resolve, reject) => {
+    const r = http.request({
+      host: '127.0.0.1', port: 3314, path, method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': type, 'X-File-Name': fileName,
+                 'Content-Length': buf.length, ...(cookie ? { Cookie: cookie } : {}) }
+    }, (res) => {
+      let out = '';
+      res.on('data', (c) => { out += c; });
+      res.on('end', () => { let b = null; try { b = JSON.parse(out); } catch { b = out; } resolve({ status: res.statusCode, body: b }); });
+    });
+    r.on('error', reject);
+    r.write(buf);
     r.end();
   });
 }
@@ -384,6 +410,73 @@ function check(name, ok, detail) {
   check('every line is settled now',
     (await db.query('SELECT xero_payment_id FROM payment_batch_lines WHERE batch_id = ?', [b2.id]))
       .every((l) => l.xero_payment_id));
+
+  {
+    // ── The bank's acknowledgement, attached to every bill it paid ────────────
+    // One document per batch, on each of its bills, so "how was this paid" is
+    // answerable from the bill rather than from somebody's inbox.
+    console.log('\nAttaching the bank receipt');
+
+    const pdf = Buffer.from('%PDF-1.4 pretend receipt');
+    // The cases above left these bills paid and in a posted batch; put them back.
+    await db.execute("UPDATE payment_batches SET status = 'cancelled' WHERE account_id = 1");
+    await repay();
+    const rb = await mkBatch();
+
+    // Nothing to acknowledge until the bank has had the file.
+    const early = await rawPost('/api/payments/batches/' + rb.id + '/receipt', pdf, { cookie });
+    check('a batch that was never uploaded refuses the receipt', early.status === 409, early.body);
+
+    failNextBatchPayment = 'Batch payment status not valid for update';
+    await req('POST', '/api/payments/batches/' + rb.id + '/uploaded', { cookie, body: {} });
+    attachments.length = 0;
+
+    const got = await rawPost('/api/payments/batches/' + rb.id + '/receipt', pdf, { cookie });
+    const lineCount = (await db.query('SELECT id FROM payment_batch_lines WHERE batch_id = ?', [rb.id])).length;
+    check('it attaches once per bill in the batch', got.status === 200 && got.body.attached === lineCount, got.body);
+    check('and Xero got the bytes, not a JSON wrapper',
+      attachments.length === lineCount && attachments.every((a) => a.bytes === pdf.length), attachments);
+    check('with the content type the browser sent',
+      attachments.every((a) => a.type === 'application/pdf'), attachments.map((a) => a.type));
+
+    // The name is what makes a second attempt safe: Xero replaces by filename.
+    check('the file is named after the batch, so re-attaching cannot duplicate',
+      attachments.every((a) => decodeURIComponent(a.path).endsWith(rb.reference + '-bank-receipt.pdf')),
+      decodeURIComponent(attachments[0].path));
+
+    const secondAttach = await rawPost('/api/payments/batches/' + rb.id + '/receipt', pdf, { cookie });
+    check("attaching the same batch twice is refused", secondAttach.status === 409, secondAttach.body);
+
+    const bills = await db.query(
+      `SELECT b.has_attachments, b.attachment_count FROM bills b
+         JOIN payment_batch_lines l ON l.bill_id = b.id WHERE l.batch_id = ?`, [rb.id]);
+    check('the bills show a file without waiting for a sync',
+      bills.every((b) => b.has_attachments === 1 && Number(b.attachment_count) >= 1), bills);
+
+    // Half-done must be resumable, the same as the payments themselves.
+    console.log('\nResuming a half-finished attach');
+    await db.execute('UPDATE payment_batch_lines SET receipt_attached = 0 WHERE batch_id = ?', [rb.id]);
+    await db.execute('UPDATE payment_batches SET receipt_name = NULL, receipt_attached_at = NULL WHERE id = ?', [rb.id]);
+    attachments.length = 0;
+    failNextAttachment = 'Xero is unavailable';
+    const broke = await rawPost('/api/payments/batches/' + rb.id + '/receipt', pdf, { cookie });
+    check('a refusal mid-run is reported', broke.status >= 400, broke.status);
+    const doneSoFar = (await db.query('SELECT receipt_attached FROM payment_batch_lines WHERE batch_id = ?', [rb.id]))
+      .filter((l) => l.receipt_attached).length;
+    const sentBefore = attachments.length;
+    const resumed = await rawPost('/api/payments/batches/' + rb.id + '/receipt', pdf, { cookie });
+    check('and the retry finishes it', resumed.status === 200, resumed.body);
+    check('re-uploading only what was still missing',
+      attachments.length - sentBefore === lineCount - doneSoFar,
+      { sentBefore, now: attachments.length, doneSoFar, lineCount });
+
+    const tooBig = Buffer.alloc(11 * 1024 * 1024, 0x41);
+    await db.execute('UPDATE payment_batch_lines SET receipt_attached = 0 WHERE batch_id = ?', [rb.id]);
+    const big = await rawPost('/api/payments/batches/' + rb.id + '/receipt', tooBig, { cookie });
+    check('an oversized file is refused before anything is uploaded',
+      big.status >= 400 && /10MB/.test(JSON.stringify(big.body)), big.body);
+
+  }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();

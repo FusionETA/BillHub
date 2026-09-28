@@ -168,6 +168,13 @@ function batchCard(b, lineRows = [], currency = 'RM') {
     canUpload: b.status === 'downloaded' && !b.xero_batch_payment_id,
     canCancel: !b.xero_batch_payment_id && ['ready', 'downloaded'].includes(b.status),
     postedNote: b.xero_batch_payment_id ? `Recorded in Xero ${shortDate(b.xero_posted_at)}` : null,
+    // The bank only acknowledges a file after it has processed it, so there is
+    // nothing to attach until the batch has been marked uploaded.
+    canAttachReceipt: ['uploaded', 'posted'].includes(b.status),
+    receiptName: b.receipt_name || null,
+    receiptNote: b.receipt_attached_at
+      ? `Bank receipt attached ${shortDate(b.receipt_attached_at)}`
+      : null,
     postError: b.post_error || null,
     downloadedNote: b.downloaded_at ? `Downloaded ${shortDate(b.downloaded_at)}` : 'Not downloaded yet',
     currency,

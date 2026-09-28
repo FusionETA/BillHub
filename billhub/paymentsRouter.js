@@ -12,6 +12,7 @@
 //   POST   /api/payments/batches         create a batch
 //   GET    /api/payments/batches/:id/file    download it
 //   POST   /api/payments/batches/:id/uploaded   confirm sent, and post to Xero
+//   POST   /api/payments/batches/:id/receipt   attach the bank's acknowledgement
 //   POST   /api/payments/batches/:id/cancel
 const express = require('express');
 const router = express.Router();
@@ -262,6 +263,26 @@ router.post('/batches/:id(\\d+)/uploaded', async (req, res) => {
     fail(res, err);
   }
 });
+
+// The file arrives as raw bytes with its own Content-Type, and its name in a
+// header — no multipart parser to add for a single field. express.json above
+// ignores it, because a PDF is not application/json.
+router.post('/batches/:id(\\d+)/receipt',
+  express.raw({ type: () => true, limit: '12mb' }),
+  async (req, res) => {
+    const accountId = needAccount(req, res); if (!accountId) return;
+    try {
+      const out = await payments.attachReceipt(accountId, Number(req.params.id), {
+        fileName: req.get('X-File-Name') || 'receipt.pdf',
+        contentType: req.get('Content-Type'),
+        bytes: req.body
+      });
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      console.error('[payments] attaching the receipt failed:', err.message);
+      fail(res, err);
+    }
+  });
 
 router.post('/batches/:id(\\d+)/cancel', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
