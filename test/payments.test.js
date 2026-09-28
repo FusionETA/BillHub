@@ -470,6 +470,36 @@ function check(name, ok, detail) {
       attachments.length - sentBefore === lineCount - doneSoFar,
       { sentBefore, now: attachments.length, doneSoFar, lineCount });
 
+    // Replacing. Verified against real Xero: PUT with the same filename
+    // overwrites — one attachment per bill, new bytes — so the only thing
+    // stopping a second upload should be the lack of an explicit intent.
+    console.log('\nReplacing a receipt');
+    const revised = Buffer.from('%PDF-1.4 pretend receipt, corrected');
+
+    const blocked = await rawPost('/api/payments/batches/' + rb.id + '/receipt', revised, { cookie });
+    check('without asking to replace, it still refuses', blocked.status === 409, blocked.body);
+
+    attachments.length = 0;
+    const done = await rawPost('/api/payments/batches/' + rb.id + '/receipt?replace=1', revised, { cookie });
+    check('asking to replace goes through', done.status === 200 && done.body.replaced === true, done.body);
+    check('and it re-attaches to every bill, not just the pending ones',
+      done.body.attached === lineCount && attachments.length === lineCount,
+      { attached: done.body.attached, sent: attachments.length, lineCount });
+    check('under the same name, which is what makes it a replace not a second copy',
+      attachments.every((a) => decodeURIComponent(a.path).endsWith(rb.reference + '-bank-receipt.pdf')),
+      decodeURIComponent(attachments[0].path));
+    check('carrying the new bytes', attachments.every((a) => a.bytes === revised.length), attachments[0]);
+
+    // A different extension is a different filename, and Xero's API cannot
+    // delete an attachment — so the old one survives and we have to say so.
+    const png = Buffer.from('\x89PNG pretend scan');
+    const other = await rawPost('/api/payments/batches/' + rb.id + '/receipt?replace=1', png,
+      { cookie, fileName: 'scan.png', type: 'image/png' });
+    check('a different file type is accepted', other.status === 200, other.body);
+    check('named for its own type', /-bank-receipt\.png$/.test(other.body.fileName), other.body.fileName);
+    check('and it warns that the previous file cannot be removed',
+      /cannot remove an attachment/.test(other.body.note || ''), other.body);
+
     const tooBig = Buffer.alloc(11 * 1024 * 1024, 0x41);
     await db.execute('UPDATE payment_batch_lines SET receipt_attached = 0 WHERE batch_id = ?', [rb.id]);
     const big = await rawPost('/api/payments/batches/' + rb.id + '/receipt', tooBig, { cookie });

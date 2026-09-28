@@ -423,7 +423,7 @@ function receiptFileName(batch, uploadedName) {
 // One document, many bills: Xero stores attachments per invoice, so the same
 // bytes go up once per line. Each is recorded as it lands, so a run that stops
 // halfway resumes instead of re-uploading what already arrived.
-async function attachReceipt(accountId, batchId, { fileName, contentType, bytes }) {
+async function attachReceipt(accountId, batchId, { fileName, contentType, bytes, replace = false }) {
   if (!Buffer.isBuffer(bytes) || !bytes.length) throw err('No file was uploaded.');
   if (bytes.length > RECEIPT_MAX_BYTES) {
     throw err(`That file is ${(bytes.length / 1048576).toFixed(1)}MB. Xero will not take more than 10MB.`);
@@ -438,10 +438,19 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes 
   }
 
   const lineRows = await batches.lines(batchId);
-  const pending = lineRows.filter((l) => !l.receipt_attached);
-  if (!pending.length) throw err(`Every bill in ${batch.reference} already has this batch's receipt.`, 409);
+  // Replacing is asked for explicitly, from a button that says so. Without that
+  // the refusal stands, because the common way to end up here twice is a double
+  // click, not a decision.
+  const pending = replace ? lineRows : lineRows.filter((l) => !l.receipt_attached);
+  if (!pending.length) {
+    throw err(`Every bill in ${batch.reference} already has this batch's receipt.`, 409);
+  }
 
   const name = receiptFileName(batch, fileName);
+  // Xero replaces an attachment by filename, so the same name overwrites. A
+  // different extension is a different name, and Xero's API cannot delete an
+  // attachment — so the old one stays, and saying so beats a silent surprise.
+  const supersedes = batch.receipt_name && batch.receipt_name !== name ? batch.receipt_name : null;
   const type = contentType && contentType !== 'application/octet-stream' ? contentType : 'application/pdf';
 
   let attached = 0;
@@ -472,7 +481,14 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes 
     );
   }
 
-  return { fileName: name, attached, bills: lineRows.length };
+  return {
+    fileName: name,
+    attached,
+    bills: lineRows.length,
+    replaced: Boolean(replace),
+    ...(supersedes ? { supersedes, note:
+      `The earlier ${supersedes} is still on these bills — Xero's API cannot remove an attachment, only overwrite one of the same name.` } : {})
+  };
 }
 
 module.exports = {

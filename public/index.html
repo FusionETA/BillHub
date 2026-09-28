@@ -1660,16 +1660,16 @@
       async function attachReceipt(batch, file) {
         setBusy(batch.id);
         try {
-          const res = await fetch('/api/payments/batches/' + batch.id + '/receipt', {
+          const res = await fetch('/api/payments/batches/' + batch.id + '/receipt' + (batch.receiptName ? '?replace=1' : ''), {
             method: 'POST', credentials: 'same-origin', body: file,
             headers: { 'Content-Type': file.type || 'application/pdf', 'X-File-Name': file.name }
           });
           const out = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(out.error || ('Upload failed (' + res.status + ')'));
           onToast({
-            title: 'Receipt attached',
+            title: out.replaced ? 'Receipt replaced' : 'Receipt attached',
             message: out.attached + ' bill' + (out.attached === 1 ? '' : 's') + ' in ' + batch.reference
-              + ' now carry ' + out.fileName + ' in Xero.'
+              + ' now carry ' + out.fileName + ' in Xero.' + (out.note ? ' ' + out.note : '')
           });
           reload();
         } catch (e) {

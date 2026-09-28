@@ -275,7 +275,8 @@ router.post('/batches/:id(\\d+)/receipt',
       const out = await payments.attachReceipt(accountId, Number(req.params.id), {
         fileName: req.get('X-File-Name') || 'receipt.pdf',
         contentType: req.get('Content-Type'),
-        bytes: req.body
+        bytes: req.body,
+        replace: req.query.replace === '1'
       });
       res.json({ ok: true, ...out });
     } catch (err) {
