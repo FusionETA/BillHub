@@ -600,7 +600,7 @@
               {showFile && <pre style={{ gridColumn: '1 / -1', margin: 0, maxHeight: 180, overflow: 'auto', background: 'var(--ink-900)', color: '#d8dbe8', borderRadius: 10, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}>{preview.filePreview}</pre>}
 
               {!preview.format.verified && <div style={{ gridColumn: '1 / -1', background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#6b4d00', lineHeight: 1.6 }}>
-                This layout has not been checked against the bank's own spec sheet. Compare the file above with what {preview.bankAccount.bankName || 'your bank'} expects, and send a single-line test payment before a full run.
+                This layout has not been checked against the bank's own spec sheet. Compare the file above with what {(preview.format && preview.format.bankName) || preview.bankAccount.bankName || 'your bank'} expects, and send a single-line test payment before a full run.
               </div>}
             </React.Fragment>}
 

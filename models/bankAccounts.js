@@ -46,7 +46,10 @@ async function upsertFromXero(accountId, tenantId, acc) {
       accountId, tenantId, acc.AccountID,
       acc.Code || null,
       acc.Name || 'Bank account',
-      acc.BankAccountType || null,
+      // Not acc.BankAccountType: that is BANK / CREDITCARD / PAYPAL, not the
+      // name of a bank. Xero has nowhere to put one, so bank_name stays for a
+      // hand-entered value and is left alone by a sync.
+      null,
       acc.BankAccountNumber || null,
       acc.CurrencyCode || null
     ]

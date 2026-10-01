@@ -33,6 +33,16 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    // These were never bank names: the sync was writing Xero's
+    // BankAccountType into bank_name, so every account claimed to be at a
+    // bank called "BANK". A later sync will not clear them, because a
+    // hand-entered bank name is meant to survive one.
+    why: 'bank_accounts.bank_name — clear the BankAccountType values that were mistaken for bank names',
+    check: "SELECT COUNT(*) AS n FROM bank_accounts WHERE bank_name IN ('BANK','CREDITCARD','PAYPAL')",
+    needed: (row) => Number(row.n) > 0,
+    sql: "UPDATE bank_accounts SET bank_name = NULL WHERE bank_name IN ('BANK','CREDITCARD','PAYPAL')"
+  },
+  {
     why: "bank_formats.payment_mode — Hong Leong's field limits depend on the rail",
     check: hasColumn('bank_formats', 'payment_mode'),
     needed: (row) => Number(row.n) === 0,
