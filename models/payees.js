@@ -30,15 +30,30 @@ function listByAccount(accountId, { tenantId = null, missingOnly = false } = {})
 
 // From a Xero Contact. Leaves a manually corrected row untouched.
 async function upsertFromXero(accountId, tenantId, contact) {
+  // BankAccountDetails is the old single free-text field. The BatchPayments
+  // block is what the contact screen's "Financial details" panel writes, and it
+  // is where the bank code, the account and the narrative actually live — so
+  // prefer it and fall back only when it is empty.
+  const bp = contact.BatchPayments || {};
+  const accountNumber = cleanAccountNumber(bp.BankAccountNumber || contact.BankAccountDetails);
   await db.execute(
-    `INSERT INTO payees (account_id, xero_tenant_id, contact_id, contact_name, account_number, source)
-     VALUES (?,?,?,?,?, 'xero')
+    `INSERT INTO payees (account_id, xero_tenant_id, contact_id, contact_name, account_number,
+                         bank_account_name, details, tax_number, email, source)
+     VALUES (?,?,?,?,?,?,?,?,?, 'xero')
      ON DUPLICATE KEY UPDATE
        contact_name = VALUES(contact_name),
-       account_number = IF(source = 'manual', account_number, VALUES(account_number))`,
-    [accountId, tenantId, contact.ContactID, contact.Name || null, cleanAccountNumber(contact.BankAccountDetails)]
+       account_number = IF(source = 'manual', account_number, VALUES(account_number)),
+       bank_account_name = IF(source = 'manual', bank_account_name, VALUES(bank_account_name)),
+       details = IF(source = 'manual', details, VALUES(details)),
+       tax_number = VALUES(tax_number),
+       email = VALUES(email)`,
+    [accountId, tenantId, contact.ContactID, contact.Name || null, accountNumber,
+     trim(bp.BankAccountName, 100), trim(bp.Details, 255),
+     trim(contact.TaxNumber, 50), trim(contact.EmailAddress, 500)]
   );
 }
+
+const trim = (v, n) => (v == null || v === '' ? null : String(v).trim().slice(0, n));
 
 async function setManual(accountId, tenantId, contactId, { accountNumber, bankName, contactName } = {}) {
   await db.execute(

@@ -233,7 +233,11 @@ function bankAccountRow(b) {
     formatKey: b.format_key || null,
     isDefault: Boolean(b.is_default),
     enabled: Boolean(b.enabled),
-    label: `${b.name}${b.currency_code ? ` (${b.currency_code})` : ''}`
+    // Every Ayu Borneo organisation names its Xero bank account after the
+    // bank, so a list of them reads "Hong Leong Bank Berhad" forty-one times.
+    // The account number is the only thing that distinguishes them.
+    label: [b.name, b.account_number, b.currency_code && `(${b.currency_code})`]
+      .filter(Boolean).join(' · ')
   };
 }
 

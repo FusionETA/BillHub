@@ -243,6 +243,16 @@ CREATE TABLE IF NOT EXISTS payees (
   contact_name   VARCHAR(255),
   account_number VARCHAR(64),
   bank_name      VARCHAR(100),
+  -- Xero's contact carries a BatchPayments block, which is the "Financial
+  -- details" panel on the contact screen. Ayu Borneo use it as the single
+  -- source for how a payee is paid:
+  --   bank_account_name  a bank ("Maybank") for a transfer, or an all-digit
+  --                      JomPay biller code ("5454") for a utility
+  --   details            the lot/location, which becomes the payment narrative
+  bank_account_name VARCHAR(100),
+  details           VARCHAR(255),
+  tax_number        VARCHAR(50),
+  email             VARCHAR(500),
   -- 'xero' = as pulled from the contact; 'manual' = corrected here, and a
   -- re-sync must not overwrite it.
   source         ENUM('xero','manual') NOT NULL DEFAULT 'xero',
