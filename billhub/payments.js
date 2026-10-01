@@ -167,6 +167,11 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
       contactId: r.contact_id,
       payeeAccount: p?.account_number || null,
       payeeBank: p?.bank_name || null,
+      // Xero's "Financial details" panel: a bank name or a JomPay biller code,
+      // the lot reference, and who the bank should send the credit advice to.
+      payeeBankAccountName: p?.bank_account_name || null,
+      payeeDetails: p?.details || null,
+      payeeEmail: p?.email || null,
       amount: Number(r.amount_due),
       reference: (r.reference || r.invoice_number || '').slice(0, 255)
     };

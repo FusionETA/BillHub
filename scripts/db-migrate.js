@@ -33,6 +33,15 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: 'payment_batch_lines — snapshot the payee payment details with the batch',
+    check: hasColumn('payment_batch_lines', 'payee_bank_account_name'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE payment_batch_lines '
+       + 'ADD COLUMN payee_bank_account_name VARCHAR(100) NULL AFTER payee_bank, '
+       + 'ADD COLUMN payee_details VARCHAR(255) NULL AFTER payee_bank_account_name, '
+       + 'ADD COLUMN payee_email VARCHAR(500) NULL AFTER payee_details'
+  },
+  {
     why: "payees — the rest of Xero's BatchPayments block, which is where Ayu Borneo keep the payment details",
     check: hasColumn('payees', 'bank_account_name'),
     needed: (row) => Number(row.n) === 0,

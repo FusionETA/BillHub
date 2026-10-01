@@ -311,6 +311,12 @@ CREATE TABLE IF NOT EXISTS payment_batch_lines (
   contact_name    VARCHAR(255),
   payee_account   VARCHAR(64),
   payee_bank      VARCHAR(100),
+  -- Snapshotted with the batch, not looked up when the file is rendered: the
+  -- file a bank received must stay reproducible even after someone edits the
+  -- contact in Xero.
+  payee_bank_account_name VARCHAR(100),
+  payee_details   VARCHAR(255),
+  payee_email     VARCHAR(500),
   amount          DECIMAL(16,2) NOT NULL,
   reference       VARCHAR(255),
   xero_payment_id CHAR(36) NULL,

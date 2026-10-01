@@ -285,7 +285,14 @@ function check(name, ok, detail) {
 
   console.log('\nFormats');
   const formats = await req('GET', '/api/payments/formats', { cookie });
-  check('both built-ins are listed', formats.body.formats.length === 2, formats.body.formats.map((f) => f.key));
+  // Named rather than counted: adding a bank should not break this, but
+  // losing one silently should.
+  const keys = formats.body.formats.map((f) => f.key);
+  check('every built-in layout is offered',
+    ['generic-csv', 'maybank-m2e-csv', 'hlb-connectfirst', 'hlb-jompay'].every((k) => keys.includes(k)), keys);
+  check('only the generic one claims to be verified',
+    formats.body.formats.filter((f) => f.verified).map((f) => f.key).join() === 'generic-csv',
+    formats.body.formats.filter((f) => f.verified).map((f) => f.key));
   check('generic-csv is the verified one',
     formats.body.formats.find((f) => f.key === 'generic-csv').verified === true
     && formats.body.formats.find((f) => f.key === 'maybank-m2e-csv').verified === false);

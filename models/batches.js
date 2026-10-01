@@ -99,10 +99,13 @@ async function create(accountId, {
     for (const l of lineRows) {
       await conn.execute(
         `INSERT INTO payment_batch_lines
-          (batch_id, bill_id, xero_invoice_id, contact_name, payee_account, payee_bank, amount, reference)
-         VALUES (?,?,?,?,?,?,?,?)`,
+          (batch_id, bill_id, xero_invoice_id, contact_name, payee_account, payee_bank,
+           payee_bank_account_name, payee_details, payee_email, amount, reference)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [batchId, l.billId, l.xeroInvoiceId, l.contactName || null,
-         l.payeeAccount || null, l.payeeBank || null, Number(l.amount).toFixed(2), l.reference || null]
+         l.payeeAccount || null, l.payeeBank || null,
+         l.payeeBankAccountName || null, l.payeeDetails || null, l.payeeEmail || null,
+         Number(l.amount).toFixed(2), l.reference || null]
       );
     }
     return { id: batchId, reference, total };
