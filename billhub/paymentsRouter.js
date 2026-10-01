@@ -264,11 +264,17 @@ router.get('/batches/:id(\\d+)', async (req, res) => {
 router.get('/batches/:id(\\d+)/file', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const { text, fileName, batch } = await payments.renderFile(accountId, Number(req.params.id));
+    const { text, buffer, fileName, batch } = await payments.renderFile(accountId, Number(req.params.id));
     if (batch.status === 'cancelled') return res.status(409).json({ error: 'That batch was cancelled.' });
     await batches.markDownloaded(accountId, batch.id);
+    const name = batch.file_name || fileName;
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    if (buffer) {
+      // The bank's own workbook, header and all.
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      return res.send(buffer);
+    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${batch.file_name || fileName}"`);
     res.send(text);
   } catch (err) { fail(res, err); }
 });

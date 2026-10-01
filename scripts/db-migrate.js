@@ -33,6 +33,13 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: "bank_formats.template — the bank's own workbook, filled rather than rebuilt",
+    check: hasColumn('bank_formats', 'template'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE bank_formats ADD COLUMN template VARCHAR(128) NULL AFTER payment_mode, '
+       + 'ADD COLUMN template_header_rows INT NOT NULL DEFAULT 1 AFTER template'
+  },
+  {
     why: 'bank_accounts.biller_format_key — the JomPay layout, for the utilities in the same pay run',
     check: hasColumn('bank_accounts', 'biller_format_key'),
     needed: (row) => Number(row.n) === 0,

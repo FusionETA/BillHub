@@ -4,8 +4,12 @@
 const db = require('../db');
 const { BUILT_IN } = require('../lib/bankFile');
 
+// Every column the renderer reads. Leaving one out here does not error —
+// the field is simply undefined and the layout quietly behaves like a
+// different one, which is how payment_mode and template were both ignored.
 const COLS = `id, account_id, format_key, name, bank_name, delimiter, extension,
               include_header, line_ending, quote_fields, date_format,
+              payment_mode, template, template_header_rows,
               columns, header_row, trailer_row, verified, notes`;
 
 // Seeds the built-in layouts. Idempotent, and it never overwrites a layout
@@ -19,10 +23,11 @@ async function seedBuiltIns() {
     await db.insert(
       `INSERT INTO bank_formats
         (account_id, format_key, name, bank_name, delimiter, extension, include_header,
-         line_ending, quote_fields, date_format, payment_mode, columns, verified, notes)
-       VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         line_ending, quote_fields, date_format, payment_mode, template, template_header_rows, columns, verified, notes)
+       VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [f.format_key, f.name, f.bank_name, f.delimiter, f.extension, f.include_header,
        f.line_ending, f.quote_fields ? 1 : 0, f.date_format || 'YYYY-MM-DD', f.payment_mode || null,
+       f.template || null, f.template_header_rows || 1,
        JSON.stringify(f.columns), f.verified ? 1 : 0, f.notes || null]
     );
   }

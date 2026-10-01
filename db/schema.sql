@@ -200,6 +200,10 @@ CREATE TABLE IF NOT EXISTS bank_formats (
   -- Hong Leong's limits move with the payment rail, so the layout has to carry
   -- which one it is: FT, IBG, RENTAS or DUITNW.
   payment_mode   VARCHAR(8) NULL,
+  -- A workbook the bank supplied, with its header already in it. Rows go
+  -- underneath; everything else in the file is left exactly as issued.
+  template       VARCHAR(128) NULL,
+  template_header_rows INT NOT NULL DEFAULT 1,
   columns        JSON NOT NULL,
   header_row     JSON NULL,          -- optional file-level header record
   trailer_row    JSON NULL,          -- optional trailer (totals, counts)
