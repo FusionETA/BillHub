@@ -305,7 +305,10 @@ router.post('/batches/:id(\\d+)/receipt',
         fileName: req.get('X-File-Name') || 'receipt.pdf',
         contentType: req.get('Content-Type'),
         bytes: req.body,
-        replace: req.query.replace === '1'
+        replace: req.query.replace === '1',
+        // A slip proves the money left; a receipt is what the bank sent back.
+        // Different documents, so different names on the bill.
+        kind: req.query.kind === 'slip' ? 'payment-slip' : 'bank-receipt'
       });
       res.json({ ok: true, ...out });
     } catch (err) {

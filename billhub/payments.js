@@ -375,7 +375,10 @@ async function payIndividually(accountId, batch, unpaid, details, status, allLin
             ? batch.payment_date.toISOString().slice(0, 10)
             : String(batch.payment_date).slice(0, 10),
           Amount: Number(line.amount),
-          Reference: String(line.reference || details || '').slice(0, DETAILS_MAX)
+          // The reference typed on the dialog wins: the field says it shows on
+          // the Xero payment, and it is the one thing tying the payments back to
+          // the bank transfer. The bill's own reference is the fallback.
+          Reference: String(details || line.reference || '').slice(0, DETAILS_MAX)
         }] }
       });
     } catch (e) {
@@ -521,9 +524,9 @@ const RECEIPT_MAX_BYTES = 10 * 1024 * 1024;
 // Xero rejects a filename with a path separator or a colon, and the name is
 // what makes this idempotent: PUT .../Attachments/<name> REPLACES by name, so
 // attaching the same receipt twice cannot leave two copies on a bill.
-function receiptFileName(batch, uploadedName) {
+function receiptFileName(batch, uploadedName, kind = 'bank-receipt') {
   const ext = (String(uploadedName || '').match(/\.[A-Za-z0-9]{1,8}$/) || ['.pdf'])[0].toLowerCase();
-  return `${batch.reference}-bank-receipt${ext}`;
+  return `${batch.reference}-${kind}${ext}`;
 }
 
 // The bank's acknowledgement for a batch, attached to every bill it paid.
@@ -531,7 +534,7 @@ function receiptFileName(batch, uploadedName) {
 // One document, many bills: Xero stores attachments per invoice, so the same
 // bytes go up once per line. Each is recorded as it lands, so a run that stops
 // halfway resumes instead of re-uploading what already arrived.
-async function attachReceipt(accountId, batchId, { fileName, contentType, bytes, replace = false }) {
+async function attachReceipt(accountId, batchId, { fileName, contentType, bytes, replace = false, kind = 'bank-receipt' }) {
   if (!Buffer.isBuffer(bytes) || !bytes.length) throw err('No file was uploaded.');
   if (bytes.length > RECEIPT_MAX_BYTES) {
     throw err(`That file is ${(bytes.length / 1048576).toFixed(1)}MB. Xero will not take more than 10MB.`);
@@ -542,7 +545,7 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes,
   if (batch.status === 'cancelled') throw err(`Batch ${batch.reference} was cancelled.`, 409);
   // The receipt only exists once the bank has processed the file.
   if (!['uploaded', 'posted'].includes(batch.status)) {
-    throw err(`Batch ${batch.reference} has not been marked uploaded yet, so there is nothing for the bank to have acknowledged.`, 409);
+    throw err(`Batch ${batch.reference} has not been marked uploaded yet, so there is nothing to attach a ${kind === 'payment-slip' ? 'slip' : 'receipt'} to.`, 409);
   }
 
   const lineRows = await batches.lines(batchId);
@@ -554,7 +557,7 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes,
     throw err(`Every bill in ${batch.reference} already has this batch's receipt.`, 409);
   }
 
-  const name = receiptFileName(batch, fileName);
+  const name = receiptFileName(batch, fileName, kind);
   // Xero replaces an attachment by filename, so the same name overwrites. A
   // different extension is a different name, and Xero's API cannot delete an
   // attachment — so the old one stays, and saying so beats a silent surprise.

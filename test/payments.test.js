@@ -22,7 +22,7 @@ let failNextBatchPayment = null;
 let paymentCounter = 0;
 const attachments = [];
 let failNextAttachment = null;
-let failPaymentForRef = null;   // fail the single payment whose Reference matches
+let failPaymentForInvoice = null;   // fail the single payment for this invoice
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   xeroCalls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
@@ -54,8 +54,10 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
   // has no bill batch payments.
   if (opts.method === 'POST' && path === '/Payments') {
     const sent = opts.body.Payments[0];
-    if (failPaymentForRef && String(sent.Reference || '').includes(failPaymentForRef)) {
-      failPaymentForRef = null;
+    // Target the invoice, not the reference: every line in a batch now carries
+    // the same user-typed reference, so that is no longer a way to single one out.
+    if (failPaymentForInvoice && sent.Invoice.InvoiceID === failPaymentForInvoice) {
+      failPaymentForInvoice = null;
       const err = new Error('Payment amount exceeds the amount outstanding on this invoice.');
       err.statusCode = 400;
       throw err;
@@ -404,7 +406,7 @@ function check(name, ok, detail) {
   await db.execute("UPDATE payment_batches SET status = 'cancelled' WHERE account_id = 1");
   const b2 = await mkBatch();
   failNextBatchPayment = 'Batch payment status not valid for update';
-  failPaymentForRef = twoBills[1].reference || 'nothing-matches';
+  failPaymentForInvoice = (await db.getOne('SELECT xero_invoice_id FROM bills WHERE id = ?', [ids[1]])).xero_invoice_id;
   xeroCalls.length = 0;
   const partial = await req('POST', '/api/payments/batches/' + b2.id + '/uploaded', { cookie, body: {} });
   check('a mid-run refusal is reported, not swallowed', partial.status >= 400, partial.status);
