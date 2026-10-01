@@ -33,6 +33,24 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: "bank_formats.payment_mode — Hong Leong's field limits depend on the rail",
+    check: hasColumn('bank_formats', 'payment_mode'),
+    needed: (row) => Number(row.n) === 0,
+    sql: "ALTER TABLE bank_formats ADD COLUMN payment_mode VARCHAR(8) NULL AFTER date_format"
+  },
+  {
+    why: "payees.payee_code / payment_batch_lines.payee_code — Xero's BatchPayments.Code, the supplier abbreviation",
+    check: hasColumn('payees', 'payee_code'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE payees ADD COLUMN payee_code VARCHAR(40) NULL AFTER details'
+  },
+  {
+    why: 'payment_batch_lines.payee_code',
+    check: hasColumn('payment_batch_lines', 'payee_code'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE payment_batch_lines ADD COLUMN payee_code VARCHAR(40) NULL AFTER payee_details'
+  },
+  {
     why: 'payment_batch_lines — snapshot the payee payment details with the batch',
     check: hasColumn('payment_batch_lines', 'payee_bank_account_name'),
     needed: (row) => Number(row.n) === 0,

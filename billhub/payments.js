@@ -94,6 +94,24 @@ async function syncAll(accountId, { tenantIds = null } = {}) {
   };
 }
 
+// A planned line in the shape the renderer reads. The download path gets
+// these columns from the database; the preview has only the plan, so without
+// this the two disagree — and the preview is the one people trust before
+// money moves.
+function lineForRender(l) {
+  return {
+    contact_name: l.contactName,
+    payee_account: l.payeeAccount,
+    payee_bank: l.payeeBank,
+    payee_bank_account_name: l.payeeBankAccountName,
+    payee_details: l.payeeDetails,
+    payee_code: l.payeeCode,
+    payee_email: l.payeeEmail,
+    amount: l.amount,
+    reference: l.reference
+  };
+}
+
 // ── Building a batch ────────────────────────────────────────────────────────
 
 // Validates a proposed batch and assembles its lines. Throws with a specific
@@ -171,6 +189,7 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
       // the lot reference, and who the bank should send the credit advice to.
       payeeBankAccountName: p?.bank_account_name || null,
       payeeDetails: p?.details || null,
+      payeeCode: p?.payee_code || null,
       payeeEmail: p?.email || null,
       amount: Number(r.amount_due),
       reference: (r.reference || r.invoice_number || '').slice(0, 255)
@@ -498,5 +517,5 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes,
 
 module.exports = {
   syncBankAccounts, syncPayees, syncAll,
-  planBatch, createBatch, renderFile, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
+  planBatch, createBatch, renderFile, lineForRender, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
 };

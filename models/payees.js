@@ -38,34 +38,58 @@ async function upsertFromXero(accountId, tenantId, contact) {
   const accountNumber = cleanAccountNumber(bp.BankAccountNumber || contact.BankAccountDetails);
   await db.execute(
     `INSERT INTO payees (account_id, xero_tenant_id, contact_id, contact_name, account_number,
-                         bank_account_name, details, tax_number, email, source)
-     VALUES (?,?,?,?,?,?,?,?,?, 'xero')
+                         bank_account_name, details, payee_code, tax_number, email, source)
+     VALUES (?,?,?,?,?,?,?,?,?,?, 'xero')
      ON DUPLICATE KEY UPDATE
        contact_name = VALUES(contact_name),
        account_number = IF(source = 'manual', account_number, VALUES(account_number)),
        bank_account_name = IF(source = 'manual', bank_account_name, VALUES(bank_account_name)),
        details = IF(source = 'manual', details, VALUES(details)),
+       payee_code = IF(source = 'manual', payee_code, VALUES(payee_code)),
        tax_number = VALUES(tax_number),
        email = VALUES(email)`,
     [accountId, tenantId, contact.ContactID, contact.Name || null, accountNumber,
-     trim(bp.BankAccountName, 100), trim(bp.Details, 255),
+     trim(bp.BankAccountName, 100), trim(bp.Details, 255), trim(bp.Code, 40),
      trim(contact.TaxNumber, 50), trim(contact.EmailAddress, 500)]
   );
 }
 
 const trim = (v, n) => (v == null || v === '' ? null : String(v).trim().slice(0, n));
 
-async function setManual(accountId, tenantId, contactId, { accountNumber, bankName, contactName } = {}) {
+// A hand correction, which a re-sync must not undo. Of the five "Financial
+// details" fields Xero shows on a contact, its API accepts only
+// BankAccountNumber on write — BankAccountName, Details and Code are silently
+// dropped. So anything not typed into the Xero UI has to be correctable here,
+// or it cannot be set at all.
+async function setManual(accountId, tenantId, contactId, f = {}) {
+  const has = (k) => Object.prototype.hasOwnProperty.call(f, k);
+  const sets = [];
+  const params = [];
+  const put = (col, value) => { sets.push(col + ' = ?'); params.push(value); };
+
+  if (has('contactName')) put('contact_name', f.contactName || null);
+  if (has('accountNumber')) put('account_number', cleanAccountNumber(f.accountNumber));
+  if (has('bankName')) put('bank_name', f.bankName || null);
+  if (has('bankAccountName')) put('bank_account_name', f.bankAccountName || null);
+  if (has('details')) put('details', f.details || null);
+  if (has('payeeCode')) put('payee_code', f.payeeCode || null);
+  if (has('email')) put('email', f.email || null);
+  if (has('taxNumber')) put('tax_number', f.taxNumber || null);
+  if (!sets.length) return 0;
+
+  // The row may not exist yet for a contact nobody has paid.
   await db.execute(
-    `INSERT INTO payees (account_id, xero_tenant_id, contact_id, contact_name, account_number, bank_name, source)
-     VALUES (?,?,?,?,?,?, 'manual')
-     ON DUPLICATE KEY UPDATE
-       contact_name = COALESCE(VALUES(contact_name), contact_name),
-       account_number = VALUES(account_number),
-       bank_name = VALUES(bank_name),
-       source = 'manual'`,
-    [accountId, tenantId, contactId, contactName || null, cleanAccountNumber(accountNumber), bankName || null]
+    `INSERT INTO payees (account_id, xero_tenant_id, contact_id, contact_name, source)
+     VALUES (?,?,?,?, 'manual')
+     ON DUPLICATE KEY UPDATE source = 'manual'`,
+    [accountId, tenantId, contactId, f.contactName || null]
   );
+  const res = await db.execute(
+    `UPDATE payees SET ${sets.join(', ')}, source = 'manual'
+      WHERE account_id = ? AND xero_tenant_id = ? AND contact_id = ?`,
+    [...params, accountId, tenantId, contactId]
+  );
+  return res.affectedRows;
 }
 
 // Xero's field is free text: "Maybank 5142-3312-9987" or "  551234567  ".

@@ -197,6 +197,9 @@ CREATE TABLE IF NOT EXISTS bank_formats (
   quote_fields   TINYINT(1) NOT NULL DEFAULT 0,
   -- How paymentDate is written: YYYY-MM-DD | YYYYMMDD | DD/MM/YYYY | DDMMYYYY
   date_format    VARCHAR(16) NOT NULL DEFAULT 'YYYY-MM-DD',
+  -- Hong Leong's limits move with the payment rail, so the layout has to carry
+  -- which one it is: FT, IBG, RENTAS or DUITNW.
+  payment_mode   VARCHAR(8) NULL,
   columns        JSON NOT NULL,
   header_row     JSON NULL,          -- optional file-level header record
   trailer_row    JSON NULL,          -- optional trailer (totals, counts)
@@ -251,6 +254,10 @@ CREATE TABLE IF NOT EXISTS payees (
   --   details            the lot/location, which becomes the payment narrative
   bank_account_name VARCHAR(100),
   details           VARCHAR(255),
+  -- Xero's BatchPayments.Code. Ayu Borneo's payment narrative is
+  -- "<entity> <supplier> <period>" — MA GE 0826 — and this is the only place
+  -- the "GE" can live without inventing a second list to maintain.
+  payee_code        VARCHAR(40),
   tax_number        VARCHAR(50),
   email             VARCHAR(500),
   -- 'xero' = as pulled from the contact; 'manual' = corrected here, and a
@@ -316,6 +323,7 @@ CREATE TABLE IF NOT EXISTS payment_batch_lines (
   -- contact in Xero.
   payee_bank_account_name VARCHAR(100),
   payee_details   VARCHAR(255),
+  payee_code      VARCHAR(40),
   payee_email     VARCHAR(500),
   amount          DECIMAL(16,2) NOT NULL,
   reference       VARCHAR(255),

@@ -191,11 +191,9 @@ router.post('/preview', async (req, res) => {
       total: plan.total,
       line_count: plan.lines.length,
       payer_name: plan.bank.entity_short,
-      payer_account: plan.bank.account_number
-    }, plan.lines.map((l) => ({
-      contact_name: l.contactName, payee_account: l.payeeAccount,
-      payee_bank: l.payeeBank, amount: l.amount, reference: l.reference
-    })));
+      payer_account: plan.bank.account_number,
+      entity_code: plan.bank.entity_code
+    }, plan.lines.map(payments.lineForRender));
 
     res.json({
       reference: await batches.nextReference(accountId),
@@ -204,7 +202,11 @@ router.post('/preview', async (req, res) => {
       currency: plan.currencyCode || '',
       total: vm.money(plan.total),
       lineCount: plan.lines.length,
-      warnings: plan.warnings,
+      // Both sets: planBatch catches what is missing before rendering, the
+      // renderer catches what the layout itself cannot carry — a name too
+      // long for IBG, a bank Hong Leong does not list. The preview is where
+      // someone decides to send this, so it has to show both.
+      warnings: [...plan.warnings, ...(sample.warnings || [])],
       missingPayeeAccounts: plan.missingPayeeAccounts,
       format: vm.bankFormatRow(format),
       // Enough of the file to check the layout, without shipping the lot.
