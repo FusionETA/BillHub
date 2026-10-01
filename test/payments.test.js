@@ -244,9 +244,14 @@ function check(name, ok, detail) {
     { before: beforeBill, after: afterBill });
   check('and it shows as paid', afterBill.xero_status === 'PAID' && afterBill.fully_paid_on, afterBill);
 
+  // Marking uploaded again is harmless bookkeeping; what must never happen is a
+  // second trip to Xero, so count the calls rather than the status code.
+  const postsBefore = xeroCalls.filter((c) => c.method === 'POST' && /Payment/.test(c.path)).length;
   const twice = await req('POST', `/api/payments/batches/${batchId}/uploaded`, { cookie });
-  check('a batch cannot be posted to Xero twice',
-    twice.status === 409 && /already recorded in Xero/.test(twice.body.error), twice.body.error);
+  const postsAfter = xeroCalls.filter((c) => c.method === 'POST' && /Payment/.test(c.path)).length;
+  check('marking an already-posted batch uploaded does not pay it twice',
+    twice.status === 200 && twice.body.alreadyPosted === true && postsAfter === postsBefore,
+    { status: twice.status, body: twice.body, postsBefore, postsAfter });
 
   const cancelPosted = await req('POST', `/api/payments/batches/${batchId}/cancel`, { cookie });
   check('a posted batch cannot be cancelled', cancelPosted.status === 409, cancelPosted.status);
@@ -394,8 +399,14 @@ function check(name, ok, detail) {
   check('the bills show as paid without waiting for a sync', Number(paidNow.n) === ids.length, paidNow);
 
   // The one that must never go wrong.
+  // Paid bill by bill, so there is no batch payment id to guard on — only
+  // xero_posted_at stands between this and paying every bill a second time.
+  const beforeAgain = xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length;
   const again = await req('POST', '/api/payments/batches/' + b1.id + '/uploaded', { cookie, body: {} });
-  check('posting it a second time is refused, not paid twice', again.status === 409, again.body);
+  const afterAgain = xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length;
+  check('marking it uploaded a second time does not pay it twice',
+    again.status === 200 && again.body.alreadyPosted === true && afterAgain === beforeAgain,
+    { status: again.status, body: again.body, beforeAgain, afterAgain });
   check('and no further payment was sent',
     xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').length === twoBills.length,
     xeroCalls.filter((c) => c.path === '/Payments').length);
@@ -520,6 +531,68 @@ function check(name, ok, detail) {
     check('an oversized file is refused before anything is uploaded',
       big.status >= 400 && /10MB/.test(JSON.stringify(big.body)), big.body);
 
+  }
+
+  // ── Marking bills paid ────────────────────────────────────────────────────
+  // The one action the Bills tab offers. It has to do both halves at once: pay
+  // Xero, because the user is telling us the money has left, and leave a file
+  // to take to the portal. Doing only one was the old behaviour, and it forced
+  // a choice between a bill with the right status and a file you could upload.
+  {
+    console.log('\nMarking bills paid in one action');
+    const two = await db.query(
+      "SELECT id FROM bills WHERE account_id = 1 AND xero_tenant_id = 'tenant-abm' ORDER BY id LIMIT 2");
+    const billIds = two.map((r) => r.id);
+    await db.execute("UPDATE payment_batches SET status = 'cancelled' WHERE account_id = 1");
+    await db.execute(
+      `UPDATE bills SET xero_status = 'AUTHORISED', amount_due = 300, amount_paid = 0 WHERE id IN (${billIds.map(() => '?').join(',')})`,
+      billIds);
+    xeroCalls.length = 0;
+
+    const paid = await req('POST', '/api/payments/batches', { cookie, body: {
+      billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-01',
+      generateFile: true, postNow: true, reference: 'HLB-DN-20261001-01'
+    } });
+    check('the batch is created', paid.status === 201, paid.body);
+    const pb = paid.body.batches[0];
+
+    check('Xero was paid there and then',
+      xeroCalls.some((c) => c.method === 'POST' && /Payment/.test(c.path)), xeroCalls.map((c) => c.method + ' ' + c.path));
+    const stillDue = await db.getOne(
+      `SELECT COUNT(*) AS n FROM bills WHERE xero_status <> 'PAID' AND id IN (${billIds.map(() => '?').join(',')})`, billIds);
+    check('the bills are paid, not awaiting payment', Number(stillDue.n) === 0, stillDue);
+
+    const row = await db.getOne('SELECT status, file_name, uploaded_at, xero_posted_at FROM payment_batches WHERE id = ?', [pb.id]);
+    check('a file was still generated', Boolean(row.file_name), row.file_name);
+    check('and it waits at ready to download, not uploaded',
+      row.status === 'ready' && row.uploaded_at === null, row);
+    check('while the Xero posting is recorded', Boolean(row.xero_posted_at), row.xero_posted_at);
+
+    // The reference typed on the dialog is the only thing tying these payments
+    // back to one bank transfer, so it has to survive whichever path Xero's
+    // edition forces us down — Details on a batch, Reference on each payment.
+    const batched = xeroCalls.filter((c) => c.path === '/BatchPayments' && c.method === 'POST').pop();
+    const single = xeroCalls.filter((c) => c.path === '/Payments' && c.method === 'POST').pop();
+    const onXero = batched
+      ? batched.body.BatchPayments[0].Details
+      : single && single.body.Payments[0].Reference;
+    check('the typed reference is on the Xero payment', onXero === 'HLB-DN-20261001-01', onXero);
+
+    const card = (await req('GET', '/api/payments', { cookie })).body.batchCards.find((c) => c.id === pb.id);
+    check('the tab shows it as ready to download', card && card.statusLabel === 'Ready to download', card && card.statusLabel);
+    check('and says it is already in Xero', Boolean(card && card.postedNote), card && card.postedNote);
+    // Cancelling would release bills that are already paid.
+    check('a paid batch cannot be cancelled', card && card.canCancel === false, card && card.canCancel);
+
+    await req('GET', `/api/payments/batches/${pb.id}/file`, { cookie, raw: true });
+    const before = xeroCalls.filter((c) => c.method === 'POST' && /Payment/.test(c.path)).length;
+    const up = await req('POST', `/api/payments/batches/${pb.id}/uploaded`, { cookie });
+    const after = xeroCalls.filter((c) => c.method === 'POST' && /Payment/.test(c.path)).length;
+    check('marking it uploaded is bookkeeping only, with no second payment',
+      up.status === 200 && up.body.alreadyPosted === true && after === before,
+      { body: up.body, before, after });
+    const done = await db.getOne('SELECT status, uploaded_at FROM payment_batches WHERE id = ?', [pb.id]);
+    check('and it lands at uploaded', done.status === 'uploaded' && done.uploaded_at, done);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

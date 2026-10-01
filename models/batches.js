@@ -123,16 +123,23 @@ async function markDownloaded(accountId, id) {
   return res.affectedRows;
 }
 
-// Called once Xero has accepted the batch payment. Storing the id is what stops
-// a second post: the router refuses when it is already set.
+// Called once Xero has accepted the batch payment. `xero_posted_at` is what
+// stops a second post — the batch payment id is null when the organisation's
+// edition made us pay bill by bill, so it cannot be the thing we check.
+//
+// Posting no longer implies the file reached the bank. Bills are paid in Xero
+// the moment the user marks them paid, while the file still has to be
+// downloaded and uploaded to the portal, so `uploaded_at` is stamped only by a
+// status that actually means uploaded.
 async function markPosted(accountId, id, { xeroBatchPaymentId, payments = [], status = 'uploaded' }) {
+  const isUpload = ['uploaded', 'posted'].includes(status);
   await db.transaction(async (conn) => {
     await conn.execute(
       `UPDATE payment_batches
           SET xero_batch_payment_id = ?, xero_posted_at = NOW(), post_error = NULL,
-              status = ?, uploaded_at = COALESCE(uploaded_at, NOW())
+              status = ?, uploaded_at = IF(?, COALESCE(uploaded_at, NOW()), uploaded_at)
         WHERE account_id = ? AND id = ?`,
-      [xeroBatchPaymentId, status, accountId, id]
+      [xeroBatchPaymentId, status, isUpload ? 1 : 0, accountId, id]
     );
     // Xero returns the payments in the order they were sent.
     for (const p of payments) {
@@ -143,6 +150,19 @@ async function markPosted(accountId, id, { xeroBatchPaymentId, payments = [], st
       );
     }
   });
+}
+
+// The bills are already paid in Xero by this point; this is the bookkeeping
+// flag that says the file was taken to the banking portal, so the tab can show
+// what is still waiting to be sent.
+async function markUploaded(accountId, id) {
+  const res = await db.execute(
+    `UPDATE payment_batches
+        SET status = 'uploaded', uploaded_at = COALESCE(uploaded_at, NOW())
+      WHERE account_id = ? AND id = ? AND status IN ('ready','downloaded')`,
+    [accountId, id]
+  );
+  return res.affectedRows;
 }
 
 // Written per payment rather than in one go at the end, so a run that dies
@@ -213,5 +233,5 @@ async function summary(accountId) {
 module.exports = {
   recordLinePayment, markLineReceipted, markReceiptAttached,
   list, getById, lines, billsInLiveBatches, nextReference, create,
-  markDownloaded, markPosted, markPostFailed, cancel, summary, LIVE_STATUSES
+  markDownloaded, markUploaded, markPosted, markPostFailed, cancel, summary, LIVE_STATUSES
 };

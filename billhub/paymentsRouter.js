@@ -225,7 +225,14 @@ router.post('/preview', async (req, res) => {
       // One entry per rail. A run of suppliers alone has one; add a utility
       // and there are two, because they are two uploads at the bank.
       files,
-      warnings: files.flatMap((f) => f.warnings),
+      // The dialog shows this list on its own, so it has to read once. The
+      // planner already names every payee missing an account in one line; the
+      // renderer then repeats each of them individually, which turned one
+      // problem into three paragraphs saying the same thing. Keep the
+      // renderer's other warnings — a bank it cannot map, a field too long for
+      // the mode — because those are things the summary does not cover.
+      warnings: [...new Set(files.flatMap((f) => f.warnings))]
+        .filter((w) => !/ has no (bank|biller) account number\.$/.test(w)),
       missingPayeeAccounts: planned.runs.flatMap((x) => x.missingPayeeAccounts)
     });
   } catch (err) { fail(res, err); }
@@ -279,16 +286,30 @@ router.get('/batches/:id(\\d+)/file', async (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
-// Confirming the file reached the bank is what records the payment in Xero.
+// Confirming the file reached the banking portal. The bills were paid in Xero
+// when the user marked them paid, so for those this is only a bookkeeping flag
+// — posting again would pay them twice. A batch created before that change, or
+// one whose posting failed, still has nothing in Xero, and this is where it
+// gets recorded.
 router.post('/batches/:id(\\d+)/uploaded', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const out = await payments.postToXero(accountId, Number(req.params.id), {
+    const id = Number(req.params.id);
+    const batch = await batches.getById(accountId, id);
+    if (!batch) return res.status(404).json({ error: 'Batch not found.' });
+    if (batch.status === 'cancelled') return res.status(409).json({ error: `Batch ${batch.reference} was cancelled.` });
+
+    if (batch.xero_posted_at) {
+      await batches.markUploaded(accountId, id);
+      return res.json({ ok: true, alreadyPosted: true, reference: batch.reference });
+    }
+
+    const out = await payments.postToXero(accountId, id, {
       reference: (req.body || {}).reference || null
     });
     res.json({ ok: true, ...out });
   } catch (err) {
-    console.error('[payments] post to Xero failed:', err.message);
+    console.error('[payments] marking uploaded failed:', err.message);
     fail(res, err);
   }
 });

@@ -496,7 +496,6 @@
       const [error, setError] = useState(null);
       const [checking, setChecking] = useState(false);
       const [busy, setBusy] = useState(false);
-      const [showFile, setShowFile] = useState(null);   // which rail's file is open
       const [reference, setReference] = useState('');
       const [slip, setSlip] = useState(null);           // optional; proof the money left
 
@@ -529,14 +528,17 @@
         return () => { cancelled = true; };
       }, [open, bankAccountId, paymentDate, bills.map(b => b.id).join(',')]);
 
-      async function submit(generateFile) {
+      // One action. The bills are paid in Xero now, and the bank file is
+      // waiting on the Bank files tab to be taken to the portal.
+      async function submit() {
         setBusy(true);
         try {
           const r = await api.post('/api/payments/batches', {
             billIds: bills.map(b => b.id),
             bankAccountId: Number(bankAccountId),
             paymentDate,
-            generateFile,
+            generateFile: true,
+            postNow: true,
             reference: reference.trim() || undefined
           });
           // A run that mixes suppliers and utilities comes back as two
@@ -547,7 +549,7 @@
           // that — so the slip goes on the bills themselves, which is where
           // anyone asking "how was this paid" will look anyway.
           let slipped = 0;
-          if (slip && !generateFile) {
+          if (slip) {
             for (const b of made) {
               try {
                 const res = await fetch('/api/payments/batches/' + b.id + '/receipt?kind=slip', {
@@ -558,19 +560,14 @@
               } catch { /* reported below; the payment itself already went through */ }
             }
             if (!slipped) onToast({ title: 'Payment recorded, slip not attached',
-              message: 'The bills are paid in Xero. Attaching the slip failed — try again from Bank files.', tone: 'error' });
+              message: 'The bills are paid in Xero. Attaching the slip failed — add it to the bills in Xero yourself.', tone: 'error' });
           }
+          const files = made.length === 1
+            ? 'The payment file is on the Bank files tab.'
+            : 'Two payment files are on the Bank files tab — one for the bank transfers, one for JomPay — each uploaded to the portal separately.';
           onToast({
-            title: made.length === 1
-              ? made[0].reference + ' created'
-              : made.length + ' payment files created',
-            message: (!generateFile && slipped)
-              ? 'Recorded in Xero and the slip is on ' + (made.length === 1 ? 'the bills' : 'every bill') + '.'
-              : generateFile
-              ? (made.length === 1
-                  ? 'Open Bank files to download it. The bills stay unpaid in Xero until you mark the batch uploaded.'
-                  : 'One for the bank transfers and one for JomPay — both on the Bank files tab, each uploaded separately. The bills stay unpaid in Xero until you mark them uploaded.')
-              : 'Recorded in Xero. The bills are now paid.'
+            title: bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' marked paid in Xero',
+            message: files + (slipped ? ' The slip is attached to every bill.' : '')
           });
           onDone();
         } catch (e) {
@@ -649,50 +646,13 @@
                 </div>
               ))}
 
-              {/* One card per file. A run of suppliers alone has one; add a
-                  utility and there are two, because JomPay and a bank transfer
-                  are two different uploads at the bank. */}
-              {preview.files.map((f) => (
-                <div key={f.rail} style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '14px 16px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <strong style={{ color: 'var(--text-heading)' }}>{preview.reference}</strong>
-                    {preview.files.length > 1 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: f.rail === 'biller' ? 'var(--blue-50)' : 'var(--neutral-100)', color: f.rail === 'biller' ? 'var(--blue-600)' : 'var(--neutral-600)' }}>{f.railLabel}</span>}
-                    <span>· {f.lineCount} payment{f.lineCount === 1 ? '' : 's'} · {preview.currency} {f.total}</span>
-                  </div>
-                  {f.format
-                    ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{f.fileName}</span>
-                        <span style={{ color: 'var(--text-subtle)' }}>·</span>
-                        <span>{f.format.name}</span>
-                        {!f.format.verified && <UnverifiedTag />}
-                        <span style={{ flex: 1 }} />
-                        <button onClick={() => setShowFile(v => (v === f.rail ? null : f.rail))} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
-                          {showFile === f.rail ? 'Hide file' : 'Check the file'}
-                        </button>
-                      </div>
-                    : <div style={{ marginTop: 4, color: 'var(--color-danger)', fontWeight: 600 }}>No layout set for this rail — nothing can be generated.</div>}
-                  {showFile === f.rail && <pre style={{ margin: '10px 0 0', maxHeight: 180, overflow: 'auto', background: 'var(--ink-900)', color: '#d8dbe8', borderRadius: 10, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}>{f.filePreview}</pre>}
-                  {f.format && !f.format.verified && <div style={{ marginTop: 10, background: 'var(--amber-100)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: '#6b4d00', lineHeight: 1.6 }}>
-                    This layout has not been checked against the bank's own spec sheet. Compare it with what {f.format.bankName || 'your bank'} expects, and send a single-line test payment before a full run.
-                  </div>}
-                </div>
-              ))}
-
             </React.Fragment>}
-
-            <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-              Creating the batch does not change anything in Xero yet. The bills are marked paid when you mark the batch uploaded, which is when the money has actually left.
-            </div>
 
             <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 4 }}>
               <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
-              <Button variant="ghost" size="md" onClick={() => submit(false)}
+              <Button variant="primary" size="md" onClick={submit}
                 style={canSubmit ? null : { opacity: .5, pointerEvents: 'none' }}>
-                {busy ? 'Recording…' : 'Mark as paid'}
-              </Button>
-              <Button variant="primary" size="md" onClick={() => submit(true)}
-                style={canSubmit ? null : { opacity: .5, pointerEvents: 'none' }}>
-                {checking ? 'Checking…' : busy ? 'Creating…' : 'Create payment file'}
+                {checking ? 'Checking…' : busy ? 'Recording…' : 'Mark as paid'}
               </Button>
             </div>
           </div>}
@@ -1719,39 +1679,16 @@
         setBusy(batch.id);
         try {
           const r = await api.post('/api/payments/batches/' + batch.id + '/uploaded');
-          onToast({
-            title: batch.ref + ' recorded in Xero',
-            message: 'Batch payment ' + String(r.batchPaymentId).slice(0, 8) + '… created. The bills are now paid.'
-          });
+          onToast(r.alreadyPosted
+            ? { title: batch.ref + ' marked uploaded', message: 'Its bills were already paid in Xero when you marked them paid.' }
+            : { title: batch.ref + ' recorded in Xero', message: 'The bills in this batch are now paid.' });
           reload();
         } catch (e) {
           onToast({
-            title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : 'Xero rejected the batch',
+            title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : 'Could not mark it uploaded',
             message: e.message, tone: 'error'
           });
           reload();
-        } finally { setBusy(null); }
-      }
-
-      // The bank's acknowledgement for a whole batch, put on every bill it paid.
-      // Sent as raw bytes with the name in a header — no multipart to build.
-      async function attachReceipt(batch, file) {
-        setBusy(batch.id);
-        try {
-          const res = await fetch('/api/payments/batches/' + batch.id + '/receipt' + (batch.receiptName ? '?replace=1' : ''), {
-            method: 'POST', credentials: 'same-origin', body: file,
-            headers: { 'Content-Type': file.type || 'application/pdf', 'X-File-Name': file.name }
-          });
-          const out = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(out.error || ('Upload failed (' + res.status + ')'));
-          onToast({
-            title: out.replaced ? 'Receipt replaced' : 'Receipt attached',
-            message: out.attached + ' bill' + (out.attached === 1 ? '' : 's') + ' in ' + batch.reference
-              + ' now carry ' + out.fileName + ' in Xero.' + (out.note ? ' ' + out.note : '')
-          });
-          reload();
-        } catch (e) {
-          onToast({ title: 'Could not attach the receipt', message: e.message, tone: 'error' });
         } finally { setBusy(null); }
       }
 
@@ -1774,7 +1711,7 @@
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Bank payment files</span></div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Bank payment files</h1>
             <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '76ch' }}>
-              Paying bills from the Bills tab creates a batch here, in the layout the paying account's bank expects. Download the file, upload it to the banking portal, then mark the batch uploaded — that last step is what records the payment in Xero.
+              Marking bills as paid generates a payment file in the layout the paying account's bank expects. Download the file, upload it to the banking portal, then mark the batch as uploaded.
             </p>
           </div>
           <span style={{ flex: 1 }} />
@@ -1823,11 +1760,6 @@
                   <Icon name="download" size={15} color="#fff" />Download file
                 </Button>}
                 {b.canUpload && <Button variant="outline" size="sm" onClick={() => markUploaded(b)} style={busy === b.id ? { opacity: .6, pointerEvents: 'none' } : null}>Mark uploaded</Button>}
-                {b.canAttachReceipt && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 10, padding: '0 12px', height: 36, fontSize: 13, fontWeight: 700, color: 'var(--color-secondary)', cursor: busy === b.id ? 'default' : 'pointer', opacity: busy === b.id ? .6 : 1, whiteSpace: 'nowrap' }}>
-                  <Icon name="paperclip" size={14} />{b.receiptName ? 'Replace receipt' : 'Attach bank receipt'}
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*" style={{ display: 'none' }}
-                    onChange={e => { const file = e.target.files && e.target.files[0]; e.target.value = ''; if (file) attachReceipt(b, file); }} />
-                </label>}
                 {b.canCancel && <button onClick={() => cancelBatch(b)} title="Cancel this batch and release its bills"
                   style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, display: 'flex', borderRadius: 6 }}><Icon name="trash-2" size={16} /></button>}
               </div>
@@ -1840,10 +1772,6 @@
                 saving rewrites long account numbers — 345678901234 becomes 3.45679E+11 — and the
                 payment then goes nowhere. To read it, use a text editor, or Excel's
                 Data → From Text import with every column set to Text.
-              </div>}
-
-              {b.receiptNote && <div style={{ padding: '8px 18px', background: 'var(--green-100)', color: '#126b42', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 7 }}>
-                <Icon name="paperclip" size={13} />{b.receiptNote} — <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{b.receiptName}</span>, on every bill in this batch
               </div>}
 
               {b.postError && <div style={{ padding: '10px 18px', background: 'var(--red-100)', color: '#8d1f17', fontSize: 13 }}>

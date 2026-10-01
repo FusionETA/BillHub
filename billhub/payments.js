@@ -290,23 +290,29 @@ async function formatFor(accountId, bank) {
   return format;
 }
 
-// Creates the batch. `generateFile: false` means the money has already moved,
-// so Xero is posted immediately and no file is produced.
 // Creates a batch per rail, so a selection of suppliers and utilities comes
 // out as two files rather than one wrong one.
-async function createRuns(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, reference }) {
+//
+// The two options are independent. `generateFile` decides whether a bank file
+// is produced; `postNow` decides whether Xero is paid straight away. Marking
+// bills paid does both: the payment is recorded the moment the user says the
+// money left, and the file is there to take to the portal afterwards. It used
+// to be either/or, which forced a choice between a bill that showed the right
+// status and a file that could be uploaded.
+async function createRuns(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, postNow, reference }) {
   const planned = await planRuns(accountId, { billIds, bankAccountId, paymentDate });
   const created = [];
   for (const run of planned.runs) {
     created.push(await createBatch(accountId, {
       billIds: run.lines.map((l) => l.billId),
-      bankAccountId, paymentDate, generateFile, reference, rail: run.rail
+      bankAccountId, paymentDate, generateFile, postNow, reference, rail: run.rail
     }));
   }
   return created;
 }
 
-async function createBatch(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, reference, rail }) {
+async function createBatch(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, postNow, reference, rail }) {
+  const pay = postNow === undefined ? !generateFile : Boolean(postNow);
   const plan = await planBatch(accountId, { billIds, bankAccountId, paymentDate });
   const useRail = rail || railOf(plan.lines[0] || {});
   const format = generateFile ? await formatForRail(accountId, plan.bank, useRail) : null;
@@ -322,6 +328,7 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
     lines: plan.lines
   });
 
+
   // The file name needs the batch reference, which only exists after the insert.
   if (format) {
     const { buildFileName } = require('../lib/bankFile');
@@ -330,9 +337,13 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
     await db.execute('UPDATE payment_batches SET file_name = ? WHERE id = ?', [fileName, created.id]);
   }
 
+  // A batch that still has a file to send stays "ready to download" — the
+  // payment is in Xero, but nothing has gone to the bank's portal yet.
   let posted = null;
-  if (!generateFile) {
-    posted = await postToXero(accountId, created.id, { reference, status: 'posted' });
+  if (pay) {
+    posted = await postToXero(accountId, created.id, {
+      reference, status: generateFile ? 'ready' : 'posted'
+    });
   }
 
   return { ...created, warnings: plan.warnings, format: format ? format.format_key : null, posted };
