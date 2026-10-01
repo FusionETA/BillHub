@@ -181,37 +181,52 @@ router.put('/payees/:tenantId/:contactId', async (req, res) => {
 router.post('/preview', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const plan = await payments.planBatch(accountId, req.body || {});
-    const format = await payments.formatFor(accountId, plan.bank);
+    const planned = await payments.planRuns(accountId, req.body || {});
     const { render } = require('../lib/bankFile');
-    const sample = render(format, {
-      reference: await batches.nextReference(accountId),
-      payment_date: plan.paymentDate,
-      currency_code: plan.currencyCode,
-      total: plan.total,
-      line_count: plan.lines.length,
-      payer_name: plan.bank.entity_short,
-      payer_account: plan.bank.account_number,
-      entity_code: plan.bank.entity_code
-    }, plan.lines.map(payments.lineForRender));
+    const nextRef = await batches.nextReference(accountId);
+
+    const files = planned.runs.map((run) => {
+      if (!run.format) {
+        return { rail: run.rail, railLabel: run.railLabel, lineCount: run.lines.length,
+                 total: vm.money(run.total), format: null, filePreview: null, fileName: null,
+                 warnings: run.warnings };
+      }
+      const sample = render(run.format, {
+        reference: nextRef,
+        payment_date: planned.paymentDate,
+        currency_code: planned.currencyCode,
+        total: run.total,
+        line_count: run.lines.length,
+        payer_name: planned.bank.entity_short,
+        payer_account: planned.bank.account_number,
+        entity_code: planned.bank.entity_code
+      }, run.lines.map(payments.lineForRender));
+      return {
+        rail: run.rail,
+        railLabel: run.railLabel,
+        lineCount: run.lines.length,
+        total: vm.money(run.total),
+        format: vm.bankFormatRow(run.format),
+        filePreview: sample.text.split(/\r?\n/).slice(0, 12).join('\n'),
+        fileName: sample.fileName,
+        // Both sets: planRuns catches what is missing, the renderer catches
+        // what the layout cannot carry.
+        warnings: [...run.warnings, ...(sample.warnings || [])]
+      };
+    });
 
     res.json({
-      reference: await batches.nextReference(accountId),
-      bankAccount: vm.bankAccountRow(plan.bank),
-      paymentDate: plan.paymentDate,
-      currency: plan.currencyCode || '',
-      total: vm.money(plan.total),
-      lineCount: plan.lines.length,
-      // Both sets: planBatch catches what is missing before rendering, the
-      // renderer catches what the layout itself cannot carry — a name too
-      // long for IBG, a bank Hong Leong does not list. The preview is where
-      // someone decides to send this, so it has to show both.
-      warnings: [...plan.warnings, ...(sample.warnings || [])],
-      missingPayeeAccounts: plan.missingPayeeAccounts,
-      format: vm.bankFormatRow(format),
-      // Enough of the file to check the layout, without shipping the lot.
-      filePreview: sample.text.split(/\r?\n/).slice(0, 12).join('\n'),
-      fileName: sample.fileName
+      reference: nextRef,
+      bankAccount: vm.bankAccountRow(planned.bank),
+      paymentDate: planned.paymentDate,
+      currency: planned.currencyCode || '',
+      total: vm.money(planned.runs.reduce((s, x) => s + x.total, 0)),
+      lineCount: planned.runs.reduce((s, x) => s + x.lines.length, 0),
+      // One entry per rail. A run of suppliers alone has one; add a utility
+      // and there are two, because they are two uploads at the bank.
+      files,
+      warnings: files.flatMap((f) => f.warnings),
+      missingPayeeAccounts: planned.runs.flatMap((x) => x.missingPayeeAccounts)
     });
   } catch (err) { fail(res, err); }
 });
@@ -219,11 +234,17 @@ router.post('/preview', async (req, res) => {
 router.post('/batches', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const out = await payments.createBatch(accountId, req.body || {});
-    res.status(201).json({ ok: true, ...out });
+    const made = await payments.createRuns(accountId, req.body || {});
+    if (!made.length) throw Object.assign(new Error('Nothing to pay.'), { statusCode: 400 });
+    res.status(201).json({
+      ok: true,
+      batches: made.map((b) => ({ id: b.id, reference: b.reference, format: b.format, lineCount: b.line_count ?? b.lineCount ?? (b.lines || []).length })),
+      // Kept for anything still expecting one.
+      ...made[0]
+    });
   } catch (err) {
     console.error('[payments] create batch failed:', err.message);
-    fail(res, err);
+    fail(res, err, 400);
   }
 });
 

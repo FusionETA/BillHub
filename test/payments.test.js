@@ -176,11 +176,16 @@ function check(name, ok, detail) {
   const preview = await req('POST', '/api/payments/preview', {
     cookie, body: { billIds: abmBills.map((b) => b.id), bankAccountId: abmBank.id, paymentDate: '2026-09-22' }
   });
-  check('preview returns a reference, total and file sample',
-    preview.status === 200 && preview.body.reference === 'PAY-0001' && preview.body.filePreview.length > 0,
-    { ref: preview.body.reference, total: preview.body.total });
+  // One entry per rail now: these bills are all bank transfers, so there is
+  // one file. A selection that also held a utility would come back with two.
+  check('preview returns a reference, total and a file per rail',
+    preview.status === 200 && preview.body.reference === 'PAY-0001'
+    && preview.body.files.length === 1 && preview.body.files[0].filePreview.length > 0,
+    { ref: preview.body.reference, files: (preview.body.files || []).map((x) => x.rail) });
+  check('the one file is the transfer rail',
+    preview.body.files[0].rail === 'transfer', preview.body.files[0].rail);
   check('preview flags the layout as unverified',
-    preview.body.format.verified === false, preview.body.format);
+    preview.body.files[0].format.verified === false, preview.body.files[0].format);
   check('preview writes nothing',
     (await db.getOne('SELECT COUNT(*) AS n FROM payment_batches')).n === 0);
 

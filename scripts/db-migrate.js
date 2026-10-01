@@ -33,6 +33,12 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: 'bank_accounts.biller_format_key — the JomPay layout, for the utilities in the same pay run',
+    check: hasColumn('bank_accounts', 'biller_format_key'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE bank_accounts ADD COLUMN biller_format_key VARCHAR(64) NULL AFTER format_key'
+  },
+  {
     // These were never bank names: the sync was writing Xero's
     // BankAccountType into bank_name, so every account claimed to be at a
     // bank called "BANK". A later sync will not clear them, because a

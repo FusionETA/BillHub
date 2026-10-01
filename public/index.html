@@ -496,7 +496,7 @@
       const [error, setError] = useState(null);
       const [checking, setChecking] = useState(false);
       const [busy, setBusy] = useState(false);
-      const [showFile, setShowFile] = useState(false);
+      const [showFile, setShowFile] = useState(null);   // which rail's file is open
 
       // A batch lives in one Xero organisation, so the paying accounts offered
       // are only that organisation's.
@@ -536,11 +536,18 @@
             paymentDate,
             generateFile
           });
+          // A run that mixes suppliers and utilities comes back as two
+          // batches, because they are two files and two uploads.
+          const made = r.batches || [{ reference: r.reference }];
           onToast({
-            title: r.reference + ' created',
+            title: made.length === 1
+              ? made[0].reference + ' created'
+              : made.length + ' payment files created',
             message: generateFile
-              ? 'Open Bank files to download it. The bills stay unpaid in Xero until you mark the batch uploaded.'
-              : 'Recorded in Xero as a batch payment. The bills are now paid.'
+              ? (made.length === 1
+                  ? 'Open Bank files to download it. The bills stay unpaid in Xero until you mark the batch uploaded.'
+                  : 'One for the bank transfers and one for JomPay — both on the Bank files tab, each uploaded separately. The bills stay unpaid in Xero until you mark them uploaded.')
+              : 'Recorded in Xero. The bills are now paid.'
           });
           onDone();
         } catch (e) {
@@ -583,25 +590,35 @@
                 </div>
               ))}
 
-              <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '14px 16px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7 }}>
-                <div><strong style={{ color: 'var(--text-heading)' }}>{preview.reference}</strong> · {preview.lineCount} payment{preview.lineCount === 1 ? '' : 's'} · {preview.currency} {preview.total}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{preview.fileName}</span>
-                  <span style={{ color: 'var(--text-subtle)' }}>·</span>
-                  <span>{preview.format.name}</span>
-                  {!preview.format.verified && <UnverifiedTag />}
-                  <span style={{ flex: 1 }} />
-                  <button onClick={() => setShowFile(v => !v)} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
-                    {showFile ? 'Hide file' : 'Check the file'}
-                  </button>
+              {/* One card per file. A run of suppliers alone has one; add a
+                  utility and there are two, because JomPay and a bank transfer
+                  are two different uploads at the bank. */}
+              {preview.files.map((f) => (
+                <div key={f.rail} style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '14px 16px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong style={{ color: 'var(--text-heading)' }}>{preview.reference}</strong>
+                    {preview.files.length > 1 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: f.rail === 'biller' ? 'var(--blue-50)' : 'var(--neutral-100)', color: f.rail === 'biller' ? 'var(--blue-600)' : 'var(--neutral-600)' }}>{f.railLabel}</span>}
+                    <span>· {f.lineCount} payment{f.lineCount === 1 ? '' : 's'} · {preview.currency} {f.total}</span>
+                  </div>
+                  {f.format
+                    ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{f.fileName}</span>
+                        <span style={{ color: 'var(--text-subtle)' }}>·</span>
+                        <span>{f.format.name}</span>
+                        {!f.format.verified && <UnverifiedTag />}
+                        <span style={{ flex: 1 }} />
+                        <button onClick={() => setShowFile(v => (v === f.rail ? null : f.rail))} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
+                          {showFile === f.rail ? 'Hide file' : 'Check the file'}
+                        </button>
+                      </div>
+                    : <div style={{ marginTop: 4, color: 'var(--color-danger)', fontWeight: 600 }}>No layout set for this rail — nothing can be generated.</div>}
+                  {showFile === f.rail && <pre style={{ margin: '10px 0 0', maxHeight: 180, overflow: 'auto', background: 'var(--ink-900)', color: '#d8dbe8', borderRadius: 10, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}>{f.filePreview}</pre>}
+                  {f.format && !f.format.verified && <div style={{ marginTop: 10, background: 'var(--amber-100)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: '#6b4d00', lineHeight: 1.6 }}>
+                    This layout has not been checked against the bank's own spec sheet. Compare it with what {f.format.bankName || 'your bank'} expects, and send a single-line test payment before a full run.
+                  </div>}
                 </div>
-              </div>
+              ))}
 
-              {showFile && <pre style={{ gridColumn: '1 / -1', margin: 0, maxHeight: 180, overflow: 'auto', background: 'var(--ink-900)', color: '#d8dbe8', borderRadius: 10, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.6 }}>{preview.filePreview}</pre>}
-
-              {!preview.format.verified && <div style={{ gridColumn: '1 / -1', background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#6b4d00', lineHeight: 1.6 }}>
-                This layout has not been checked against the bank's own spec sheet. Compare the file above with what {(preview.format && preview.format.bankName) || preview.bankAccount.bankName || 'your bank'} expects, and send a single-line test payment before a full run.
-              </div>}
             </React.Fragment>}
 
             <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>

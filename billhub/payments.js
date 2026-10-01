@@ -20,6 +20,7 @@ const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
 const entities = require('../models/entities');
+const banks = require('../lib/malaysianBanks');
 const accounts = require('../models/accounts');
 const { render } = require('../lib/bankFile');
 
@@ -110,6 +111,74 @@ function lineForRender(l) {
     amount: l.amount,
     reference: l.reference
   };
+}
+
+// Which rail a line travels on. Ayu Borneo's convention decides it with no
+// extra field: an all-digit "Bank account name" on the Xero contact is a
+// JomPay biller code, anything else is a bank.
+function railOf(line) {
+  return banks.isBillerCode(line.payeeBankAccountName) ? 'biller' : 'transfer';
+}
+
+// A selection can contain both. They are different files, uploaded to
+// different places in the portal, so they are different batches — putting a
+// utility into a bank-transfer file produces a line with no bank code and a
+// D-prefixed meter number, which is worse than refusing.
+function splitByRail(lines) {
+  const out = { transfer: [], biller: [] };
+  for (const l of lines) out[railOf(l)].push(l);
+  return out;
+}
+
+// One plan per rail the selection actually contains. A run of only suppliers
+// yields one; a run that also has utilities yields two, and they become two
+// batches and two files.
+async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
+  const plan = await planBatch(accountId, { billIds, bankAccountId, paymentDate });
+  const split = splitByRail(plan.lines);
+
+  const runs = [];
+  for (const rail of ['transfer', 'biller']) {
+    const lines = split[rail];
+    if (!lines.length) continue;
+
+    const format = await formatForRail(accountId, plan.bank, rail);
+    const warnings = [];
+    if (!format) {
+      warnings.push(rail === 'biller'
+        ? `${lines.length} bill(s) are paid by JomPay biller code, and ${plan.bank.name} has no JomPay layout set. Choose one on the Bank files tab.`
+        : `${plan.bank.name} has no payment file layout set.`);
+    }
+    // Only the lines on this rail can be missing an account, so recount.
+    const withoutAccount = lines.filter((l) => !l.payeeAccount);
+    if (withoutAccount.length) {
+      warnings.push(`${withoutAccount.length} payee(s) have no ${rail === 'biller' ? 'biller account number' : 'bank account number'}: `
+        + `${withoutAccount.slice(0, 5).map((l) => l.contactName).join(', ')}${withoutAccount.length > 5 ? '…' : ''}.`);
+    }
+
+    runs.push({
+      rail,
+      railLabel: rail === 'biller' ? 'JomPay' : 'Bank transfer',
+      format,
+      lines,
+      total: lines.reduce((sum, l) => sum + l.amount, 0),
+      warnings,
+      missingPayeeAccounts: withoutAccount.map((l) => ({ contactId: l.contactId, contactName: l.contactName }))
+    });
+  }
+
+  return { bank: plan.bank, currencyCode: plan.currencyCode, paymentDate: plan.paymentDate, runs };
+}
+
+// The layout for one rail. A biller run falls back to the matching JomPay
+// layout of whichever bank the transfer layout belongs to, so a Hong Leong
+// account does not need both set by hand before it works.
+async function formatForRail(accountId, bank, rail) {
+  if (rail !== 'biller') return formatFor(accountId, bank);
+  const key = bank.biller_format_key
+    || (String(bank.format_key || '').startsWith('hlb-') ? 'hlb-jompay' : null);
+  if (!key) return null;
+  return bankFormats.get(accountId, key);
 }
 
 // ── Building a batch ────────────────────────────────────────────────────────
@@ -223,9 +292,24 @@ async function formatFor(accountId, bank) {
 
 // Creates the batch. `generateFile: false` means the money has already moved,
 // so Xero is posted immediately and no file is produced.
-async function createBatch(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, reference }) {
+// Creates a batch per rail, so a selection of suppliers and utilities comes
+// out as two files rather than one wrong one.
+async function createRuns(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, reference }) {
+  const planned = await planRuns(accountId, { billIds, bankAccountId, paymentDate });
+  const created = [];
+  for (const run of planned.runs) {
+    created.push(await createBatch(accountId, {
+      billIds: run.lines.map((l) => l.billId),
+      bankAccountId, paymentDate, generateFile, reference, rail: run.rail
+    }));
+  }
+  return created;
+}
+
+async function createBatch(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, reference, rail }) {
   const plan = await planBatch(accountId, { billIds, bankAccountId, paymentDate });
-  const format = generateFile ? await formatFor(accountId, plan.bank) : null;
+  const useRail = rail || railOf(plan.lines[0] || {});
+  const format = generateFile ? await formatForRail(accountId, plan.bank, useRail) : null;
 
   const created = await batches.create(accountId, {
     tenantId: plan.bank.xero_tenant_id,
@@ -517,5 +601,5 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes,
 
 module.exports = {
   syncBankAccounts, syncPayees, syncAll,
-  planBatch, createBatch, renderFile, lineForRender, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
+  planBatch, planRuns, createBatch, createRuns, formatForRail, renderFile, lineForRender, railOf, splitByRail, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
 };
