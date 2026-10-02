@@ -127,7 +127,9 @@ const onlyUnknown = process.argv.includes('--unknown');
   if (swapped || abbrev) {
     console.log('What to do with each:\n');
     if (swapped) console.log(`  • ${swapped} swapped: in Xero, move the biller code up into "Bank account name"\n    and the premises down into "Details". Then Sync accounts & payees.`);
-    if (abbrev) console.log(`  • ${abbrev} abbreviations: confirm what each one means, then they go in the lookup.\n    They are NOT guessed — "AMB" is itself a published code meaning Alliance\n    Investment Bank, so assuming it means AmBank would pay the wrong bank.`);
+    const distinctAbbrev = new Set((kinds.get('Looks like a bank abbreviation — needs confirming before it can be used') || []).map((p) => String(p.name).trim().toUpperCase())).size;
+    if (abbrev) console.log(`  • ${distinctAbbrev} distinct abbreviation(s) across ${abbrev} payee(s): confirm what each means.`
+      + `\n    One answer fixes every payee using it, so this is a short list, not a long one.\n    They are NOT guessed — "AMB" is itself a published code meaning Alliance\n    Investment Bank, so assuming it means AmBank would pay the wrong bank.`);
     console.log('');
   }
 

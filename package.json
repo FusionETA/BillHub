@@ -34,7 +34,8 @@
     "test:setup": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node scripts/test-setup.js",
     "demo-hlb": "node scripts/demo-hlb.js",
     "demo-payrun": "node scripts/demo-payrun.js",
-    "bank-names": "node scripts/bank-names.js"
+    "bank-names": "node scripts/bank-names.js",
+    "ready-to-pay": "node scripts/ready-to-pay.js"
   },
   "engines": {
     "node": ">=18"
