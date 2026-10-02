@@ -56,10 +56,15 @@ async function upsertFromXero(accountId, tenantId, acc) {
   );
 }
 
-async function update(accountId, id, { formatKey, bankName, accountNumber, isDefault, enabled } = {}) {
+async function update(accountId, id, { formatKey, billerFormatKey, bankName, accountNumber, isDefault, enabled } = {}) {
   const sets = [];
   const params = [];
   if (formatKey !== undefined) { sets.push('format_key = ?'); params.push(formatKey || null); }
+  // The JomPay layout for the same account. It was added to the schema and
+  // read by the renderer, but never made settable — so a run with a utility in
+  // it had no layout to use and the whole selection came out in the transfer
+  // file, or in the generic fallback.
+  if (billerFormatKey !== undefined) { sets.push('biller_format_key = ?'); params.push(billerFormatKey || null); }
   if (bankName !== undefined) { sets.push('bank_name = ?'); params.push(bankName || null); }
   if (accountNumber !== undefined) { sets.push('account_number = ?'); params.push(accountNumber || null); }
   if (enabled !== undefined) { sets.push('enabled = ?'); params.push(enabled ? 1 : 0); }

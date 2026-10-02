@@ -232,6 +232,7 @@ function bankAccountRow(b) {
     accountNumber: b.account_number || null,
     currency: b.currency_code || null,
     formatKey: b.format_key || null,
+    billerFormatKey: b.biller_format_key || null,
     isDefault: Boolean(b.is_default),
     enabled: Boolean(b.enabled),
     // Every Ayu Borneo organisation names its Xero bank account after the

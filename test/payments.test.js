@@ -705,6 +705,34 @@ function check(name, ok, detail) {
     check('the real batches are still there', offView.batchCards.length > 0, offView.batchCards.length);
   }
 
+  // ── Choosing a layout ─────────────────────────────────────────────────────
+  // biller_format_key was in the schema and read by the renderer, and nothing
+  // could write it. A deployment hit the consequence: no layout set, so every
+  // file came out of the generic fallback, in a shape no bank accepts.
+  {
+    console.log('\nSetting a paying account\'s layout');
+    const before = (await req('GET', '/api/payments/bank-accounts?all=true', { cookie })).body.bankAccounts[0];
+    check('the row reports both rails', 'formatKey' in before && 'billerFormatKey' in before, Object.keys(before));
+
+    const set = await req('PATCH', `/api/payments/bank-accounts/${before.id}`,
+      { cookie, body: { formatKey: 'hlb-connectfirst', billerFormatKey: 'hlb-jompay' } });
+    check('both can be set in one call',
+      set.status === 200 && set.body.bankAccount.formatKey === 'hlb-connectfirst'
+      && set.body.bankAccount.billerFormatKey === 'hlb-jompay', set.body.bankAccount);
+
+    const stored = await db.getOne('SELECT format_key, biller_format_key FROM bank_accounts WHERE id = ?', [before.id]);
+    check('and they reach the database', stored.biller_format_key === 'hlb-jompay', stored);
+
+    // Clearing matters too: an account that never pays JomPay should be able
+    // to say so, rather than silently inheriting a layout.
+    const cleared = await req('PATCH', `/api/payments/bank-accounts/${before.id}`,
+      { cookie, body: { billerFormatKey: null } });
+    check('a rail can be cleared', cleared.body.bankAccount.billerFormatKey === null, cleared.body.bankAccount);
+
+    await req('PATCH', `/api/payments/bank-accounts/${before.id}`,
+      { cookie, body: { formatKey: before.formatKey, billerFormatKey: before.billerFormatKey } });
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
