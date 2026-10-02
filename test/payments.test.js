@@ -768,6 +768,50 @@ function check(name, ok, detail) {
       require('../billhub/payments').railOf({ payeeBankAccountName: '5454' }) === 'biller');
   }
 
+  // ── Ref-2 ─────────────────────────────────────────────────────────────────
+  // Hong Leong's portal refused a real upload with "Line 2 : Reference 2 field
+  // must not exceed 20 characters". The column was capped at 30, and a plain
+  // truncation would have taken the period off the end — the one part saying
+  // which month's bill this is, while keeping premises that Ref-1 already
+  // identifies.
+  {
+    console.log('\nThe JomPay narrative fits what the portal accepts');
+    const bf = require('../lib/bankFile');
+    const jom = { format_key: 'hlb-jompay', delimiter: ',', extension: 'csv', include_header: 0,
+                  payment_mode: 'DUITNW',
+                  columns: [{ header: 'Ref-2', field: 'otherDetails', transform: 'safe', maxLength: 20 }] };
+    const ref2 = (entity, details, code) => bf.render(jom,
+      { reference: 'X', payment_date: '2026-10-02', currency_code: 'MYR', total: 1, line_count: 1, entity_code: entity },
+      [{ contact_name: 'C', payee_account: '1', payee_bank_account_name: '5454',
+         payee_details: details, payee_code: code, amount: 1 }]).text.trim();
+
+    const long = ref2('MA', 'Shop 49, 49-1, 49-2', null);
+    check('a long premises is brought within 20', long.length <= 20, { value: long, length: long.length });
+    check('and the period survives it', /1026$/.test(long), long);
+
+    const live = ref2('BM', '69', 'TNB');
+    check('a narrative that already fits is untouched', live === 'BM 69 TNB 1026', live);
+
+    const both = ref2('DCGLOBAL', 'BM 69', 'IWK');
+    check('entity and supplier abbreviation are kept over the premises',
+      both.length <= 20 && /^DCGLOBAL/.test(both) && /IWK 1026$/.test(both), both);
+
+    check('nothing to trim still works', ref2('MA', null, null) === 'MA 1026');
+
+    // ConnectFirst's own cap is per mode and far wider on DuitNow; it must not
+    // have been dragged down to 20 with it.
+    const cf = require('../lib/bankFile');
+    const wide = { format_key: 'hlb-connectfirst', delimiter: ',', extension: 'csv', include_header: 0,
+                   payment_mode: 'DUITNW',
+                   columns: [{ header: 'Other Payment Details', field: 'otherDetails', transform: 'trim',
+                               maxLengthByMode: { FT: 20, IBG: 20, RENTAS: 20, DUITNW: 140 } }] };
+    const dn = cf.render(wide,
+      { reference: 'X', payment_date: '2026-10-02', currency_code: 'MYR', total: 1, line_count: 1, entity_code: 'MA' },
+      [{ contact_name: 'C', payee_account: '1', payee_bank_account_name: 'Maybank',
+         payee_details: 'Shop 49, 49-1, 49-2', payee_code: 'GE', amount: 1 }]).text.trim();
+    check('DuitNow keeps the full narrative', dn === 'MA Shop 49, 49-1, 49-2 GE 1026', dn);
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
