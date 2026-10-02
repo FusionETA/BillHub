@@ -68,6 +68,29 @@ function refused(fn) {
   await entities.update(1, 'tenant-abm', { included: true });
   check('and can be put back', (await entities.listSyncable(1, wazzocrAccountId)).length === 5);
 
+  // ── The migration must not depend on its own ordering ─────────────────────
+  // Three adjustments once said AFTER a column that a LATER adjustment adds.
+  // On a database that already had the column it passed; on an older one it
+  // stopped the migration dead, part applied — and the older the database, the
+  // likelier that was. A deployment found it the hard way.
+  //
+  // Column position is cosmetic, so the rule is simply that none of them say
+  // AFTER. Cheap to check, and it rules out the whole class rather than the
+  // three instances.
+  {
+    console.log('\nMigration adjustments');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'db-migrate.js'), 'utf8');
+    const body = src.slice(src.indexOf('const ADJUSTMENTS = ['), src.indexOf('\n];', src.indexOf('const ADJUSTMENTS = [')));
+    check('the adjustment list was found', body.length > 100, body.length);
+    const after = body.match(/ AFTER [a-z_]+/g) || [];
+    check('no adjustment positions a column AFTER another', after.length === 0, after);
+    // Each one has to be a no-op when it has already run, or re-running a
+    // part-applied migration cannot finish it.
+    const guards = (body.match(/check:/g) || []).length;
+    const sqls = (body.match(/sql:/g) || []).length;
+    check('every adjustment is guarded by a check', guards === sqls, { guards, sqls });
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   await db.close();
   process.exit(fail ? 1 : 0);

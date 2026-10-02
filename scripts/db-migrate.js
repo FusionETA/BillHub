@@ -23,6 +23,14 @@ function ca() {
 
 // Column changes that a CREATE TABLE IF NOT EXISTS cannot deliver to a database
 // that already exists.
+//
+// None of these say AFTER. Column position is cosmetic in MySQL, and naming a
+// neighbour couples one adjustment to another having already run: three of
+// these pointed AFTER a column that a LATER entry in this list adds, which is
+// fine on a database that happens to have it and a hard stop on one that does
+// not. That is exactly backwards — the older the database, the more likely it
+// breaks. Order within this list now carries no meaning, which is the only
+// safe thing for it to carry.
 const width = (table, column) => `
   SELECT CHARACTER_MAXIMUM_LENGTH AS n FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`;
@@ -36,26 +44,26 @@ const ADJUSTMENTS = [
     why: 'accounts.test_mode — the toggle that stops every Xero write',
     check: hasColumn('accounts', 'test_mode'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE accounts ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0 AFTER wazzocr_account_id'
+    sql: 'ALTER TABLE accounts ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0'
   },
   {
     why: 'payment_batches.test_mode — a batch whose file is real but which never reached Xero',
     check: hasColumn('payment_batches', 'test_mode'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE payment_batches ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0 AFTER status'
+    sql: 'ALTER TABLE payment_batches ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0'
   },
   {
     why: "bank_formats.template — the bank's own workbook, filled rather than rebuilt",
     check: hasColumn('bank_formats', 'template'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE bank_formats ADD COLUMN template VARCHAR(128) NULL AFTER payment_mode, '
-       + 'ADD COLUMN template_header_rows INT NOT NULL DEFAULT 1 AFTER template'
+    sql: 'ALTER TABLE bank_formats ADD COLUMN template VARCHAR(128) NULL, '
+       + 'ADD COLUMN template_header_rows INT NOT NULL DEFAULT 1'
   },
   {
     why: 'bank_accounts.biller_format_key — the JomPay layout, for the utilities in the same pay run',
     check: hasColumn('bank_accounts', 'biller_format_key'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE bank_accounts ADD COLUMN biller_format_key VARCHAR(64) NULL AFTER format_key'
+    sql: 'ALTER TABLE bank_accounts ADD COLUMN biller_format_key VARCHAR(64) NULL'
   },
   {
     // These were never bank names: the sync was writing Xero's
@@ -71,38 +79,38 @@ const ADJUSTMENTS = [
     why: "bank_formats.payment_mode — Hong Leong's field limits depend on the rail",
     check: hasColumn('bank_formats', 'payment_mode'),
     needed: (row) => Number(row.n) === 0,
-    sql: "ALTER TABLE bank_formats ADD COLUMN payment_mode VARCHAR(8) NULL AFTER date_format"
+    sql: "ALTER TABLE bank_formats ADD COLUMN payment_mode VARCHAR(8) NULL"
   },
   {
     why: "payees.payee_code / payment_batch_lines.payee_code — Xero's BatchPayments.Code, the supplier abbreviation",
     check: hasColumn('payees', 'payee_code'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE payees ADD COLUMN payee_code VARCHAR(40) NULL AFTER details'
+    sql: 'ALTER TABLE payees ADD COLUMN payee_code VARCHAR(40) NULL'
   },
   {
     why: 'payment_batch_lines.payee_code',
     check: hasColumn('payment_batch_lines', 'payee_code'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE payment_batch_lines ADD COLUMN payee_code VARCHAR(40) NULL AFTER payee_details'
+    sql: 'ALTER TABLE payment_batch_lines ADD COLUMN payee_code VARCHAR(40) NULL'
   },
   {
     why: 'payment_batch_lines — snapshot the payee payment details with the batch',
     check: hasColumn('payment_batch_lines', 'payee_bank_account_name'),
     needed: (row) => Number(row.n) === 0,
     sql: 'ALTER TABLE payment_batch_lines '
-       + 'ADD COLUMN payee_bank_account_name VARCHAR(100) NULL AFTER payee_bank, '
-       + 'ADD COLUMN payee_details VARCHAR(255) NULL AFTER payee_bank_account_name, '
-       + 'ADD COLUMN payee_email VARCHAR(500) NULL AFTER payee_details'
+       + 'ADD COLUMN payee_bank_account_name VARCHAR(100) NULL, '
+       + 'ADD COLUMN payee_details VARCHAR(255) NULL, '
+       + 'ADD COLUMN payee_email VARCHAR(500) NULL'
   },
   {
     why: "payees — the rest of Xero's BatchPayments block, which is where Ayu Borneo keep the payment details",
     check: hasColumn('payees', 'bank_account_name'),
     needed: (row) => Number(row.n) === 0,
     sql: 'ALTER TABLE payees '
-       + 'ADD COLUMN bank_account_name VARCHAR(100) NULL AFTER bank_name, '
-       + 'ADD COLUMN details VARCHAR(255) NULL AFTER bank_account_name, '
-       + 'ADD COLUMN tax_number VARCHAR(50) NULL AFTER details, '
-       + 'ADD COLUMN email VARCHAR(500) NULL AFTER tax_number'
+       + 'ADD COLUMN bank_account_name VARCHAR(100) NULL, '
+       + 'ADD COLUMN details VARCHAR(255) NULL, '
+       + 'ADD COLUMN tax_number VARCHAR(50) NULL, '
+       + 'ADD COLUMN email VARCHAR(500) NULL'
   },
   {
     why: 'payment_batches.receipt_name — the bank acknowledgement attached to a batch',
@@ -120,7 +128,7 @@ const ADJUSTMENTS = [
     why: 'bill_sync_state.contacts_cursor_utc — contact changes need their own high-water mark',
     check: hasColumn('bill_sync_state', 'contacts_cursor_utc'),
     needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE bill_sync_state ADD COLUMN contacts_cursor_utc DATETIME NULL AFTER cursor_utc'
+    sql: 'ALTER TABLE bill_sync_state ADD COLUMN contacts_cursor_utc DATETIME NULL'
   },
   {
     // Found the hard way: 24 of 41 organisations failed their first sync with
