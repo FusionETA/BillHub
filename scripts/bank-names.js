@@ -3,6 +3,7 @@
 //
 //   node scripts/bank-names.js
 //   node scripts/bank-names.js --unknown      only the ones that fail
+//   node scripts/bank-names.js --panel        and their whole Financial details
 //
 // Read-only. Touches no Xero API and changes nothing.
 //
@@ -23,7 +24,8 @@ const onlyUnknown = process.argv.includes('--unknown');
 
 (async () => {
   const rows = await db.query(
-    `SELECT p.bank_account_name AS name, p.contact_name, e.code AS entity
+    `SELECT p.bank_account_name AS name, p.contact_name, p.account_number, p.details,
+            p.payee_code, p.bank_name, e.code AS entity
        FROM payees p
        LEFT JOIN entities e ON e.account_id = p.account_id AND e.xero_tenant_id = p.xero_tenant_id
       WHERE p.account_id = ? AND p.bank_account_name IS NOT NULL AND p.bank_account_name <> ''
@@ -71,6 +73,24 @@ const onlyUnknown = process.argv.includes('--unknown');
     if (g.payees.length > 1) {
       for (const p of g.payees.slice(1, 4)) console.log(`${' '.repeat(54)}${p.contact_name.slice(0, 32)}`);
       if (g.payees.length > 4) console.log(`${' '.repeat(54)}… and ${g.payees.length - 4} more`);
+    }
+  }
+
+  // Xero's panel has four fields and the value is rarely wrong — it is in the
+  // wrong box. Printing all four together is the only way to see that.
+  if (unknown.length && process.argv.includes('--panel')) {
+    console.log('\nThe whole Financial details panel, for the ones that fail\n');
+    console.log('  ' + 'CONTACT'.padEnd(34) + 'BANK ACCOUNT NAME'.padEnd(26) + 'ACCOUNT NUMBER'.padEnd(18) + 'DETAILS'.padEnd(22) + 'CODE');
+    for (const g of unknown) {
+      for (const p of g.payees) {
+        console.log('  '
+          + String(p.contact_name || '').slice(0, 32).padEnd(34)
+          + String(p.name || '').slice(0, 24).padEnd(26)
+          + String(p.account_number || '—').slice(0, 16).padEnd(18)
+          + String(p.details || '—').slice(0, 20).padEnd(22)
+          + String(p.payee_code || '—')
+          + (p.bank_name ? '   [bank set here: ' + p.bank_name + ']' : ''));
+      }
     }
   }
 
