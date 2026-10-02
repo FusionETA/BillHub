@@ -35,11 +35,32 @@ Two independent guards stop that. Use both, from the moment you switch.
 | Guard | What it does | Where |
 | --- | --- | --- |
 | `XERO_TENANT_ALLOWLIST` | Refuses every Xero **write** outside the list, before the request is built. Reads are unaffected. | env var |
+| **Testing mode** | Refuses every Xero **write**, full stop. Reads are unaffected. | the switch in the header |
 | `entities.included` | Stops an organisation being synced or shown at all. | `npm run entities` |
 
 The allowlist is the one that matters: it holds regardless of what the UI, the
 database or a mis-click say. Set it, and the deployment is structurally
 incapable of changing a live organisation.
+
+## Testing mode
+
+The switch in the header. On, every call that would change something in Xero
+is refused at `lib/xero.js` — the one place every Xero call passes through, so
+it holds regardless of which part of the app is asking.
+
+Reads carry on untouched, which is the point: a pay run still reads the real
+bills, payees and bank accounts and still produces a real bank file, while the
+bills stay at Awaiting payment and nothing is posted. Use it to check a bank
+layout against live data before anything is paid for real.
+
+Those batches are tagged **TEST** on the Bank files tab and never reserve their
+bills, so the same selection can be run again as many times as the layout takes
+to get right.
+
+It is stored per account and survives a restart. It is not a substitute for
+`XERO_TENANT_ALLOWLIST`: the allowlist is read from the environment and is what
+protects live organisations, while this is a switch anyone with the UI can turn
+off.
 
 ---
 

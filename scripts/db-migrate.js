@@ -33,6 +33,18 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: 'accounts.test_mode — the toggle that stops every Xero write',
+    check: hasColumn('accounts', 'test_mode'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE accounts ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0 AFTER wazzocr_account_id'
+  },
+  {
+    why: 'payment_batches.test_mode — a batch whose file is real but which never reached Xero',
+    check: hasColumn('payment_batches', 'test_mode'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE payment_batches ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0 AFTER status'
+  },
+  {
     why: "bank_formats.template — the bank's own workbook, filled rather than rebuilt",
     check: hasColumn('bank_formats', 'template'),
     needed: (row) => Number(row.n) === 0,

@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS accounts (
   -- between the two databases, so the mapping has to be explicit. NULL means
   -- Xero is not wired up yet.
   wazzocr_account_id BIGINT UNSIGNED NULL,
+  -- Testing mode. When on, every call that would CHANGE something in Xero is
+  -- refused at lib/xero.js, so the app can be exercised end to end — sync,
+  -- select bills, generate a bank file — without a single write reaching the
+  -- real organisations. Reads are untouched, so the file is built from live
+  -- Xero data. Per account and persisted, because a toggle that forgets itself
+  -- on restart is worse than no toggle.
+  test_mode      TINYINT(1) NOT NULL DEFAULT 0,
   setup_complete TINYINT(1) NOT NULL DEFAULT 1,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -291,6 +298,11 @@ CREATE TABLE IF NOT EXISTS payment_batches (
   -- posted     → recorded in Xero with no file (already paid another way)
   -- cancelled  → abandoned before reaching the bank
   status           ENUM('ready','downloaded','uploaded','posted','cancelled') NOT NULL DEFAULT 'ready',
+  -- Made while testing mode was on: a real file built from real Xero data, but
+  -- nothing was posted to Xero and its bills were never reserved, so the same
+  -- bills can be run again. Kept as a column rather than inferred, because
+  -- "no payment id" is also what a failed posting looks like.
+  test_mode        TINYINT(1) NOT NULL DEFAULT 0,
   file_name        VARCHAR(255),
   format_key       VARCHAR(64),
   -- Set once Xero has accepted the batch payment. Its presence is what stops a

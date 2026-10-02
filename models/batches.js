@@ -58,6 +58,7 @@ async function billsInLiveBatches(accountId, billIds = []) {
        FROM payment_batch_lines l
        JOIN payment_batches b ON b.id = l.batch_id
       WHERE b.account_id = ?
+        AND b.test_mode = 0
         AND b.status IN (${LIVE_STATUSES.map(() => '?').join(',')})
         AND l.bill_id IN (${billIds.map(() => '?').join(',')})`,
     [accountId, ...LIVE_STATUSES, ...billIds]
@@ -80,7 +81,8 @@ async function nextReference(accountId) {
 // Creates the batch and its lines in one transaction, so a failure part-way
 // through can't leave bills attached to a batch that has no total.
 async function create(accountId, {
-  tenantId, bankAccountId, paymentDate, currencyCode, formatKey, fileName, status = 'ready', lines: lineRows
+  tenantId, bankAccountId, paymentDate, currencyCode, formatKey, fileName, status = 'ready',
+  testMode = false, lines: lineRows
 }) {
   return db.transaction(async (conn) => {
     const reference = await nextReference(accountId);
@@ -89,10 +91,10 @@ async function create(accountId, {
     const [res] = await conn.execute(
       `INSERT INTO payment_batches
         (account_id, xero_tenant_id, reference, bank_account_id, payment_date, currency_code,
-         total, line_count, status, file_name, format_key)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+         total, line_count, status, test_mode, file_name, format_key)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [accountId, tenantId, reference, bankAccountId, paymentDate, currencyCode,
-       total.toFixed(2), lineRows.length, status, fileName || null, formatKey || null]
+       total.toFixed(2), lineRows.length, status, testMode ? 1 : 0, fileName || null, formatKey || null]
     );
     const batchId = res.insertId;
 

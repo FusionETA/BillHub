@@ -25,6 +25,7 @@ const payees = require('../models/payees');
 const entities = require('../models/entities');
 const grantSource = require('../lib/grantSource');
 const vm = require('./viewModel');
+const testMode = require('../lib/testMode');
 const { attachUser, requireAuth } = require('../auth/middleware');
 
 router.use(attachUser, requireAuth);
@@ -217,6 +218,9 @@ router.post('/preview', async (req, res) => {
 
     res.json({
       reference: nextRef,
+      // The dialog says what the button will do, and in testing mode it does
+      // something different, so the preview is where that has to come from.
+      testMode: await testMode.isOn(accountId),
       bankAccount: vm.bankAccountRow(planned.bank),
       paymentDate: planned.paymentDate,
       currency: planned.currencyCode || '',
@@ -299,9 +303,13 @@ router.post('/batches/:id(\\d+)/uploaded', async (req, res) => {
     if (!batch) return res.status(404).json({ error: 'Batch not found.' });
     if (batch.status === 'cancelled') return res.status(409).json({ error: `Batch ${batch.reference} was cancelled.` });
 
-    if (batch.xero_posted_at) {
+    // A test batch has nothing in Xero and is never going to, so posting it
+    // here would be the one write testing mode was meant to prevent.
+    if (batch.xero_posted_at || batch.test_mode) {
       await batches.markUploaded(accountId, id);
-      return res.json({ ok: true, alreadyPosted: true, reference: batch.reference });
+      return res.json({
+        ok: true, alreadyPosted: true, testMode: Boolean(batch.test_mode), reference: batch.reference
+      });
     }
 
     const out = await payments.postToXero(accountId, id, {

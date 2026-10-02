@@ -24,6 +24,9 @@ const attachments = [];
 let failNextAttachment = null;
 let failPaymentForInvoice = null;   // fail the single payment for this invoice
 
+// Kept so the testing-mode case can exercise the REAL guard rather than this
+// stub, which by definition has no guard in it.
+const realXeroApi = xero.api;
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   xeroCalls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
 
@@ -593,6 +596,94 @@ function check(name, ok, detail) {
       { body: up.body, before, after });
     const done = await db.getOne('SELECT status, uploaded_at FROM payment_batches WHERE id = ?', [pb.id]);
     check('and it lands at uploaded', done.status === 'uploaded' && done.uploaded_at, done);
+  }
+
+  // ── Testing mode ──────────────────────────────────────────────────────────
+  // The claim is narrow and absolute: reads work, the bank file is real, and
+  // nothing at all reaches Xero. Each half is worth a test, because a switch
+  // that is only mostly off is worse than none — it would be trusted.
+  {
+    console.log('\nTesting mode');
+    const testMode = require('../lib/testMode');
+    const two = await db.query(
+      "SELECT id FROM bills WHERE account_id = 1 AND xero_tenant_id = 'tenant-abm' ORDER BY id LIMIT 2");
+    const billIds = two.map((r) => r.id);
+    await db.execute("UPDATE payment_batches SET status = 'cancelled' WHERE account_id = 1");
+    await db.execute(
+      `UPDATE bills SET xero_status = 'AUTHORISED', amount_due = 250, amount_paid = 0 WHERE id IN (${billIds.map(() => '?').join(',')})`,
+      billIds);
+
+    await testMode.set(1, true);
+    xeroCalls.length = 0;
+
+    const prev = await req('POST', '/api/payments/preview', { cookie, body: {
+      billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02' } });
+    check('the preview tells the dialog the mode is on', prev.body.testMode === true, prev.body.testMode);
+
+    const made = await req('POST', '/api/payments/batches', { cookie, body: {
+      billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02',
+      generateFile: true, postNow: true, reference: 'TEST-RUN-1' } });
+    check('a pay run still goes through', made.status === 201, made.body);
+    const tb = made.body.batches[0];
+
+    check('but NOTHING was written to Xero',
+      !xeroCalls.some((c) => c.method !== 'GET'), xeroCalls.map((c) => c.method + ' ' + c.path));
+    const stillOwing = await db.getOne(
+      `SELECT COUNT(*) AS n FROM bills WHERE xero_status = 'AUTHORISED' AND id IN (${billIds.map(() => '?').join(',')})`, billIds);
+    check('the bills are untouched, still awaiting payment', Number(stillOwing.n) === billIds.length, stillOwing);
+
+    const trow = await db.getOne('SELECT status, test_mode, file_name, xero_posted_at FROM payment_batches WHERE id = ?', [tb.id]);
+    check('the batch is marked as a test', Number(trow.test_mode) === 1, trow.test_mode);
+    check('with nothing posted', trow.xero_posted_at === null, trow.xero_posted_at);
+    check('and a real file to look at', Boolean(trow.file_name), trow.file_name);
+
+    const dl = await req('GET', `/api/payments/batches/${tb.id}/file`, { cookie, raw: true });
+    check('which downloads', dl.status === 200, dl.status);
+
+    // The point of not reserving them: the layout gets checked by running the
+    // same bills over and over.
+    const again2 = await req('POST', '/api/payments/batches', { cookie, body: {
+      billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02', generateFile: true, postNow: true } });
+    check('the same bills can be run again', again2.status === 201, again2.body);
+
+    const card = (await req('GET', '/api/payments', { cookie })).body.batchCards.find((c) => c.id === tb.id);
+    check('the card says so', card && card.testMode === true && /testing mode/i.test(card.postedNote || ''), card && card.postedNote);
+
+    // Marking uploaded is the other door into postToXero.
+    await req('GET', `/api/payments/batches/${tb.id}/file`, { cookie, raw: true });
+    const up = await req('POST', `/api/payments/batches/${tb.id}/uploaded`, { cookie });
+    check('marking a test batch uploaded posts nothing',
+      up.status === 200 && up.body.testMode === true && !xeroCalls.some((c) => c.method !== 'GET'), up.body);
+
+    // The guard that matters is not the pay flow being polite — it is
+    // lib/xero.js refusing whatever it is handed. Call it straight, with a
+    // write no part of this app would otherwise make.
+    // Not the stub above — the real lib/xero.js, which is where the refusal
+    // has to live for the switch to be worth anything. It throws before it
+    // reaches a token or the network, so this makes no request.
+    let refused = null;
+    try {
+      await realXeroApi(1, 'tenant-abm', '/Invoices', { method: 'POST', body: { Invoices: [] } });
+    } catch (e) { refused = e; }
+    check('any Xero write at all is refused at the one chokepoint',
+      refused && refused.testMode === true, refused && refused.message);
+    check('the refusal names the call, so the log says what was stopped',
+      refused && /POST \/Invoices/.test(refused.message), refused && refused.message);
+    check('and still nothing but GETs reached Xero',
+      !xeroCalls.some((c) => c.method !== 'GET'), xeroCalls.map((c) => c.method + ' ' + c.path));
+
+    // Reads are the whole reason this mode is useful, so prove the guard lets
+    // one through rather than inferring it from the file having been built.
+    let readBlocked = false;
+    try {
+      await realXeroApi(1, 'tenant-abm', '/Organisation', { retries: 0 });
+    } catch (e) { readBlocked = Boolean(e.testMode); }
+    check('a read is not refused by the guard', readBlocked === false);
+
+    await testMode.set(1, false);
+    const off = await req('POST', '/api/payments/preview', { cookie, body: {
+      billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02' } });
+    check('turning it off takes effect at once', off.body.testMode === false, off.body.testMode);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

@@ -16,6 +16,7 @@ const xero = require('../lib/xero');
 const grantSource = require('../lib/grantSource');
 const bills = require('../models/bills');
 const batches = require('../models/batches');
+const testMode = require('../lib/testMode');
 const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
@@ -312,10 +313,15 @@ async function createRuns(accountId, { billIds, bankAccountId, paymentDate, gene
 }
 
 async function createBatch(accountId, { billIds, bankAccountId, paymentDate, generateFile = true, postNow, reference, rail }) {
-  const pay = postNow === undefined ? !generateFile : Boolean(postNow);
+  // Testing mode is checked here as well as in lib/xero.js. The guard there is
+  // what makes it safe; this is what makes it usable — otherwise a test run
+  // would build the file and then fail on the posting, leaving a batch with an
+  // error on it rather than a file to inspect.
+  const testing = await testMode.isOn(accountId);
+  const pay = testing ? false : (postNow === undefined ? !generateFile : Boolean(postNow));
   const plan = await planBatch(accountId, { billIds, bankAccountId, paymentDate });
   const useRail = rail || railOf(plan.lines[0] || {});
-  const format = generateFile ? await formatForRail(accountId, plan.bank, useRail) : null;
+  const format = (generateFile || testing) ? await formatForRail(accountId, plan.bank, useRail) : null;
 
   const created = await batches.create(accountId, {
     tenantId: plan.bank.xero_tenant_id,
@@ -324,7 +330,10 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
     currencyCode: plan.currencyCode,
     formatKey: format ? format.format_key : null,
     fileName: null,
-    status: generateFile ? 'ready' : 'posted',
+    // A test run always leaves a file to look at; there is nothing else it
+    // could usefully produce.
+    status: (generateFile || testing) ? 'ready' : 'posted',
+    testMode: testing,
     lines: plan.lines
   });
 
@@ -346,7 +355,10 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
     });
   }
 
-  return { ...created, warnings: plan.warnings, format: format ? format.format_key : null, posted };
+  return {
+    ...created, warnings: plan.warnings,
+    format: format ? format.format_key : null, posted, testMode: testing
+  };
 }
 
 // ── The file ────────────────────────────────────────────────────────────────

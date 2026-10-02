@@ -161,6 +161,10 @@ function batchCard(b, lineRows = [], currency = 'RM') {
     statusBg: status.bg,
     statusFg: status.fg,
     status: b.status,
+    // A real file built from real Xero data, with nothing posted to Xero. The
+    // card has to say so, because otherwise it is indistinguishable from a
+    // batch that paid 40 live bills.
+    testMode: Boolean(b.test_mode),
     // A file only exists for batches that were meant to produce one.
     canDownload: Boolean(b.file_name) && b.status !== 'cancelled',
     // Offered once the file has actually been taken, and never twice.
@@ -169,7 +173,9 @@ function batchCard(b, lineRows = [], currency = 'RM') {
     // has no bill batch payments is paid bill by bill and leaves that id null,
     // so checking it would offer to cancel a batch whose bills are already paid.
     canCancel: !b.xero_posted_at && ['ready', 'downloaded'].includes(b.status),
-    postedNote: b.xero_posted_at ? `Recorded in Xero ${shortDate(b.xero_posted_at)}` : null,
+    postedNote: b.test_mode
+      ? 'Nothing was sent to Xero — testing mode'
+      : (b.xero_posted_at ? `Recorded in Xero ${shortDate(b.xero_posted_at)}` : null),
     postError: b.post_error || null,
     downloadedNote: b.downloaded_at ? `Downloaded ${shortDate(b.downloaded_at)}` : 'Not downloaded yet',
     currency,

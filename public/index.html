@@ -549,7 +549,7 @@
           // that — so the slip goes on the bills themselves, which is where
           // anyone asking "how was this paid" will look anyway.
           let slipped = 0;
-          if (slip) {
+          if (slip && !testing) {
             for (const b of made) {
               try {
                 const res = await fetch('/api/payments/batches/' + b.id + '/receipt?kind=slip', {
@@ -565,10 +565,11 @@
           const files = made.length === 1
             ? 'The payment file is on the Bank files tab.'
             : 'Two payment files are on the Bank files tab — one for the bank transfers, one for JomPay — each uploaded to the portal separately.';
-          onToast({
-            title: bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' marked paid in Xero',
-            message: files + (slipped ? ' The slip is attached to every bill.' : '')
-          });
+          onToast(testing
+            ? { title: 'Bank file generated · nothing sent to Xero',
+                message: files + ' The bills are untouched and can be run again.' }
+            : { title: bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' marked paid in Xero',
+                message: files + (slipped ? ' The slip is attached to every bill.' : '') });
           onDone();
         } catch (e) {
           onToast({
@@ -584,6 +585,7 @@
       // the Bills screen is showing until it arrives.
       const cur = (preview && preview.currency) || currency;
       const canSubmit = Boolean(preview) && !checking && !busy;
+      const testing = Boolean(preview && preview.testMode);
 
       return <Dialog open={open} onClose={onClose} title="Pay bills"
         description={bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' · ' + (cur ? cur + ' ' : '') + fmtTotal} size="md">
@@ -625,7 +627,7 @@
                       {slip ? slip.name : 'Attach payment slip'}
                     </span>
                     <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>
-                      {slip ? 'Attached to every bill in Xero when you mark them paid' : 'PDF or image · bank transfer slip or receipt'}
+                      {testing ? 'Not attached while testing mode is on' : slip ? 'Attached to every bill in Xero when you mark them paid' : 'PDF or image · bank transfer slip or receipt'}
                     </span>
                   </span>
                   <span style={{ flex: 1 }} />
@@ -636,8 +638,10 @@
                 </label>
               </div>
 
-              <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                Payments will be recorded in {tenantIds.length} Xero {tenantIds.length === 1 ? 'entity' : 'entities'} using the same date, account and reference.
+              <div style={{ gridColumn: '1 / -1', background: testing ? 'var(--amber-100)' : 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: testing ? '#6b4d00' : 'var(--text-body)', lineHeight: 1.6 }}>
+                {testing
+                  ? <React.Fragment><strong>Testing mode is on.</strong> The bank file will be generated from live Xero data, but nothing will be recorded in Xero and these bills will stay at Awaiting payment.</React.Fragment>
+                  : 'Payments will be recorded in ' + tenantIds.length + ' Xero ' + (tenantIds.length === 1 ? 'entity' : 'entities') + ' using the same date, account and reference.'}
               </div>
 
               {preview.warnings.map((w, i) => (
@@ -652,7 +656,7 @@
               <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
               <Button variant="primary" size="md" onClick={submit}
                 style={canSubmit ? null : { opacity: .5, pointerEvents: 'none' }}>
-                {checking ? 'Checking…' : busy ? 'Recording…' : 'Mark as paid'}
+                {checking ? 'Checking…' : busy ? 'Generating…' : testing ? 'Generate bank file' : 'Mark as paid'}
               </Button>
             </div>
           </div>}
@@ -1747,6 +1751,8 @@
                     <Code>{b.entityCode}</Code>
                     <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)' }}>{b.ref} · {b.bank}</span>
                     {unverified.has(b.format) && <UnverifiedTag />}
+                    {b.testMode && <span title="Generated while testing mode was on. Nothing was posted to Xero and its bills were never reserved."
+                      style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', padding: '2px 8px', borderRadius: 999, background: 'var(--amber-500)', color: '#3d2c00' }}>Test</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{b.entityLabel} · {b.account} · {b.format} · {b.dateFmt}</div>
                 </div>
@@ -2323,6 +2329,22 @@
         ? currency.mixed.join('/')
         : (currency && currency.symbol) || '';
       const openAccess = Boolean(me && me.authDisabled);
+      const testing = Boolean(xero && xero.testMode);
+
+      // Flipping it reloads the context so every view sees the new mode at
+      // once, rather than one tab at a time as they happen to refetch.
+      const toggleTesting = useCallback(async (on) => {
+        try {
+          await api.post('/api/xero/test-mode', { on });
+          setXero(x => ({ ...(x || {}), testMode: on }));
+          setDataNonce(n => n + 1);
+          pushToast(on
+            ? { title: 'Testing mode on', message: 'Bills Hub will read from Xero but change nothing in it. Bank files are still generated.' }
+            : { title: 'Testing mode off', message: 'Changes reach Xero again.' });
+        } catch (e) {
+          pushToast({ title: 'Could not change testing mode', message: e.message, tone: 'error' });
+        }
+      }, [pushToast]);
 
       return <div style={{ minHeight: '100vh', background: 'var(--surface-page)' }}>
         <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'var(--ink-900)', padding: '0 28px', display: 'flex', alignItems: 'center', gap: 20, height: 64 }}>
@@ -2332,6 +2354,17 @@
           <span style={{ whiteSpace: 'nowrap', fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--orange-400)' }}>{(me && me.account && me.account.name) || ''}</span>
           <span style={{ flex: 1 }} />
           <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
+          <button onClick={() => toggleTesting(!testing)}
+            title={testing
+              ? 'Testing mode is ON — Bills Hub reads from Xero but writes nothing to it. Click to turn off.'
+              : 'Turn on testing mode: read from Xero, generate bank files, but change nothing in Xero.'}
+            className="feta-hover"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, border: 'none', whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: testing ? 'var(--amber-500)' : 'rgba(255,255,255,.08)', color: testing ? '#3d2c00' : 'rgba(255,255,255,.82)' }}>
+            <span style={{ width: 26, height: 15, borderRadius: 999, background: testing ? '#3d2c00' : 'rgba(255,255,255,.22)', position: 'relative', flex: '0 0 auto', transition: 'background var(--dur-fast)' }}>
+              <span style={{ position: 'absolute', top: 2, left: testing ? 13 : 2, width: 11, height: 11, borderRadius: '50%', background: '#fff', transition: 'left var(--dur-fast)' }} />
+            </span>
+            <span>Testing mode</span>
+          </button>
           <button onClick={() => setOrgsOpen(true)}
             title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting' : 'See the connected Xero organisations')}
             className="feta-hover"
@@ -2342,6 +2375,14 @@
           </button>
           {!openAccess && <div title={me && me.user ? me.user.email : ''} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 700 }}>{(me && me.user && me.user.initials) || '–'}</div>}
         </header>
+
+        {/* Which way round the app is pointing changes what every button here
+            does, so it cannot be left to a toggle in the corner. */}
+        {testing && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap', background: 'var(--amber-500)', borderBottom: '1px solid #c99a00', padding: '9px 20px', fontSize: 13, color: '#3d2c00' }}>
+          <strong>Testing mode is on.</strong>
+          <span>Bills Hub reads from Xero but changes nothing in it. Bank files are still generated from live data.</span>
+          <button onClick={() => toggleTesting(false)} style={{ border: 'none', background: 'rgba(0,0,0,.14)', borderRadius: 999, padding: '3px 12px', fontSize: 12, fontWeight: 700, color: '#3d2c00', cursor: 'pointer' }}>Turn off</button>
+        </div>}
 
         {/* Sign-in is off, and this app can change bills in a live Xero. Keep
             that visible rather than letting it be forgotten. */}

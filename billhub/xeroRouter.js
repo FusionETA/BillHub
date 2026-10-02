@@ -18,6 +18,7 @@ const grantSource = require('../lib/grantSource');
 const xero = require('../lib/xero');
 const xc = require('../models/xeroConnections');
 const entities = require('../models/entities');
+const testMode = require('../lib/testMode');
 const { attachUser, requireAuth } = require('../auth/middleware');
 
 const WAZZOCR_URL = (process.env.WAZZOCR_URL || '').replace(/\/$/, '');
@@ -115,8 +116,23 @@ router.get('/status', attachUser, requireAuth, async (req, res) => {
         status: r.status,
         needsReconnect: Boolean(r.needs_reconnect)
       })),
-      manageAt: grantSource.BORROWED && WAZZOCR_URL ? `${WAZZOCR_URL}/account.html` : null
+      manageAt: grantSource.BORROWED && WAZZOCR_URL ? `${WAZZOCR_URL}/account.html` : null,
+      testMode: await testMode.isOn(req.user.account_id)
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The testing-mode toggle. On means every Xero write is refused at
+// lib/xero.js, so the app can be driven end to end — sync, pick bills,
+// generate a bank file — without a single change reaching a real
+// organisation. Reads carry on, which is what makes the file worth looking at.
+router.post('/test-mode', attachUser, requireAuth, async (req, res) => {
+  if (!req.user.account_id) return res.status(400).json({ error: 'This user has no account.' });
+  try {
+    const on = await testMode.set(req.user.account_id, Boolean((req.body || {}).on));
+    res.json({ ok: true, testMode: on });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
