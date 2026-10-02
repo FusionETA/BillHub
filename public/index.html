@@ -1612,7 +1612,7 @@
       </span>;
     }
 
-    function BankView({ onToast, refreshKey = 0 }) {
+    function BankView({ onToast, refreshKey = 0, testing = false, onToggleTesting }) {
       const [data, setData] = useState(null);
       const [loading, setLoading] = useState(true);
       const [error, setError] = useState(null);
@@ -1719,10 +1719,28 @@
             </p>
           </div>
           <span style={{ flex: 1 }} />
+          <button onClick={() => onToggleTesting && onToggleTesting(!testing)}
+            title={testing
+              ? 'Testing mode is ON — Bills Hub reads from Xero but writes nothing to it. Click to turn off.'
+              : 'Turn on testing mode: read from Xero and generate bank files, but change nothing in Xero.'}
+            className="feta-hover"
+            style={{ display: 'flex', alignItems: 'center', gap: 9, height: 36, padding: '0 14px', borderRadius: 10, whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: testing ? 'var(--amber-500)' : 'var(--surface-card)', color: testing ? '#3d2c00' : 'var(--color-secondary)', border: testing ? '1.5px solid #c99a00' : '1.5px solid var(--border-default)' }}>
+            <span style={{ width: 28, height: 16, borderRadius: 999, background: testing ? '#3d2c00' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', transition: 'background var(--dur-fast)' }}>
+              <span style={{ position: 'absolute', top: 2, left: testing ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left var(--dur-fast)' }} />
+            </span>
+            <span>Testing mode</span>
+          </button>
           <Button variant="outline" size="sm" onClick={runSync} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>
             {syncing ? 'Syncing…' : 'Sync accounts & payees'}
           </Button>
         </div>
+
+        {/* The switch above says what the mode is; this says what it costs,
+            because "no file will reach the bank either" is the part someone
+            testing a layout can forget. */}
+        {testing && <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'var(--amber-100)', border: '1px solid #e7c96b', borderLeft: '4px solid var(--amber-500)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13.5, color: '#6b4d00', lineHeight: 1.6 }}>
+          <span><strong style={{ color: '#5a4100' }}>Testing mode is on.</strong> Files here are built from live Xero data, but nothing is recorded in Xero and the bills stay at Awaiting payment. Batches made this way are tagged <strong>TEST</strong> and do not reserve their bills, so the same selection can be run again.</span>
+        </div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>
           {((data && data.bankStats) || [0, 1, 2, 3].map(() => ({ label: '—', amount: '—', sub: '', color: 'var(--neutral-300)' })))
@@ -2354,17 +2372,6 @@
           <span style={{ whiteSpace: 'nowrap', fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--orange-400)' }}>{(me && me.account && me.account.name) || ''}</span>
           <span style={{ flex: 1 }} />
           <Tabs tabs={viewTabs} value={view} onChange={setView} variant="pill" />
-          <button onClick={() => toggleTesting(!testing)}
-            title={testing
-              ? 'Testing mode is ON — Bills Hub reads from Xero but writes nothing to it. Click to turn off.'
-              : 'Turn on testing mode: read from Xero, generate bank files, but change nothing in Xero.'}
-            className="feta-hover"
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 999, border: 'none', whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: testing ? 'var(--amber-500)' : 'rgba(255,255,255,.08)', color: testing ? '#3d2c00' : 'rgba(255,255,255,.82)' }}>
-            <span style={{ width: 26, height: 15, borderRadius: 999, background: testing ? '#3d2c00' : 'rgba(255,255,255,.22)', position: 'relative', flex: '0 0 auto', transition: 'background var(--dur-fast)' }}>
-              <span style={{ position: 'absolute', top: 2, left: testing ? 13 : 2, width: 11, height: 11, borderRadius: '50%', background: '#fff', transition: 'left var(--dur-fast)' }} />
-            </span>
-            <span>Testing mode</span>
-          </button>
           <button onClick={() => setOrgsOpen(true)}
             title={xeroProblem || (needsReconnect ? needsReconnect + ' organisation(s) need reconnecting' : 'See the connected Xero organisations')}
             className="feta-hover"
@@ -2393,7 +2400,8 @@
 
         {view === 'bills' && <BillsView entities={entities} xero={xero} onToast={pushToast} refreshKey={dataNonce} onSynced={loadContext} onPaid={() => setView('bank')} />}
         {view === 'recharge' && <RechargeView entities={entities} onToast={pushToast} refreshKey={dataNonce} />}
-        {view === 'bank' && <BankView onToast={pushToast} refreshKey={dataNonce} />}
+        {view === 'bank' && <BankView onToast={pushToast} refreshKey={dataNonce}
+          testing={testing} onToggleTesting={toggleTesting} />}
         {view === 'settings' && <SettingsView entities={entities} onToast={pushToast} refreshKey={dataNonce} />}
 
         <OrganisationsDialog open={orgsOpen} onToast={pushToast}
