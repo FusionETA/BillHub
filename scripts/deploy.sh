@@ -54,13 +54,25 @@ fi
 
 rule "Fetching"
 git fetch --quiet origin
-BEHIND="$(git rev-list --count HEAD..@{u} 2>/dev/null || echo 0)"
+
+# Resolve the upstream explicitly. @{u} on a branch with no tracking ref fails,
+# and swallowing that would have this report "already up to date" and skip the
+# pull — the one outcome a deploy script must never produce quietly.
+UPSTREAM="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+if [ -z "$UPSTREAM" ]; then
+  warn "  this branch tracks nothing, so there is no way to tell what to pull."
+  warn "  Set it once:  git branch --set-upstream-to=origin/$(git rev-parse --abbrev-ref HEAD)"
+  exit 1
+fi
+echo "  tracking   $UPSTREAM"
+
+BEHIND="$(git rev-list --count "HEAD..$UPSTREAM")"
 if [ "$BEHIND" = "0" ]; then
   echo "  already up to date"
 else
   echo "  $BEHIND commit(s) to apply:"
-  git --no-pager log --oneline HEAD..@{u} | sed 's/^/    /'
-  git merge --ff-only @{u}
+  git --no-pager log --oneline "HEAD..$UPSTREAM" | sed 's/^/    /'
+  git merge --ff-only "$UPSTREAM"
 fi
 
 rule "Dependencies"
