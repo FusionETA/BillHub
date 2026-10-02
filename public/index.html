@@ -497,7 +497,6 @@
       const [checking, setChecking] = useState(false);
       const [busy, setBusy] = useState(false);
       const [reference, setReference] = useState('');
-      const [slip, setSlip] = useState(null);           // optional; proof the money left
 
       // A batch lives in one Xero organisation, so the paying accounts offered
       // are only that organisation's.
@@ -545,23 +544,6 @@
           // batches, because they are two files and two uploads.
           const made = r.batches || [{ id: r.id, reference: r.reference }];
 
-          // Xero has no attachment endpoint for a payment — only the UI can do
-          // that — so the slip goes on the bills themselves, which is where
-          // anyone asking "how was this paid" will look anyway.
-          let slipped = 0;
-          if (slip && !testing) {
-            for (const b of made) {
-              try {
-                const res = await fetch('/api/payments/batches/' + b.id + '/receipt?kind=slip', {
-                  method: 'POST', credentials: 'same-origin', body: slip,
-                  headers: { 'Content-Type': slip.type || 'application/pdf', 'X-File-Name': slip.name }
-                });
-                if (res.ok) slipped += 1;
-              } catch { /* reported below; the payment itself already went through */ }
-            }
-            if (!slipped) onToast({ title: 'Payment recorded, slip not attached',
-              message: 'The bills are paid in Xero. Attaching the slip failed — add it to the bills in Xero yourself.', tone: 'error' });
-          }
           const files = made.length === 1
             ? 'The payment file is on the Bank files tab.'
             : 'Two payment files are on the Bank files tab — one for the bank transfers, one for JomPay — each uploaded to the portal separately.';
@@ -569,7 +551,7 @@
             ? { title: 'Bank file generated · nothing sent to Xero',
                 message: files + ' The bills are untouched and can be run again.' }
             : { title: bills.length + ' bill' + (bills.length === 1 ? '' : 's') + ' marked paid in Xero',
-                message: files + (slipped ? ' The slip is attached to every bill.' : '') });
+                message: files });
           onDone();
         } catch (e) {
           onToast({
@@ -609,33 +591,6 @@
               <div style={{ gridColumn: '1 / -1' }}>
                 <Input label="Reference" placeholder="e.g. HLB-DN-20261001-01" value={reference} onChange={setReference}
                   hint="Shown on the Xero payment in every entity." />
-              </div>
-
-              {/* Optional. Evidence is better attached than remembered, but a
-                  payment that has plainly left should not be blocked for want
-                  of a screenshot. */}
-              <div style={{ gridColumn: '1 / -1' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>
-                  Payment slip <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>· optional</span>
-                </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1.5px dashed var(--border-default)', borderRadius: 10, padding: '12px 14px', cursor: 'pointer', background: 'var(--surface-card)' }}>
-                  <span style={{ display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 9, background: 'var(--neutral-50)', flex: '0 0 auto' }}>
-                    <Icon name="paperclip" size={16} color="var(--text-muted)" />
-                  </span>
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>
-                      {slip ? slip.name : 'Attach payment slip'}
-                    </span>
-                    <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>
-                      {testing ? 'Not attached while testing mode is on' : slip ? 'Attached to every bill in Xero when you mark them paid' : 'PDF or image · bank transfer slip or receipt'}
-                    </span>
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  {slip && <button onClick={(e) => { e.preventDefault(); setSlip(null); }}
-                    style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>Remove</button>}
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*" style={{ display: 'none' }}
-                    onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) setSlip(f); }} />
-                </label>
               </div>
 
               <div style={{ gridColumn: '1 / -1', background: testing ? 'var(--amber-100)' : 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: testing ? '#6b4d00' : 'var(--text-body)', lineHeight: 1.6 }}>
