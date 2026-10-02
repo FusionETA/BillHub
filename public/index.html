@@ -2313,7 +2313,7 @@
           setDataNonce(n => n + 1);
           pushToast(on
             ? { title: 'Testing mode on', message: 'Bills Hub will read from Xero but change nothing in it. Bank files are still generated.' }
-            : { title: 'Testing mode off', message: 'Changes reach Xero again.' });
+            : { title: 'Testing mode off', message: 'Changes reach Xero again. Test files are hidden — turn testing back on to see them.' });
         } catch (e) {
           pushToast({ title: 'Could not change testing mode', message: e.message, tone: 'error' });
         }

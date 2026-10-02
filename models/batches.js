@@ -10,9 +10,15 @@ const db = require('../db');
 // bills so they can go into another run.
 const LIVE_STATUSES = ['ready', 'downloaded', 'uploaded', 'posted'];
 
-function list(accountId, { status = null, tenantId = null, limit = 100 } = {}) {
+// `includeTest` follows the testing-mode switch. A batch made while testing
+// paid nothing and will never go to a bank, so once the switch is off it is
+// not one of the files waiting to be dealt with — it is a leftover sitting
+// among the real ones looking exactly like them. Hidden rather than deleted:
+// turn testing back on and they are all still there.
+function list(accountId, { status = null, tenantId = null, limit = 100, includeTest = true } = {}) {
   const where = ['b.account_id = ?'];
   const params = [accountId];
+  if (!includeTest) where.push('b.test_mode = 0');
   if (status && status !== 'all') { where.push('b.status = ?'); params.push(status); }
   if (tenantId) { where.push('b.xero_tenant_id = ?'); params.push(tenantId); }
   return db.query(
@@ -212,7 +218,7 @@ async function cancel(accountId, id) {
 }
 
 // The four stat cards on the Bank files screen.
-async function summary(accountId) {
+async function summary(accountId, { includeTest = true } = {}) {
   const row = await db.getOne(
     `SELECT
        SUM(status = 'ready')                                        AS ready_n,
@@ -221,7 +227,7 @@ async function summary(accountId) {
        SUM(CASE WHEN status = 'downloaded' THEN total ELSE 0 END)    AS downloaded_amt,
        SUM(status IN ('uploaded','posted'))                         AS uploaded_n,
        SUM(CASE WHEN status IN ('uploaded','posted') THEN total ELSE 0 END) AS uploaded_amt
-     FROM payment_batches WHERE account_id = ?`,
+     FROM payment_batches WHERE account_id = ?${includeTest ? '' : ' AND test_mode = 0'}`,
     [accountId]
   );
   const n = (v) => Number(v || 0);

@@ -56,9 +56,13 @@ router.get('/', async (req, res) => {
   try {
     const cur = await currencyFor(req);
     const currency = cur.symbol;
+    // Test batches belong to testing mode. With the switch off they are not
+    // files anyone has to act on, and sitting in the same list as the real
+    // ones is exactly how someone ends up uploading nothing to the bank.
+    const includeTest = await testMode.isOn(accountId);
     const [batchRows, stats, bankSummary, payeeSummary] = await Promise.all([
-      batches.list(accountId, { status: req.query.status || null, limit: 100 }),
-      batches.summary(accountId),
+      batches.list(accountId, { status: req.query.status || null, limit: 100, includeTest }),
+      batches.summary(accountId, { includeTest }),
       bankAccounts.summary(accountId),
       payees.summary(accountId)
     ]);
@@ -75,6 +79,7 @@ router.get('/', async (req, res) => {
         ? `${payeeSummary.missing} supplier${payeeSummary.missing === 1 ? ' has' : 's have'} no bank account number.`
         : null,
       unconfiguredFormats: bankSummary.unconfigured,
+      testMode: includeTest,
       currency
     });
   } catch (err) {

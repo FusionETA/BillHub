@@ -680,10 +680,29 @@ function check(name, ok, detail) {
     } catch (e) { readBlocked = Boolean(e.testMode); }
     check('a read is not refused by the guard', readBlocked === false);
 
+    const onView = (await req('GET', '/api/payments', { cookie })).body;
+
     await testMode.set(1, false);
     const off = await req('POST', '/api/payments/preview', { cookie, body: {
       billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02' } });
     check('turning it off takes effect at once', off.body.testMode === false, off.body.testMode);
+
+    // A test batch paid nothing and will never go to a bank. Left in the list
+    // once the switch is off, it looks exactly like a file someone still has
+    // to upload.
+    const offView = (await req('GET', '/api/payments', { cookie })).body;
+    check('test batches are listed while testing is on',
+      onView.batchCards.some((c) => c.testMode), onView.batchCards.length);
+    check('and gone once it is off',
+      offView.batchCards.every((c) => !c.testMode)
+      && offView.batchCards.length < onView.batchCards.length,
+      { on: onView.batchCards.length, off: offView.batchCards.length });
+    // Stats that disagree with the list are worse than either on its own.
+    // `again2` above is still sitting at ready, so that card has to move.
+    const ready = (v) => v.bankStats.find((x) => x.label === 'Ready to download').sub;
+    check('the stat cards count the same batches the list shows',
+      ready(offView) !== ready(onView), { on: ready(onView), off: ready(offView) });
+    check('the real batches are still there', offView.batchCards.length > 0, offView.batchCards.length);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
