@@ -733,6 +733,41 @@ function check(name, ok, detail) {
       { cookie, body: { formatKey: before.formatKey, billerFormatKey: before.billerFormatKey } });
   }
 
+  // ── Correcting a payee's bank ─────────────────────────────────────────────
+  // Xero's field is called "Bank account name" and a great many of Ayu
+  // Borneo's contacts use it for just that: the name on the account, a
+  // premises code, two banks with a slash. None names a bank, so the
+  // beneficiary bank code comes out blank and the line is rejected.
+  // payees.bank_name exists for the correction and was being shadowed by the
+  // Xero value, so setting it did nothing.
+  {
+    console.log('\nCorrecting a payee whose Xero field is not a bank');
+    const { render } = require('../lib/bankFile');
+    const fmt = { format_key: 't', delimiter: ',', extension: 'csv', include_header: 0,
+                  payment_mode: 'DUITNW', columns: [{ header: 'c', field: 'payeeBankCode' }] };
+    const batch = { reference: 'X', payment_date: '2026-10-02', currency_code: 'MYR', total: 1, line_count: 1 };
+    const codeOf = (line) => render(fmt, batch, [line]).text.trim();
+
+    check('a hand-set bank wins over a holder name in Xero',
+      codeOf({ contact_name: 'A', payee_account: '1',
+               payee_bank_account_name: 'Analin Binti Abdusali', payee_bank: 'Public Bank Berhad' }) === 'PBBB');
+    check('Xero still works on its own',
+      codeOf({ contact_name: 'B', payee_account: '1', payee_bank_account_name: 'Public Bank Berhad' }) === 'PBBB');
+    // The correction may only ever select a published code, never invent one.
+    check('an unusable correction does not break a good Xero value',
+      codeOf({ contact_name: 'E', payee_account: '1',
+               payee_bank_account_name: 'Maybank', payee_bank: 'Not A Bank' }) === 'MBBB');
+    check('neither resolving still leaves it blank',
+      codeOf({ contact_name: 'C', payee_account: '1',
+               payee_bank_account_name: 'PBB / MBB', payee_bank: 'Also Not A Bank' }) === '');
+    // A biller code is the rail signal and must not acquire a bank code.
+    check('a JomPay biller code stays blank even with a bank set',
+      codeOf({ contact_name: 'D', payee_account: '1',
+               payee_bank_account_name: '5454', payee_bank: 'Maybank' }) === '');
+    check('and it is still routed to the JomPay rail',
+      require('../billhub/payments').railOf({ payeeBankAccountName: '5454' }) === 'biller');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
