@@ -92,9 +92,36 @@ const STORE = BORROWED ? `WazzOCR's Xero tables (${DB_NAME})` : "Bills Hub's own
   }
 
   let grants = [];
+  let allGrants = [];
   try {
-    grants = await db.query(`SELECT id, account_id, scope FROM ${GRANTS}`);
-    ok(`SELECT on xero_grants — ${grants.length} grant(s)`);
+    allGrants = await db.query(`SELECT id, account_id, scope FROM ${GRANTS}`);
+    ok(`SELECT on xero_grants — ${allGrants.length} grant(s)`);
+
+    // Narrow to the grants this deployment will actually use: the ones its own
+    // accounts reach through an active connection, exactly as
+    // xeroConnections.getGrantForTenant does at runtime.
+    //
+    // Reading every row and pooling the scopes was wrong in the one mode where
+    // it matters. A borrowed wazzocr.xero_grants holds a row per WazzOCR
+    // account; if any other account's grant carried accounting.payments, the
+    // pooled string said "ok" while the grant Bills Hub borrows did not have
+    // it — and the first real pay run would fail against live organisations.
+    const connIds = [];
+    for (const a of await db.query('SELECT id FROM accounts')) {
+      try { connIds.push(await grantSource.connectionsAccountId(a.id)); } catch { /* reported under Accounts */ }
+    }
+    const usable = connIds.filter((v) => v !== null && v !== undefined);
+    if (usable.length) {
+      grants = await db.query(
+        `SELECT DISTINCT g.id, g.account_id, g.scope
+           FROM ${GRANTS} g JOIN ${CONNECTIONS} c ON c.grant_id = g.id
+          WHERE c.status = 'active' AND c.account_id IN (${usable.map(() => '?').join(',')})`,
+        usable
+      );
+    }
+    if (!grants.length && allGrants.length) {
+      note(`none of the ${allGrants.length} grant(s) is reached by an active connection from this deployment`);
+    }
   } catch (err) {
     bad(`cannot read ${GRANTS}: ${err.code || err.message}`,
         BORROWED ? `GRANT SELECT, UPDATE ON \`${DB_NAME}\`.\`xero_grants\` TO '${process.env.DB_USER}'@'%';` : 'run npm run db:migrate');
@@ -120,26 +147,34 @@ const STORE = BORROWED ? `WazzOCR's Xero tables (${DB_NAME})` : "Bills Hub's own
   // that decides whether switching to a borrowed grant costs a feature, and it
   // is free to run.
   console.log('\nScopes on the stored grant');
+  if (grants.length) {
+    note(`read from grant ${grants.map((g) => '#' + g.id).join(', ')}`
+      + (allGrants.length > grants.length ? ` — the ${allGrants.length - grants.length} other row(s) in the table are not used here` : ''));
+  }
   if (!grants.length) {
     note('no grant to read scopes from');
   } else {
-    const recorded = grants.map((g) => String(g.scope || '')).filter(Boolean);
-    if (!recorded.length) {
+    const withScope = grants.filter((g) => String(g.scope || '').trim());
+    if (!withScope.length) {
       warn('the grant records no scope string', 'older grants predate the column — prove them with --xero instead');
     } else {
-      const all = recorded.join(' ');
-      if (/\baccounting\.transactions\b/.test(all)) {
-        note('this grant uses the broad accounting.transactions scope (an app predating March 2026)');
+      if (withScope.some((g) => /\baccounting\.transactions\b/.test(g.scope))) {
+        note('a grant here uses the broad accounting.transactions scope (an app predating March 2026)');
       }
-      const absent = new Set(xero.missingScopes(all).map(([s]) => s));
+      // Per grant, not pooled. Each organisation is reached through one grant,
+      // so a scope present on only some of them is a scope some organisations
+      // do not have — and pooling the strings reports that as fine.
       for (const [scope, what] of xero.SCOPES_REQUIRED) {
-        if (!absent.has(scope)) ok(`${scope.padEnd(26)} ${what}`);
-        else {
-          bad(`${scope.padEnd(26)} MISSING — needed for ${what}`,
-              BORROWED
-                ? `add ${scope} to WazzOCR's XERO_SCOPES, deploy it, and reconnect Xero IN WAZZOCR`
-                : `add ${scope} to XERO_SCOPES and reconnect`);
-        }
+        const lacking = withScope.filter((g) =>
+          xero.missingScopes(g.scope).some(([s]) => s === scope));
+        if (!lacking.length) { ok(`${scope.padEnd(26)} ${what}`); continue; }
+        const which = lacking.length === withScope.length
+          ? 'MISSING'
+          : `MISSING from grant ${lacking.map((g) => '#' + g.id).join(', ')}`;
+        bad(`${scope.padEnd(26)} ${which} — needed for ${what}`,
+            BORROWED
+              ? `add ${scope} to WazzOCR's XERO_SCOPES, deploy it, and reconnect Xero IN WAZZOCR`
+              : `add ${scope} to XERO_SCOPES and reconnect`);
       }
     }
   }
