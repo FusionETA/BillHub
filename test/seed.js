@@ -173,12 +173,47 @@ async function seed({ quiet = false } = {}) {
   // ── Bank files fixtures ───────────────────────────────────────────────────
   await bankFormats.seedBuiltIns();
 
+  // Two CSV layouts, defined for this account only. They used to ship as
+  // built-ins and no longer do — Hong Leong is the only bank Ayu Borneo pays
+  // from. The renderer's CSV path is still real code, though, and an
+  // account-defined layout is still a supported thing, so the fixtures keep
+  // both covered rather than deleting the coverage along with the layouts.
+  await bankFormats.upsertForAccount(ACCOUNT, 'maybank-m2e-csv', {
+    name: 'Maybank M2E (CSV) — starter', bankName: 'Maybank',
+    delimiter: ',', extension: 'csv', includeHeader: 0, quoteFields: 0,
+    lineEnding: 'crlf', dateFormat: 'DDMMYYYY', verified: 0,
+    columns: [
+      { header: 'PayeeAccount', field: 'payeeAccount', transform: 'digits' },
+      { header: 'Amount', field: 'amount' },
+      { header: 'PayeeName', field: 'payeeName', transform: 'upper', maxLength: 40 },
+      { header: 'Reference', field: 'reference', transform: 'alnum', maxLength: 20 },
+      { header: 'PaymentDate', field: 'paymentDate' }
+    ]
+  });
+  await bankFormats.upsertForAccount(ACCOUNT, 'generic-csv', {
+    name: 'Generic CSV (readable)', bankName: 'Generic',
+    delimiter: ',', extension: 'csv', includeHeader: 1, quoteFields: 1,
+    lineEnding: 'crlf', verified: 1,
+    columns: [
+      { header: 'No', field: 'seq' },
+      { header: 'Payee', field: 'payeeName', transform: 'trim' },
+      { header: 'Bank', field: 'payeeBank', transform: 'trim' },
+      { header: 'Account No', field: 'payeeAccount', transform: 'trim' },
+      { header: 'Amount', field: 'amount' },
+      { header: 'Currency', field: 'currency' },
+      { header: 'Payment Date', field: 'paymentDate' },
+      { header: 'Reference', field: 'reference', transform: 'trim' },
+      { header: 'Batch', field: 'batchRef' }
+    ]
+  });
+
   // Paying accounts, shaped like Xero's BANK accounts.
   const BANKS = [
     ['tenant-abm',  'acct-abm-mbb',  '090', 'Maybank Current 5142', '514212345678', 'maybank-m2e-csv'],
     ['tenant-abm',  'acct-abm-cimb', '091', 'CIMB Operating 8830',  '883099887766', 'generic-csv'],
     ['tenant-abkk', 'acct-abkk-mbb', '090', 'Maybank Current 7781', '778154321098', 'maybank-m2e-csv'],
-    // Deliberately left without a format, to exercise the fallback.
+    // Deliberately left without a format, to exercise the fallback — which is
+    // now Hong Leong ConnectFirst rather than a generic CSV.
     ['tenant-abkj', 'acct-abkj-mbb', '090', 'Maybank Current 3320', '332011223344', null]
   ];
   for (const [tenantId, xeroAccountId, code, name, number, formatKey] of BANKS) {

@@ -1575,8 +1575,6 @@
       const [busy, setBusy] = useState(null);
       const [syncing, setSyncing] = useState(false);
       const [formats, setFormats] = useState([]);
-      const [accounts, setAccounts] = useState([]);
-      const [showAccounts, setShowAccounts] = useState(false);
       const [nonce, setNonce] = useState(0);
       const reload = () => setNonce(n => n + 1);
 
@@ -1592,28 +1590,7 @@
 
       useEffect(() => {
         api.get('/api/payments/formats').then(d => setFormats(d.formats || [])).catch(() => {});
-        api.get('/api/payments/bank-accounts?all=true').then(d => setAccounts(d.bankAccounts || [])).catch(() => {});
       }, [nonce]);
-
-      // Which layout each paying account uses. Without this the renderer falls
-      // back to generic-csv and every file comes out in the wrong shape — and
-      // the JomPay layout had no way to be set at all, so a utility ended up in
-      // the transfer file.
-      async function setLayout(acct, field, value) {
-        setBusy('acct-' + acct.id);
-        try {
-          await api.patch('/api/payments/bank-accounts/' + acct.id, { [field]: value || null });
-          onToast({
-            title: acct.name + ' updated',
-            message: value
-              ? (field === 'billerFormatKey' ? 'JomPay file: ' : 'Bank transfer file: ') + value
-              : 'Layout cleared — that rail will have nothing to generate.'
-          });
-          reload();
-        } catch (e) {
-          onToast({ title: 'Could not set the layout', message: e.message, tone: 'error' });
-        } finally { setBusy(null); }
-      }
 
       const unverified = new Set(formats.filter(f => !f.verified).map(f => f.key));
 
@@ -1731,49 +1708,6 @@
             <strong style={{ color: 'var(--text-heading)' }}>{data.payeeWarning}</strong> Those lines will be blank in the file and the bank will reject them. Add the details in Xero, or correct them here.
           </div>
         </div>}
-
-        {/* Which layout each paying account uses. There was no way to set this
-            in the product at all, so every file came out of the generic
-            fallback — right data, wrong shape — and the JomPay layout, which
-            the renderer reads, could not be chosen by any means. */}
-        {accounts.length > 0 && (() => {
-          const unset = accounts.filter(a => !a.formatKey);
-          const opts = (extra) => [{ label: '— none —', value: '' }]
-            .concat(formats.map(f => ({ label: f.name + (f.verified ? '' : ' (unverified)'), value: f.key })));
-          return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: unset.length ? '4px solid var(--amber-500)' : '4px solid var(--green-500)', borderRadius: 10, marginBottom: 16, overflow: 'hidden' }}>
-            <button onClick={() => setShowAccounts(v => !v)} className="feta-hover"
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-              <span style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}>
-                {unset.length
-                  ? <React.Fragment><strong style={{ color: 'var(--text-heading)' }}>{unset.length} paying account{unset.length === 1 ? ' has' : 's have'} no file layout.</strong> Their files come out in the generic layout, which no bank accepts. Set one for each.</React.Fragment>
-                  : <React.Fragment><strong style={{ color: 'var(--text-heading)' }}>All {accounts.length} paying accounts have a layout.</strong> Open to change which file each one produces.</React.Fragment>}
-              </span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-link)' }}>{showAccounts ? 'Hide' : 'Set layouts'}</span>
-            </button>
-
-            {showAccounts && <div style={{ borderTop: '1px solid var(--neutral-100)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)', gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--neutral-100)' }}>
-                <div>Paying account</div><div>Bank transfer file</div><div>JomPay file</div>
-              </div>
-              {accounts.map(a => (
-                <div key={a.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr)', gap: 12, alignItems: 'center', padding: '10px 18px', borderBottom: '1px solid var(--neutral-100)', opacity: busy === 'acct-' + a.id ? .5 : 1 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Code>{a.entityCode}</Code>
-                      <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{a.name}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{a.entityShort}{a.currency ? ' · ' + a.currency : ''}</div>
-                  </div>
-                  <Select value={a.formatKey || ''} options={opts()} onChange={v => setLayout(a, 'formatKey', v)} />
-                  <Select value={a.billerFormatKey || ''} options={opts()} onChange={v => setLayout(a, 'billerFormatKey', v)} />
-                </div>
-              ))}
-              <div style={{ padding: '12px 18px', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                A selection splits by the payee's bank account name: a name goes in the <strong>bank transfer</strong> file, four or five digits is a JomPay biller code and goes in the <strong>JomPay</strong> file. Leave a rail unset only if that account never pays down it.
-              </div>
-            </div>}
-          </div>;
-        })()}
 
         {error
           ? <Placeholder tone="error" title="Could not load payment batches" message={error}

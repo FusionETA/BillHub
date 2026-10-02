@@ -211,10 +211,14 @@ function bankStatCards(stats, bankSummary, currency = 'RM') {
       color: 'var(--green-500)'
     },
     {
-      label: 'Bank formats',
-      amount: String(bankSummary.formats),
-      sub: `across ${bankSummary.accounts} paying account${bankSummary.accounts === 1 ? '' : 's'}`
-         + (bankSummary.unconfigured ? ` · ${bankSummary.unconfigured} unset` : ''),
+      // There is one bank and nothing to configure, so counting layouts and
+      // warning about "unset" accounts described a choice that no longer
+      // exists. What is worth knowing is how many accounts can pay at all.
+      label: 'Paying accounts',
+      amount: String(bankSummary.accounts),
+      sub: bankSummary.accounts
+        ? 'all on the Hong Leong layouts'
+        : 'none yet — run Sync accounts & payees',
       color: 'var(--blue-500)'
     }
   ];

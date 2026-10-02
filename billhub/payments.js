@@ -171,15 +171,11 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
   return { bank: plan.bank, currencyCode: plan.currencyCode, paymentDate: plan.paymentDate, runs };
 }
 
-// The layout for one rail. A biller run falls back to the matching JomPay
-// layout of whichever bank the transfer layout belongs to, so a Hong Leong
-// account does not need both set by hand before it works.
+// The layout for one rail. Both default to Hong Leong, so a paying account
+// needs nothing set before its files are right.
 async function formatForRail(accountId, bank, rail) {
   if (rail !== 'biller') return formatFor(accountId, bank);
-  const key = bank.biller_format_key
-    || (String(bank.format_key || '').startsWith('hlb-') ? 'hlb-jompay' : null);
-  if (!key) return null;
-  return bankFormats.get(accountId, key);
+  return bankFormats.get(accountId, bank.biller_format_key || 'hlb-jompay');
 }
 
 // ── Building a batch ────────────────────────────────────────────────────────
@@ -285,7 +281,10 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
 // Resolves the layout for a batch: the bank account's own, else the readable
 // generic one so a batch is never blocked by an unconfigured format.
 async function formatFor(accountId, bank) {
-  const key = bank.format_key || 'generic-csv';
+  // Hong Leong unless an account says otherwise. Ayu Borneo pays from Hong
+  // Leong, so making that the default means nothing has to be configured
+  // before the first file is right.
+  const key = bank.format_key || 'hlb-connectfirst';
   const format = await bankFormats.get(accountId, key);
   if (!format) throw err(`Bank format "${key}" is not defined.`, 404);
   return format;
@@ -366,7 +365,7 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
 async function renderFile(accountId, batchId) {
   const batch = await batches.getById(accountId, batchId);
   if (!batch) throw err('Batch not found.', 404);
-  const format = await bankFormats.get(accountId, batch.format_key || batch.bank_format_key || 'generic-csv');
+  const format = await bankFormats.get(accountId, batch.format_key || batch.bank_format_key || 'hlb-connectfirst');
   if (!format) throw err(`Bank format "${batch.format_key}" is not defined.`, 404);
   const lineRows = await batches.lines(batchId);
   const out = render(format, batch, lineRows);

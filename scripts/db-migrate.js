@@ -41,6 +41,28 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    // Ayu Borneo pays from Hong Leong and nothing else, so the generic CSV and
+    // the unverified Maybank starter are gone. Anything still pointing at them
+    // is repointed before they are deleted — an existing batch keeps its
+    // format_key, and a row with no layout to render would fail to download.
+    why: 'bank_accounts / payment_batches — repoint the retired layouts at Hong Leong',
+    check: "SELECT COUNT(*) AS n FROM bank_accounts WHERE format_key IN ('generic-csv','maybank-m2e-csv')",
+    needed: (row) => Number(row.n) > 0,
+    sql: "UPDATE bank_accounts SET format_key = 'hlb-connectfirst' WHERE format_key IN ('generic-csv','maybank-m2e-csv')"
+  },
+  {
+    why: 'payment_batches — the same, so an old file still renders',
+    check: "SELECT COUNT(*) AS n FROM payment_batches WHERE format_key IN ('generic-csv','maybank-m2e-csv')",
+    needed: (row) => Number(row.n) > 0,
+    sql: "UPDATE payment_batches SET format_key = 'hlb-connectfirst' WHERE format_key IN ('generic-csv','maybank-m2e-csv')"
+  },
+  {
+    why: 'bank_formats — drop the retired built-in layouts',
+    check: "SELECT COUNT(*) AS n FROM bank_formats WHERE account_id IS NULL AND format_key IN ('generic-csv','maybank-m2e-csv')",
+    needed: (row) => Number(row.n) > 0,
+    sql: "DELETE FROM bank_formats WHERE account_id IS NULL AND format_key IN ('generic-csv','maybank-m2e-csv')"
+  },
+  {
     why: 'accounts.test_mode — the toggle that stops every Xero write',
     check: hasColumn('accounts', 'test_mode'),
     needed: (row) => Number(row.n) === 0,
