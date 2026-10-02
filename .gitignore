@@ -6,3 +6,4 @@ certs/
 *.log
 .DS_Store
 .devdata/
+*.bak
