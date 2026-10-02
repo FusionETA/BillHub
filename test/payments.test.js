@@ -812,6 +812,45 @@ function check(name, ok, detail) {
     check('DuitNow keeps the full narrative', dn === 'MA Shop 49, 49-1, 49-2 GE 1026', dn);
   }
 
+  // ── What the client caught ────────────────────────────────────────────────
+  // "Ref-2 here suppose to be the Ref in Xero right? Which should be the
+  // actual bill number." It was a narrative built from the entity, premises
+  // and period, which made every line of a utility's file read the same.
+  {
+    console.log('\nRef-2 carries the bill number');
+    const bf = require('../lib/bankFile');
+    const jom = { format_key: 'hlb-jompay', delimiter: '|', extension: 'csv', include_header: 0,
+                  payment_mode: 'DUITNW',
+                  columns: [{ header: 'Biller', field: 'billerCode', transform: 'digits' },
+                            { header: 'Ref-1', field: 'payeeAccount' },
+                            { header: 'Ref-2', field: 'reference', transform: 'safe', maxLength: 20 },
+                            { header: 'Amount', field: 'amount' }] };
+    const mk = (ref, amt) => ({ contact_name: 'Indah Water', payee_bank_account_name: '68502',
+                                payee_account: '10159261735', payee_details: 'MA Shop 49, 49-1, 49-2',
+                                amount: amt, reference: ref });
+    const run = (lines) => bf.render(jom,
+      { reference: 'X', payment_date: '2026-10-02', currency_code: 'MYR', total: 1,
+        line_count: lines.length, entity_code: 'ABMA' }, lines);
+
+    const one = run([mk('BZ052254', 184.15)]);
+    check('Ref-2 is the bill reference, not the premises narrative',
+      one.text.trim().split('|')[2] === 'BZ052254', one.text.trim());
+
+    const over = run([mk('10159261735 - MA49, 49-1, 49-2', 184.15)]);
+    check('a long bill reference is still held to 20',
+      over.text.trim().split('|')[2].length <= 20, over.text.trim().split('|')[2]);
+
+    // The second half of what she spotted: with the reference fixed, three of
+    // those lines are still indistinguishable, because three Xero bills share
+    // a reference and an amount. Real payments, but they read as duplicates.
+    const dupes = run([mk('MA 12-1', 194.65), mk('MA 12-1', 252.85), mk('MA 12-1', 252.85), mk('MA 12-1', 252.85)]);
+    const dupWarn = dupes.warnings.find((w) => /identical/.test(w));
+    check('identical lines are reported', Boolean(dupWarn), dupes.warnings);
+    check('and it names which ones', dupWarn && /Lines 2, 3, 4/.test(dupWarn), dupWarn);
+    check('a file with none of them says nothing',
+      !run([mk('A', 1), mk('B', 2)]).warnings.some((w) => /identical/.test(w)));
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
