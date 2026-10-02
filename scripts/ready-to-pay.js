@@ -90,11 +90,14 @@ function assess(row) {
     (Math.min(b.transfer, 1) + Math.min(b.biller, 1)) - (Math.min(a.transfer, 1) + Math.min(a.biller, 1))
     || (b.transfer + b.biller) - (a.transfer + a.biller));
 
+  // Entity codes run to twelve characters and a fixed column ate the gap, so
+  // ABMANAGEMENT ran straight into its own name and could not be copied.
+  const w = Math.max(6, ...summary.map((s) => String(s.code).length)) + 2;
   console.log('\nOrganisations with bills awaiting payment — best to test with first\n');
-  console.log('  ' + 'CODE'.padEnd(12) + 'ORGANISATION'.padEnd(32) + 'CLEAN'.padStart(6) + 'TRANSFER'.padStart(10) + 'JOMPAY'.padStart(8) + '  OF');
+  console.log('  ' + 'CODE'.padEnd(w) + 'ORGANISATION'.padEnd(32) + 'CLEAN'.padStart(6) + 'TRANSFER'.padStart(10) + 'JOMPAY'.padStart(8) + '  OF');
   for (const s of summary) {
     const both = s.transfer > 0 && s.biller > 0 ? '  <- both rails' : '';
-    console.log('  ' + String(s.code).padEnd(12) + String(s.name).slice(0, 30).padEnd(32)
+    console.log('  ' + String(s.code).padEnd(w) + String(s.name).slice(0, 30).padEnd(32)
       + String(s.transfer + s.biller).padStart(6) + String(s.transfer).padStart(10)
       + String(s.biller).padStart(8) + '  ' + String(s.total) + both);
   }
