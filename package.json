@@ -32,7 +32,8 @@
     "set-password": "node scripts/set-password.js",
     "add-user": "node scripts/add-user.js",
     "test:setup": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node scripts/test-setup.js",
-    "demo-hlb": "node scripts/demo-hlb.js"
+    "demo-hlb": "node scripts/demo-hlb.js",
+    "demo-payrun": "node scripts/demo-payrun.js"
   },
   "engines": {
     "node": ">=18"
