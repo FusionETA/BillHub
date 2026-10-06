@@ -859,6 +859,15 @@ function check(name, ok, detail) {
     check('a long premises is brought within 20', long.length <= 20, { value: long, length: long.length });
     check('and the period survives it', /0926$/.test(long), long);
 
+    // Cutting mid-token turned "MA 49 49-1 49-2" into "MA 49 4", which does
+    // not read as a shortened premises — it reads as a different one, and the
+    // stray digit is the first thing anyone asks about.
+    const clipped = ref2('ABMA', mk('MA 49 49-1 49-2', 'ID', 1, '2026-08-19'));
+    check('a trimmed premises breaks on a word, not mid-token',
+      clipped === 'ABMA MA 49 ID 0826', clipped);
+    check('a single word too long to break is still cut',
+      ref2('ABMA', mk('Averyverylongsinglewordpremises', 'ID', 1, '2026-08-19')).length <= 20);
+
     check('a bill with no date falls back to the payment period',
       /1026$/.test(ref2('BM', mk('69', 'TNB', 1, null))));
 
