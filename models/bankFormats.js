@@ -14,12 +14,36 @@ const COLS = `id, account_id, format_key, name, bank_name, delimiter, extension,
 
 // Seeds the built-in layouts. Idempotent, and it never overwrites a layout
 // someone has since corrected — the whole point of holding these as data.
+// The built-in layouts, kept in step with the code on every boot.
+//
+// This used to insert and then skip anything already there, which meant a
+// layout was frozen at whatever it looked like the first time a database saw
+// it. Every correction since — a column's length, which field it reads, how
+// it is sanitised — reached new databases and no existing one, silently. The
+// deployment found it: Hong Leong refused a file for a 20-character limit,
+// the limit was changed to 20, and the next file was still built to 30.
+//
+// Only the shipped rows are touched. A layout a customer has adjusted is
+// stored against their account id, and nothing here looks at those.
 async function seedBuiltIns() {
   for (const f of BUILT_IN) {
     const exists = await db.getOne(
       'SELECT id FROM bank_formats WHERE account_id IS NULL AND format_key = ?', [f.format_key]
     );
-    if (exists) continue;
+    if (exists) {
+      await db.execute(
+        `UPDATE bank_formats
+            SET name = ?, bank_name = ?, delimiter = ?, extension = ?, include_header = ?,
+                line_ending = ?, quote_fields = ?, date_format = ?, payment_mode = ?,
+                template = ?, template_header_rows = ?, columns = ?, verified = ?, notes = ?
+          WHERE id = ?`,
+        [f.name, f.bank_name, f.delimiter, f.extension, f.include_header,
+         f.line_ending, f.quote_fields ? 1 : 0, f.date_format || 'YYYY-MM-DD', f.payment_mode || null,
+         f.template || null, f.template_header_rows || 1,
+         JSON.stringify(f.columns), f.verified ? 1 : 0, f.notes || null, exists.id]
+      );
+      continue;
+    }
     await db.insert(
       `INSERT INTO bank_formats
         (account_id, format_key, name, bank_name, delimiter, extension, include_header,

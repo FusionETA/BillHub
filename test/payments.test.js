@@ -879,6 +879,39 @@ function check(name, ok, detail) {
       ref2('MA', mk('49', codes.codeFor('Indah Water Konsortium Sdn Bhd-MA Shop 49'), 1, '2026-09-18')) === 'MA 49 ID 0926');
   }
 
+  // ── Shipped layouts track the code ────────────────────────────────────────
+  // seedBuiltIns used to skip any layout already in the table, so a layout was
+  // frozen at whatever it looked like when that database first saw it. Every
+  // correction since reached new databases and no existing one, in silence.
+  // Hong Leong refused a file over a 20-character limit; the limit was changed
+  // to 20; the next file was still built to 30.
+  {
+    console.log('\nA changed layout reaches a database that already has it');
+    const bankFormats = require('../models/bankFormats');
+    const parse = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
+
+    // Put it back the way the deployment had it, then re-seed.
+    await db.execute(
+      "UPDATE bank_formats SET columns = ?, name = ? WHERE account_id IS NULL AND format_key = 'hlb-jompay'",
+      [JSON.stringify([{ header: 'Ref-2', field: 'otherDetails', transform: 'safe', maxLength: 30 }]), 'Stale name']
+    );
+    await bankFormats.seedBuiltIns();
+
+    const row = await db.getOne(
+      "SELECT name, columns FROM bank_formats WHERE account_id IS NULL AND format_key = 'hlb-jompay'");
+    const ref2 = parse(row.columns).find((c) => c.header === 'Ref-2');
+    check('the stale column definition is replaced', ref2 && ref2.maxLength === 20, ref2);
+    check('and so is the rest of the row', row.name !== 'Stale name', row.name);
+
+    // A layout the customer has adjusted is their data and must survive it.
+    await bankFormats.upsertForAccount(1, 'hlb-jompay', { name: 'Ours, edited' });
+    await bankFormats.seedBuiltIns();
+    const mine = await db.getOne(
+      "SELECT name FROM bank_formats WHERE account_id = 1 AND format_key = 'hlb-jompay'");
+    check('an account\'s own layout is left alone', mine && mine.name === 'Ours, edited', mine);
+    await db.execute("DELETE FROM bank_formats WHERE account_id = 1 AND format_key = 'hlb-jompay'");
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
