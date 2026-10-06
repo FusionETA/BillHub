@@ -3,6 +3,7 @@
 //   node scripts/ready-to-pay.js                 organisations, best first
 //   node scripts/ready-to-pay.js --entity ABPJ   the bills in one of them
 //   node scripts/ready-to-pay.js --bank CIMB     only organisations paying from CIMB
+//   node scripts/ready-to-pay.js --entity X --from CIMB   as if paying from that account
 //
 // Read-only. Makes no Xero call and changes nothing.
 //
@@ -115,10 +116,27 @@ function assess(row, scheme, paysBiller = true) {
   if (want) {
     const org = orgs.get(want);
     if (!org) { console.log(`\nNo bills awaiting payment in "${want}".\n`); return; }
-    const scheme = schemeFor.get(org.tenantId) || 'duitnow';
+    // An organisation banking at two banks has two answers, and the dropdown
+    // picks which. Without this the report assesses against whichever account
+    // happens to be preselected, while you are about to choose the other.
+    const accts0 = banksFor.get(org.tenantId) || [];
+    const from = (arg('--from') || '').trim().toLowerCase();
+    const chosenAcct = from
+      ? accts0.find((a) => `${a.name} ${a.bank_name || ''}`.toLowerCase().includes(from))
+      : (accts0.find((a) => a.is_default) || accts0[0]);
+    if (from && !chosenAcct) {
+      console.log(`\nNo paying account in ${want} matches "${arg('--from')}".`);
+      console.log('  ' + accts0.map((a) => a.name).join('\n  ') + '\n');
+      await db.close();
+      return;
+    }
+    const scheme = chosenAcct && bankOf(chosenAcct) === 'CIMB' ? 'bnm' : 'duitnow';
+    const paysBiller = !chosenAcct || Boolean(chosenAcct.biller_format_key) || bankOf(chosenAcct) !== 'CIMB';
+    org.bills = org.bills.map((b) => ({ ...b, ...assess(b, scheme, paysBiller) }));
     console.log(`\n${want} — ${org.name}`);
-    console.log(`  judged against ${scheme === 'bnm' ? "CIMB's BNM codes" : "Hong Leong's codes"}, `
-      + 'because that is the bank its dialog preselects\n');
+    console.log(`  paying from ${chosenAcct ? chosenAcct.name : '(no account)'}, `
+      + `judged against ${scheme === 'bnm' ? "CIMB's BNM codes" : "Hong Leong's codes"}`
+      + (from ? '' : ' — the account its dialog preselects') + '\n');
     console.log('  ' + 'OK'.padEnd(4) + 'RAIL'.padEnd(10) + 'PAYEE'.padEnd(36) + 'AMOUNT'.padStart(11) + '   WHY');
     for (const b of org.bills.sort((x, y) => (y.ok - x.ok) || x.rail.localeCompare(y.rail))) {
       console.log('  ' + (b.ok ? 'yes ' : 'no  ') + b.rail.padEnd(10)
@@ -151,8 +169,8 @@ function assess(row, scheme, paysBiller = true) {
     // dialog that will refuse them.
     const t = ok.filter((b) => b.rail === 'Transfer').length;
     const j = ok.filter((b) => b.rail === 'JomPay').length;
-    const chosen = accts.find((a) => a.is_default) || accts[0];
-    const chosenPaysBiller = chosen && (chosen.biller_format_key || bankOf(chosen) !== 'CIMB');
+    const chosen = chosenAcct;
+    const chosenPaysBiller = paysBiller;
 
     console.log('');
     if (!j || chosenPaysBiller) {
