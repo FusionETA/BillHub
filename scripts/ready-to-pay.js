@@ -23,16 +23,26 @@ const ACCOUNT = Number(process.env.DEFAULT_ACCOUNT_ID) || 1;
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 
 // The renderer's rules, not an approximation of them.
-function assess(row) {
+// `scheme` is the paying bank's, not a default. CIMB wants BNM's two-digit
+// code and lists 33 IBG participants; Hong Leong wants its own four-character
+// one and lists 113. The same payee can be payable from one bank and not the
+// other, so assessing everything against Hong Leong quietly overstated what a
+// CIMB organisation could pay.
+function assess(row, scheme) {
   const bankish = row.bank_account_name || row.bank_name || '';
   if (banks.isBillerCode(String(bankish).trim())) {
     return row.account_number
       ? { rail: 'JomPay', ok: true, why: 'biller ' + String(bankish).trim() }
       : { rail: 'JomPay', ok: false, why: 'no account number for Ref-1' };
   }
-  const code = banks.bankCode(row.bank_name, 'duitnow') || banks.bankCode(bankish, 'duitnow');
+  const code = banks.bankCode(row.bank_name, scheme) || banks.bankCode(bankish, scheme);
   if (!row.account_number) return { rail: 'Transfer', ok: false, why: 'no account number' };
-  if (!code) return { rail: 'Transfer', ok: false, why: `"${String(bankish).slice(0, 22) || '—'}" is not a bank` };
+  if (!code) {
+    const elsewhere = scheme === 'bnm' && banks.bankCode(bankish, 'duitnow');
+    return { rail: 'Transfer', ok: false,
+      why: `"${String(bankish).slice(0, 22) || '—'}" is not a bank`
+        + (elsewhere ? ' CIMB lists (Hong Leong does)' : '') };
+  }
   return { rail: 'Transfer', ok: true, why: code };
 }
 
@@ -73,18 +83,29 @@ function assess(row) {
     return a.bank_name || '(no bank set)';
   };
 
+  // Which code table each organisation's bills are judged against, decided by
+  // the account its dialog preselects.
+  const schemeFor = new Map();
+  for (const [tenantId, accts] of banksFor) {
+    const chosen = accts.find((a) => a.is_default) || accts[0];
+    schemeFor.set(tenantId, chosen && bankOf(chosen) === 'CIMB' ? 'bnm' : 'duitnow');
+  }
+
   const orgs = new Map();
   for (const r of rows) {
     const key = r.entity || r.xero_tenant_id;
     if (!orgs.has(key)) orgs.set(key, { name: r.entity_name || key, tenantId: r.xero_tenant_id, bills: [] });
-    orgs.get(key).bills.push({ ...r, ...assess(r) });
+    orgs.get(key).bills.push({ ...r, ...assess(r, schemeFor.get(r.xero_tenant_id) || 'duitnow') });
   }
 
   const want = (arg('--entity') || '').trim().toUpperCase();
   if (want) {
     const org = orgs.get(want);
     if (!org) { console.log(`\nNo bills awaiting payment in "${want}".\n`); return; }
-    console.log(`\n${want} — ${org.name}\n`);
+    const scheme = schemeFor.get(org.tenantId) || 'duitnow';
+    console.log(`\n${want} — ${org.name}`);
+    console.log(`  judged against ${scheme === 'bnm' ? "CIMB's BNM codes" : "Hong Leong's codes"}, `
+      + 'because that is the bank its dialog preselects\n');
     console.log('  ' + 'OK'.padEnd(4) + 'RAIL'.padEnd(10) + 'PAYEE'.padEnd(36) + 'AMOUNT'.padStart(11) + '   WHY');
     for (const b of org.bills.sort((x, y) => (y.ok - x.ok) || x.rail.localeCompare(y.rail))) {
       console.log('  ' + (b.ok ? 'yes ' : 'no  ') + b.rail.padEnd(10)
