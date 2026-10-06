@@ -921,6 +921,68 @@ function check(name, ok, detail) {
     await db.execute("DELETE FROM bank_formats WHERE account_id = 1 AND format_key = 'hlb-jompay'");
   }
 
+  // ── CIMB ──────────────────────────────────────────────────────────────────
+  // A second bank, and almost nothing about it matches the first: two-digit
+  // BNM codes instead of four-character ones, the paying account repeated on
+  // every JomPAY row, three header rows, 30 characters of Ref-2 rather than
+  // 20, and hyphens forbidden where Hong Leong accepts them.
+  {
+    console.log('\nCIMB');
+    const banks = require('../lib/malaysianBanks');
+    const bf = require('../lib/bankFile');
+    const bankFormats = require('../models/bankFormats');
+    await bankFormats.seedBuiltIns();
+
+    check('BNM codes are a different scheme, not shorter ones',
+      banks.bankCode('CIMB Bank Berhad', 'bnm') === '35'
+      && banks.bankCode('CIMB Bank Berhad', 'duitnow') === 'CIMB');
+    check('and Maybank resolves despite CIMB calling it Malayan Banking',
+      banks.bankCode('Maybank', 'bnm') === '27');
+    // The same trap as AMB: a parent's code is not its subsidiary's.
+    check('an investment bank is not collapsed onto its parent',
+      banks.bankCode('Alliance Investment Bank', 'bnm') === null);
+    check('a bank CIMB does not list resolves to nothing',
+      banks.bankCode('Bank of Narnia', 'bnm') === null);
+
+    const bulk = await bankFormats.get(1, 'cimb-bulk');
+    const jom = await bankFormats.get(1, 'cimb-jompay');
+    check('both layouts are shipped', Boolean(bulk && jom));
+    check('and expect three header rows',
+      Number(bulk.template_header_rows) === 3 && Number(jom.template_header_rows) === 3,
+      { bulk: bulk.template_header_rows, jompay: jom.template_header_rows });
+
+    const batch = { reference: 'PAY-X', payment_date: '2026-10-06', currency_code: 'MYR',
+                    total: 1, line_count: 1, entity_code: 'MA', payer_account: '8010072820' };
+    const row = (fmt, line) => bf.render(fmt, batch, [line]).text.trim().split(/\r?\n/)[1].split(',')
+      .map((v) => v.replace(/^"|"$/g, ''));
+
+    const t = row(bulk, { contact_name: 'Sinaran Office Supplies Sdn Bhd', payee_account: '514027718842',
+                          payee_bank_account_name: 'Maybank', payee_code: 'SOS',
+                          reference: 'SOS-26-1041', amount: 3280, bill_date: '2026-09-18' });
+    check('the transfer row carries the two-digit BNM code', t[2] === '27', t);
+    check('and strips the hyphen CIMB forbids', t[5] === 'SOS 26 1041', t[5]);
+
+    const j = row(jom, { contact_name: 'Indah Water', payee_bank_account_name: '7011',
+                         payee_account: '880142300561', payee_details: 'BM 69',
+                         payee_code: 'IWK', amount: 128.90, bill_date: '2026-09-18' });
+    check('the JomPAY row repeats the paying account, which Hong Leong does not',
+      j[1] === '8010072820', j);
+    check('and dates Ref-2 from the bill', /0926$/.test(j[3]), j[3]);
+
+    // The layout follows the bank, with nothing configured.
+    const pay = require('../billhub/payments');
+    const abm = (await req('GET', '/api/payments/bank-accounts?all=true', { cookie })).body.bankAccounts[0];
+    await db.execute("UPDATE bank_accounts SET bank_name = 'CIMB Bank Berhad', format_key = NULL, biller_format_key = NULL WHERE id = ?", [abm.id]);
+    const cimbBank = await require('../models/bankAccounts').getById(1, abm.id);
+    check('a CIMB paying account picks the CIMB layouts without being told',
+      (await pay.formatForRail(1, cimbBank, 'transfer')).format_key === 'cimb-bulk'
+      && (await pay.formatForRail(1, cimbBank, 'biller')).format_key === 'cimb-jompay');
+    await db.execute("UPDATE bank_accounts SET bank_name = 'Hong Leong Bank' WHERE id = ?", [abm.id]);
+    const hlbBank = await require('../models/bankAccounts').getById(1, abm.id);
+    check('and a Hong Leong one still picks Hong Leong',
+      (await pay.formatForRail(1, hlbBank, 'transfer')).format_key === 'hlb-connectfirst');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();

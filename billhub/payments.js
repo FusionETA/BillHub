@@ -177,7 +177,7 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
 // needs nothing set before its files are right.
 async function formatForRail(accountId, bank, rail) {
   if (rail !== 'biller') return formatFor(accountId, bank);
-  return bankFormats.get(accountId, bank.biller_format_key || 'hlb-jompay');
+  return bankFormats.get(accountId, bank.biller_format_key || layoutsFor(bank).biller);
 }
 
 // ── Building a batch ────────────────────────────────────────────────────────
@@ -286,11 +286,26 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
 
 // Resolves the layout for a batch: the bank account's own, else the readable
 // generic one so a batch is never blocked by an unconfigured format.
+// Which pair of layouts a paying account uses, taken from the bank it belongs
+// to. Nothing has to be configured: an account at CIMB produces BizConverter
+// sheets and one at Hong Leong produces ConnectFirst, because that is the only
+// answer that could be right. `format_key` on the account still overrides,
+// which is what a second CIMB product or a customer-edited layout would need.
+const LAYOUTS = {
+  cimb: { transfer: 'cimb-bulk', biller: 'cimb-jompay' },
+  hlb: { transfer: 'hlb-connectfirst', biller: 'hlb-jompay' }
+};
+
+function layoutsFor(bank) {
+  const name = `${bank.bank_name || ''} ${bank.name || ''}`;
+  // On the BNM table rather than the word "CIMB", so "Islamic" and the rest
+  // of their trading names land in the same place.
+  if (banks.bnmCode(bank.bank_name) === '35' || /\bCIMB\b/i.test(name)) return LAYOUTS.cimb;
+  return LAYOUTS.hlb;
+}
+
 async function formatFor(accountId, bank) {
-  // Hong Leong unless an account says otherwise. Ayu Borneo pays from Hong
-  // Leong, so making that the default means nothing has to be configured
-  // before the first file is right.
-  const key = bank.format_key || 'hlb-connectfirst';
+  const key = bank.format_key || layoutsFor(bank).transfer;
   const format = await bankFormats.get(accountId, key);
   if (!format) throw err(`Bank format "${key}" is not defined.`, 404);
   return format;
@@ -371,7 +386,8 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
 async function renderFile(accountId, batchId) {
   const batch = await batches.getById(accountId, batchId);
   if (!batch) throw err('Batch not found.', 404);
-  const format = await bankFormats.get(accountId, batch.format_key || batch.bank_format_key || 'hlb-connectfirst');
+  const format = await bankFormats.get(accountId,
+    batch.format_key || batch.bank_format_key || layoutsFor(batch).transfer);
   if (!format) throw err(`Bank format "${batch.format_key}" is not defined.`, 404);
   const lineRows = await batches.lines(batchId);
   const out = render(format, batch, lineRows);
