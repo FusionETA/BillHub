@@ -3,10 +3,16 @@
 // selection on the Bills tab.
 //
 //   node scripts/demo-payrun.js --tenant DCGLOBAL
+//   node scripts/demo-payrun.js --tenant DCGLOBAL --cimb
 //   node scripts/demo-payrun.js --tenant DCGLOBAL --no-sync
 //
 // Six bills by default: four suppliers, two utilities. All AUTHORISED, so they
 // land straight in Awaiting payment.
+//
+// --cimb seeds suppliers only, at banks on CIMB's list. A CIMB account pays
+// suppliers and never JomPay, so utilities in that run would only produce a
+// refusal; and CIMB names 33 IBG participants against Hong Leong's 113, so a
+// supplier has to be at one of those to produce a line at all.
 //
 // The payee bank details are written to Bills Hub, not to Xero. Xero's API
 // accepts a Contact's BatchPayments block and then silently keeps only
@@ -44,6 +50,17 @@ const BILLS = [
   { name: 'Telekom Malaysia Berhad',         bankAccountName: '8888',             account: '100288473019', code: 'TM',   details: 'BM 69', email: '',                          amount:  459.20, ref: 'TM 1026' }
 ];
 
+// Banks on CIMB's own BNM list, so every line resolves to a two-digit code.
+const CIMB_BILLS = [
+  { name: 'Lembah Jaya Hardware Sdn Bhd',  bankAccountName: 'Maybank',            account: '512088143077', code: 'LJH', details: 'MA 12', email: 'ar@lembahjaya.example.com',  amount: 2140.00, ref: 'LJH-26-0912' },
+  { name: 'Pacific Linen Supply Sdn Bhd',  bankAccountName: 'CIMB Bank Berhad',   account: '8009471263',   code: 'PLS', details: 'MA 12', email: 'billing@paclinen.example.com', amount: 5675.30, ref: 'PL/2609/0441' },
+  { name: 'Teratai Engineering Sdn Bhd',   bankAccountName: 'Public Bank Berhad', account: '3188204551',   code: 'TES', details: 'HG 7',  email: 'accounts@teratai.example.com', amount:  980.45, ref: 'TE-0926-33' },
+  { name: 'Suria Cold Chain Sdn Bhd',      bankAccountName: 'RHB Bank Berhad',    account: '21409500117722', code: 'SCC', details: 'BM 69', email: 'ap@suriacold.example.com',   amount: 1312.75, ref: 'SCC26/0908' },
+  // One at a bank Hong Leong lists and CIMB does not, so the refusal shows up
+  // in a run rather than only in a unit test.
+  { name: 'Mahkota Investment Advisory Sdn Bhd', bankAccountName: 'Alliance Investment Bank', account: '140910020099881', code: 'MIA', details: 'HQ', email: '', amount: 4400.00, ref: 'MIA-2609-02' }
+];
+
 (async () => {
   // Writing to Xero is the entire job here, so refuse early and clearly rather
   // than failing on the first contact.
@@ -73,7 +90,8 @@ const BILLS = [
   const t = org.xero_tenant_id;
   console.log(`\nSeeding a pay run in "${orgName}"\n`);
 
-  for (const b of BILLS) {
+  const set = process.argv.includes('--cimb') ? CIMB_BILLS : BILLS;
+  for (const b of set) {
     const saved = (await xero.api(ACCOUNT, t, '/Contacts', {
       method: 'POST',
       body: { Contacts: [{
@@ -110,8 +128,10 @@ const BILLS = [
     console.log(`  ${b.name.slice(0, 36).padEnd(38)} ${rail.padEnd(9)} ${String(b.amount.toFixed(2)).padStart(9)}  ${b.bankAccountName}`);
   }
 
-  const transfers = BILLS.filter((b) => !/^\d{4,5}$/.test(b.bankAccountName)).length;
-  console.log(`\n  ${transfers} bank transfer + ${BILLS.length - transfers} JomPay = two files from one selection.`);
+  const transfers = set.filter((b) => !/^\d{4,5}$/.test(b.bankAccountName)).length;
+  console.log(set === CIMB_BILLS
+    ? `\n  ${transfers} supplier(s) for the CIMB bulk payment sheet. No utilities: CIMB does not pay JomPay.`
+    : `\n  ${transfers} bank transfer + ${set.length - transfers} JomPay = two files from one selection.`);
 
   if (!process.argv.includes('--no-sync')) {
     console.log('\nSyncing…');
