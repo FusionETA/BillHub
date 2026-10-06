@@ -861,6 +861,22 @@ function check(name, ok, detail) {
 
     check('a bill with no date falls back to the payment period',
       /1026$/.test(ref2('BM', mk('69', 'TNB', 1, null))));
+
+    // The abbreviation is a name mapping, not a payee field — Xero drops its
+    // Code on write and writing it to the payee row would freeze that row
+    // against the next sync of the fields being corrected in Xero.
+    const codes = require('../lib/payeeCodes');
+    check('a utility abbreviation resolves from the contact name',
+      codes.codeFor('Tenaga Nasional Berhad - MA 75-02') === 'TNB');
+    check('through every variant of that name',
+      codes.codeFor('Syarikat Bekalan Air Selangor Sd') === 'AIS'
+      && codes.codeFor('Air Selangor Sdn Bhd') === 'AIS');
+    check('and a supplier with no entry resolves to nothing, not a guess',
+      codes.codeFor('Celcom Mobile Sdn Bhd - JS 17-1') === null);
+    check('so its narrative simply leaves that part out',
+      ref2('MA', mk('49', codes.codeFor('Celcom Mobile Sdn Bhd'), 1, '2026-09-18')) === 'MA 49 0926');
+    check('while one with an entry carries it',
+      ref2('MA', mk('49', codes.codeFor('Indah Water Konsortium Sdn Bhd-MA Shop 49'), 1, '2026-09-18')) === 'MA 49 ID 0926');
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

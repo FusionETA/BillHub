@@ -17,6 +17,7 @@ const grantSource = require('../lib/grantSource');
 const bills = require('../models/bills');
 const batches = require('../models/batches');
 const testMode = require('../lib/testMode');
+const payeeCodes = require('../lib/payeeCodes');
 const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
@@ -256,7 +257,10 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
       // the lot reference, and who the bank should send the credit advice to.
       payeeBankAccountName: p?.bank_account_name || null,
       payeeDetails: p?.details || null,
-      payeeCode: p?.payee_code || null,
+      // Xero's Code when it has one, otherwise Ayu Borneo's own abbreviation
+      // for that utility. Resolved here rather than stored on the payee, so a
+      // re-sync of the contact is unaffected.
+      payeeCode: p?.payee_code || payeeCodes.codeFor(r.contact_name) || null,
       payeeEmail: p?.email || null,
       amount: Number(r.amount_due),
       billDate: r.bill_date || null,

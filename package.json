@@ -35,7 +35,8 @@
     "demo-hlb": "node scripts/demo-hlb.js",
     "demo-payrun": "node scripts/demo-payrun.js",
     "bank-names": "node scripts/bank-names.js",
-    "ready-to-pay": "node scripts/ready-to-pay.js"
+    "ready-to-pay": "node scripts/ready-to-pay.js",
+    "payee-codes": "node scripts/payee-codes.js"
   },
   "engines": {
     "node": ">=18"
