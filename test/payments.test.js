@@ -1022,6 +1022,53 @@ function check(name, ok, detail) {
       (await pay.formatForRail(1, hlbBank, 'biller')).format_key === 'hlb-jompay');
   }
 
+  // ── The template is the bank's own form ───────────────────────────────────
+  // The client's standard for this was "don't change a single thing inside",
+  // and they were right to set it there: a filled sheet that does not look
+  // like the blank one is a sheet somebody has to check before trusting.
+  {
+    console.log('\nCIMB templates reproduce the form, not an approximation of it');
+    const { readZip, inflate, fillTemplate } = require('../lib/xlsx');
+    const fs = require('fs');
+    const path = require('path');
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'templates', 'cimb-bulk.xlsx'));
+
+    const out = fillTemplate(tpl, [
+      ['Lembah Jaya Hardware Sdn Bhd', 'LJH', '27-Malayan Banking Berhad', '512088143077', 2140, 'LJH 26 0912', 'MA 12 LJH 0926']
+    ], { headerRows: 3 });
+    const sheet = inflate(readZip(out).find((z) => /sheet1/.test(z.name))).toString('utf8');
+    const styles = inflate(readZip(out).find((z) => z.name === 'xl/styles.xml')).toString('utf8');
+
+    const rowOf = (n) => (sheet.match(new RegExp('<row[^>]*r="' + n + '"[\\s\\S]*?</row>')) || [''])[0];
+    check('row 1 stays hidden, as it is in their workbook', / r="1"[^>]*hidden="1"/.test(sheet), rowOf(1).slice(0, 60));
+    check('and the header rows keep their heights',
+      /r="3"[^>]*ht="28.5"/.test(sheet), rowOf(3).slice(0, 50));
+
+    // Grey header, red on the mandatory columns, black on the optional.
+    const fonts = (styles.match(/<fonts[\s\S]*?<\/fonts>/) || [''])[0];
+    const fills = (styles.match(/<fills[\s\S]*?<\/fills>/) || [''])[0];
+    check('their grey is carried through', /FF969696/.test(fills), fills.slice(0, 120));
+    check('and their red', /FFFF0000/.test(fonts), fonts.slice(0, 120));
+
+    // Every written cell is styled, or the filled rows look foreign.
+    const data = rowOf(4);
+    const cells = (data.match(/<c r="[A-Z]+4"/g) || []).length;
+    const styled = (data.match(/<c r="[A-Z]+4" s="\d+"/g) || []).length;
+    check('every data cell carries the bank\'s own column style', cells > 0 && cells === styled, { cells, styled });
+
+    // Text format on the account column is what stops Excel rewriting a long
+    // account number as 3.45679E+11 when somebody opens and saves the file.
+    const sIdx = (data.match(/<c r="D4" s="(\d+)"/) || [])[1];
+    const xfs = [...styles.split('<cellXfs')[1].matchAll(/<xf ([^>]*?)(?:\/>|>)/g)].map((m) => m[1]);
+    check('the account column is formatted as text', /numFmtId="49"/.test(xfs[Number(sIdx)] || ''), xfs[Number(sIdx)]);
+
+    // The prototype row defines the styling and must not survive as data.
+    const values = [...data.matchAll(/<t[^>]*>([^<]*)</g)].map((m) => m[1]);
+    check('the prototype row is consumed, not left in the file',
+      values[0] === 'Lembah Jaya Hardware Sdn Bhd', values);
+    check('and nothing is written past the rows given', rowOf(5) === '', rowOf(5));
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
