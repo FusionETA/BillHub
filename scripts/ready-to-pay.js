@@ -2,6 +2,7 @@
 //
 //   node scripts/ready-to-pay.js                 organisations, best first
 //   node scripts/ready-to-pay.js --entity ABPJ   the bills in one of them
+//   node scripts/ready-to-pay.js --bank CIMB     only organisations paying from CIMB
 //
 // Read-only. Makes no Xero call and changes nothing.
 //
@@ -50,10 +51,32 @@ function assess(row) {
   );
   if (!rows.length) { console.log('\nNo bills are awaiting payment.\n'); return; }
 
+  // Which bank an organisation pays from, and therefore which files it
+  // produces. The layout follows the paying account, so this is the only
+  // thing that decides whether a run comes out as ConnectFirst or
+  // BizConverter — and an organisation can have accounts at both.
+  const accounts = await db.query(
+    `SELECT xero_tenant_id, name, bank_name, is_default, format_key
+       FROM bank_accounts WHERE account_id = ? AND enabled = 1
+      ORDER BY is_default DESC, name`,
+    [ACCOUNT]
+  );
+  const banksFor = new Map();
+  for (const a of accounts) {
+    if (!banksFor.has(a.xero_tenant_id)) banksFor.set(a.xero_tenant_id, []);
+    banksFor.get(a.xero_tenant_id).push(a);
+  }
+  const bankOf = (a) => {
+    const name = `${a.bank_name || ''} ${a.name || ''}`;
+    if (banks.bnmCode(a.bank_name) === '35' || /\bCIMB\b/i.test(name)) return 'CIMB';
+    if (banks.bankCode(a.bank_name, 'duitnow') === 'HLBB' || /HONG\s*LEONG/i.test(name)) return 'Hong Leong';
+    return a.bank_name || '(no bank set)';
+  };
+
   const orgs = new Map();
   for (const r of rows) {
     const key = r.entity || r.xero_tenant_id;
-    if (!orgs.has(key)) orgs.set(key, { name: r.entity_name || key, bills: [] });
+    if (!orgs.has(key)) orgs.set(key, { name: r.entity_name || key, tenantId: r.xero_tenant_id, bills: [] });
     orgs.get(key).bills.push({ ...r, ...assess(r) });
   }
 
@@ -69,21 +92,71 @@ function assess(row) {
         + Number(b.amount_due).toFixed(2).padStart(11) + '   ' + b.why);
     }
     const ok = org.bills.filter((b) => b.ok);
+    // Which account to choose in the dialog, and therefore which files come
+    // out. An organisation with accounts at two banks produces different
+    // files depending on this one dropdown.
+    const accts = banksFor.get(org.tenantId) || [];
+    if (accts.length) {
+      console.log('\n  Paid from:');
+      for (const a of accts) {
+        const b = bankOf(a);
+        const files = b === 'CIMB'
+          ? 'BizConverter bulk + JomPAY sheets'
+          : b === 'Hong Leong' ? 'ConnectFirst + JomPay workbooks'
+          : 'ConnectFirst + JomPay workbooks (no bank set, so the default)';
+        console.log('    ' + (a.is_default ? '* ' : '  ') + String(a.name).slice(0, 34).padEnd(36)
+          + String(b).padEnd(14) + files);
+      }
+      if (accts.length > 1) console.log('    * is what the dialog preselects.');
+    } else {
+      console.log('\n  No paying account for this organisation — run Sync accounts & payees.');
+    }
+
     console.log(`\n  Tick the ${ok.length} marked yes. `
-      + `${ok.filter((b) => b.rail === 'Transfer').length} go in the ConnectFirst file, `
+      + `${ok.filter((b) => b.rail === 'Transfer').length} go in the transfer file, `
       + `${ok.filter((b) => b.rail === 'JomPay').length} in the JomPay file.\n`);
     await db.close();
     return;
   }
 
-  const summary = [...orgs.entries()].map(([code, o]) => {
+  let summary = [...orgs.entries()].map(([code, o]) => {
     const ok = o.bills.filter((b) => b.ok);
+    const accts = banksFor.get(o.tenantId) || [];
+    // The default is what the dialog preselects, so it is the one that
+    // decides the file unless somebody changes it in the dialog.
+    const paying = [...new Set(accts.map(bankOf))];
     return {
       code, name: o.name, total: o.bills.length,
+      bank: paying[0] || '(no paying account)',
+      alsoAt: paying.slice(1),
       transfer: ok.filter((b) => b.rail === 'Transfer').length,
       biller: ok.filter((b) => b.rail === 'JomPay').length
     };
   });
+
+  const wantBank = (arg('--bank') || '').trim();
+  if (wantBank) {
+    const needle = wantBank.toLowerCase();
+    summary = summary.filter((x) =>
+      [x.bank, ...x.alsoAt].some((b) => String(b).toLowerCase().includes(needle)));
+    // Show the bank that matched. Leaving the default there answers a
+    // different question from the one asked, and "Maybank" under --bank CIMB
+    // reads as a bug.
+    for (const x of summary) {
+      const all = [x.bank, ...x.alsoAt];
+      const hit = all.find((b) => String(b).toLowerCase().includes(needle));
+      if (hit && hit !== x.bank) {
+        x.alsoAt = all.filter((b) => b !== hit);
+        x.bank = hit + '*';
+      }
+    }
+    if (!summary.length) {
+      console.log(`\nNo organisation with bills awaiting payment pays from a bank matching "${wantBank}".`);
+      console.log('Banks in use: ' + [...new Set(accounts.map(bankOf))].join(', ') + '\n');
+      await db.close();
+      return;
+    }
+  }
   // Both rails clean is what produces two files from one selection, so those
   // sort first — that is the run worth testing with.
   summary.sort((a, b) =>
@@ -94,10 +167,13 @@ function assess(row) {
   // ABMANAGEMENT ran straight into its own name and could not be copied.
   const w = Math.max(6, ...summary.map((s) => String(s.code).length)) + 2;
   console.log('\nOrganisations with bills awaiting payment — best to test with first\n');
-  console.log('  ' + 'CODE'.padEnd(w) + 'ORGANISATION'.padEnd(32) + 'CLEAN'.padStart(6) + 'TRANSFER'.padStart(10) + 'JOMPAY'.padStart(8) + '  OF');
+  console.log('  ' + 'CODE'.padEnd(w) + 'ORGANISATION'.padEnd(28) + 'PAYS FROM'.padEnd(16)
+    + 'CLEAN'.padStart(6) + 'TRANSFER'.padStart(10) + 'JOMPAY'.padStart(8) + '  OF');
   for (const s of summary) {
     const both = s.transfer > 0 && s.biller > 0 ? '  <- both rails' : '';
-    console.log('  ' + String(s.code).padEnd(w) + String(s.name).slice(0, 30).padEnd(32)
+    const bank = s.bank + (s.alsoAt.length ? ' +' + s.alsoAt.length : '');
+    console.log('  ' + String(s.code).padEnd(w) + String(s.name).slice(0, 26).padEnd(28)
+      + String(bank).slice(0, 14).padEnd(16)
       + String(s.transfer + s.biller).padStart(6) + String(s.transfer).padStart(10)
       + String(s.biller).padStart(8) + '  ' + String(s.total) + both);
   }
