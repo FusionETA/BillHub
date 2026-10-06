@@ -108,12 +108,13 @@ async function create(accountId, {
       await conn.execute(
         `INSERT INTO payment_batch_lines
           (batch_id, bill_id, xero_invoice_id, contact_name, payee_account, payee_bank,
-           payee_bank_account_name, payee_details, payee_code, payee_email, amount, reference)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+           payee_bank_account_name, payee_details, payee_code, payee_email, amount,
+           bill_date, reference)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [batchId, l.billId, l.xeroInvoiceId, l.contactName || null,
          l.payeeAccount || null, l.payeeBank || null,
          l.payeeBankAccountName || null, l.payeeDetails || null, l.payeeCode || null, l.payeeEmail || null,
-         Number(l.amount).toFixed(2), l.reference || null]
+         Number(l.amount).toFixed(2), l.billDate || null, l.reference || null]
       );
     }
     return { id: batchId, reference, total };

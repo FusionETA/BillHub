@@ -342,6 +342,10 @@ CREATE TABLE IF NOT EXISTS payment_batch_lines (
   payee_code      VARCHAR(40),
   payee_email     VARCHAR(500),
   amount          DECIMAL(16,2) NOT NULL,
+  -- The bill's own date, not the payment's. The JomPay Ref-2 carries the
+  -- period the bill is FOR, which is the only thing telling four identical
+  -- monthly bills apart; the payment date is the same on every line.
+  bill_date       DATE NULL,
   reference       VARCHAR(255),
   xero_payment_id CHAR(36) NULL,
   -- Per line, so attaching to twenty bills can resume rather than start over.

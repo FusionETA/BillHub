@@ -823,32 +823,48 @@ function check(name, ok, detail) {
                   payment_mode: 'DUITNW',
                   columns: [{ header: 'Biller', field: 'billerCode', transform: 'digits' },
                             { header: 'Ref-1', field: 'payeeAccount' },
-                            { header: 'Ref-2', field: 'reference', transform: 'safe', maxLength: 20 },
+                            { header: 'Ref-2', field: 'referenceDated', transform: 'ref', maxLength: 20 },
                             { header: 'Amount', field: 'amount' }] };
-    const mk = (ref, amt) => ({ contact_name: 'Indah Water', payee_bank_account_name: '68502',
+    const mk = (ref, amt, billDate) => ({ contact_name: 'Indah Water', payee_bank_account_name: '68502',
                                 payee_account: '10159261735', payee_details: 'MA Shop 49, 49-1, 49-2',
-                                amount: amt, reference: ref });
+                                amount: amt, reference: ref, bill_date: billDate });
     const run = (lines) => bf.render(jom,
       { reference: 'X', payment_date: '2026-10-02', currency_code: 'MYR', total: 1,
         line_count: lines.length, entity_code: 'ABMA' }, lines);
 
-    const one = run([mk('BZ052254', 184.15)]);
-    check('Ref-2 is the bill reference, not the premises narrative',
-      one.text.trim().split('|')[2] === 'BZ052254', one.text.trim());
+    const one = run([mk('BZ052254', 184.15, '2026-09-18')]);
+    check('Ref-2 is the bill reference plus the bill\'s own period',
+      one.text.trim().split('|')[2] === 'BZ052254 0926', one.text.trim());
+    check('and the hyphens in a reference survive, so it matches Xero',
+      run([mk('MA 12-1', 1, '2026-02-19')]).text.trim().split('|')[2] === 'MA 12-1 0226');
 
-    const over = run([mk('10159261735 - MA49, 49-1, 49-2', 184.15)]);
-    check('a long bill reference is still held to 20',
-      over.text.trim().split('|')[2].length <= 20, over.text.trim().split('|')[2]);
+    const over = run([mk('10159261735 - MA49, 49-1, 49-2', 184.15, '2026-08-19')]);
+    const ref2 = over.text.trim().split('|')[2];
+    check('a long bill reference is still held to 20', ref2.length <= 20, ref2);
+    check('and the period is kept, not the tail of the reference', /0826$/.test(ref2), ref2);
 
-    // The second half of what she spotted: with the reference fixed, three of
-    // those lines are still indistinguishable, because three Xero bills share
-    // a reference and an amount. Real payments, but they read as duplicates.
-    const dupes = run([mk('MA 12-1', 194.65), mk('MA 12-1', 252.85), mk('MA 12-1', 252.85), mk('MA 12-1', 252.85)]);
-    const dupWarn = dupes.warnings.find((w) => /identical/.test(w));
-    check('identical lines are reported', Boolean(dupWarn), dupes.warnings);
-    check('and it names which ones', dupWarn && /Lines 2, 3, 4/.test(dupWarn), dupWarn);
-    check('a file with none of them says nothing',
-      !run([mk('A', 1), mk('B', 2)]).warnings.some((w) => /identical/.test(w)));
+    // The period is the bill's, not the payment's. Four monthly bills paid
+    // together share a payment date, so using that would leave them identical
+    // — which is the whole thing this had to fix.
+    const months = run([mk('MA 12-1', 194.65, '2026-01-20'), mk('MA 12-1', 252.85, '2026-02-19'),
+                        mk('MA 12-1', 252.85, '2026-03-19'), mk('MA 12-1', 252.85, '2026-04-20')]);
+    const refs = months.text.trim().split(/\r?\n/).map((l) => l.split('|')[2]);
+    check('four monthly bills come out as four different lines',
+      new Set(refs).size === 4, refs);
+    check('each carrying its own month', refs.join(',') === 'MA 12-1 0126,MA 12-1 0226,MA 12-1 0326,MA 12-1 0426', refs);
+    check('so nothing is reported as identical any more',
+      !months.warnings.some((w) => /identical/.test(w)), months.warnings);
+
+    // The duplicate guard still has to fire when lines really are alike.
+    const same = run([mk('MA 12-1', 252.85, '2026-02-19'), mk('MA 12-1', 252.85, '2026-02-19')]);
+    const dupWarn = same.warnings.find((w) => /identical/.test(w));
+    check('two bills alike in every respect are still reported', Boolean(dupWarn), same.warnings);
+    check('and it names which ones', dupWarn && /Lines 1, 2/.test(dupWarn), dupWarn);
+
+    // A bill with no date falls back rather than emitting a bare reference.
+    check('a bill with no date still gets a period',
+      /0{0,1}1026$/.test(run([mk('NODATE', 1, null)]).text.trim().split('|')[2]),
+      run([mk('NODATE', 1, null)]).text.trim());
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

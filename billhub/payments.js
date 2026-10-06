@@ -110,6 +110,7 @@ function lineForRender(l) {
     payee_code: l.payeeCode,
     payee_email: l.payeeEmail,
     amount: l.amount,
+    bill_date: l.billDate,
     reference: l.reference
   };
 }
@@ -258,6 +259,7 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
       payeeCode: p?.payee_code || null,
       payeeEmail: p?.email || null,
       amount: Number(r.amount_due),
+      billDate: r.bill_date || null,
       reference: (r.reference || r.invoice_number || '').slice(0, 255)
     };
   });
