@@ -28,9 +28,14 @@ const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.
 // one and lists 113. The same payee can be payable from one bank and not the
 // other, so assessing everything against Hong Leong quietly overstated what a
 // CIMB organisation could pay.
-function assess(row, scheme) {
+function assess(row, scheme, paysBiller = true) {
   const bankish = row.bank_account_name || row.bank_name || '';
   if (banks.isBillerCode(String(bankish).trim())) {
+    // Ayu Borneo pay every JomPay bill from Hong Leong, so a utility in a
+    // CIMB organisation is not ready — it is ready from a different account.
+    if (!paysBiller) {
+      return { rail: 'JomPay', ok: false, why: 'JomPay is not paid from this account — use the Hong Leong one' };
+    }
     return row.account_number
       ? { rail: 'JomPay', ok: true, why: 'biller ' + String(bankish).trim() }
       : { rail: 'JomPay', ok: false, why: 'no account number for Ref-1' };
@@ -67,6 +72,7 @@ function assess(row, scheme) {
   // BizConverter — and an organisation can have accounts at both.
   const accounts = await db.query(
     `SELECT xero_tenant_id, name, bank_name, is_default, format_key
+       , biller_format_key
        FROM bank_accounts WHERE account_id = ? AND enabled = 1
       ORDER BY is_default DESC, name`,
     [ACCOUNT]
@@ -86,16 +92,23 @@ function assess(row, scheme) {
   // Which code table each organisation's bills are judged against, decided by
   // the account its dialog preselects.
   const schemeFor = new Map();
+  const billerFor = new Map();
   for (const [tenantId, accts] of banksFor) {
     const chosen = accts.find((a) => a.is_default) || accts[0];
-    schemeFor.set(tenantId, chosen && bankOf(chosen) === 'CIMB' ? 'bnm' : 'duitnow');
+    const isCimb = chosen && bankOf(chosen) === 'CIMB';
+    schemeFor.set(tenantId, isCimb ? 'bnm' : 'duitnow');
+    // A JomPay bill is payable here only if some account in the organisation
+    // actually pays JomPay, which a CIMB-only organisation does not.
+    billerFor.set(tenantId, accts.some((a) => a.biller_format_key || bankOf(a) !== 'CIMB'));
   }
 
   const orgs = new Map();
   for (const r of rows) {
     const key = r.entity || r.xero_tenant_id;
     if (!orgs.has(key)) orgs.set(key, { name: r.entity_name || key, tenantId: r.xero_tenant_id, bills: [] });
-    orgs.get(key).bills.push({ ...r, ...assess(r, schemeFor.get(r.xero_tenant_id) || 'duitnow') });
+    orgs.get(key).bills.push({ ...r, ...assess(r,
+      schemeFor.get(r.xero_tenant_id) || 'duitnow',
+      billerFor.get(r.xero_tenant_id) !== false) });
   }
 
   const want = (arg('--entity') || '').trim().toUpperCase();
@@ -122,7 +135,7 @@ function assess(row, scheme) {
       for (const a of accts) {
         const b = bankOf(a);
         const files = b === 'CIMB'
-          ? 'BizConverter bulk + JomPAY sheets'
+          ? 'BizConverter bulk sheet (suppliers only, no JomPay)'
           : b === 'Hong Leong' ? 'ConnectFirst + JomPay workbooks'
           : 'ConnectFirst + JomPay workbooks (no bank set, so the default)';
         console.log('    ' + (a.is_default ? '* ' : '  ') + String(a.name).slice(0, 34).padEnd(36)
@@ -133,9 +146,24 @@ function assess(row, scheme) {
       console.log('\n  No paying account for this organisation — run Sync accounts & payees.');
     }
 
-    console.log(`\n  Tick the ${ok.length} marked yes. `
-      + `${ok.filter((b) => b.rail === 'Transfer').length} go in the transfer file, `
-      + `${ok.filter((b) => b.rail === 'JomPay').length} in the JomPay file.\n`);
+    // Two accounts can mean two runs. Saying "tick the nine" when three of
+    // them cannot go through the preselected account sends someone into a
+    // dialog that will refuse them.
+    const t = ok.filter((b) => b.rail === 'Transfer').length;
+    const j = ok.filter((b) => b.rail === 'JomPay').length;
+    const chosen = accts.find((a) => a.is_default) || accts[0];
+    const chosenPaysBiller = chosen && (chosen.biller_format_key || bankOf(chosen) !== 'CIMB');
+
+    console.log('');
+    if (!j || chosenPaysBiller) {
+      console.log(`  Tick the ${ok.length} marked yes — ${t} in the transfer file, ${j} in the JomPay file.`);
+    } else {
+      const other = accts.find((a) => a !== chosen && (a.biller_format_key || bankOf(a) !== 'CIMB'));
+      console.log(`  Two runs, because ${chosen.name} does not pay JomPay:`);
+      console.log(`    ${t} transfer bill(s) from ${chosen.name}`);
+      console.log(`    ${j} JomPay bill(s) from ${other ? other.name : 'a Hong Leong account — this organisation has none'}`);
+    }
+    console.log('');
     await db.close();
     return;
   }

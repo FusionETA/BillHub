@@ -148,9 +148,13 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
     const format = await formatForRail(accountId, plan.bank, rail);
     const warnings = [];
     if (!format) {
-      warnings.push(rail === 'biller'
-        ? `${lines.length} bill(s) are paid by JomPay biller code, and ${plan.bank.name} has no JomPay layout set. Choose one on the Bank files tab.`
-        : `${plan.bank.name} has no payment file layout set.`);
+      warnings.push(
+        rail !== 'biller'
+          ? `${plan.bank.name} has no payment file layout set.`
+          : doesBiller(plan.bank)
+            ? `${lines.length} bill(s) are paid by JomPay biller code, and ${plan.bank.name} has no JomPay layout set.`
+            : `${lines.length} bill(s) are paid by JomPay biller code, and ${plan.bank.name} does not pay JomPay. `
+              + 'Leave them out of this run and pay them from the Hong Leong account instead.');
     }
     // Only the lines on this rail can be missing an account, so recount.
     const withoutAccount = lines.filter((l) => !l.payeeAccount);
@@ -177,7 +181,15 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
 // needs nothing set before its files are right.
 async function formatForRail(accountId, bank, rail) {
   if (rail !== 'biller') return formatFor(accountId, bank);
-  return bankFormats.get(accountId, bank.biller_format_key || layoutsFor(bank).biller);
+  const key = bank.biller_format_key || layoutsFor(bank).biller;
+  return key ? bankFormats.get(accountId, key) : null;
+}
+
+// Whether this account is one JomPay is paid from at all. A CIMB account is
+// not, and saying "no layout set" would send someone off to configure one
+// rather than to the account that should be paying.
+function doesBiller(bank) {
+  return Boolean(bank.biller_format_key || layoutsFor(bank).biller);
 }
 
 // ── Building a batch ────────────────────────────────────────────────────────
@@ -291,8 +303,12 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
 // sheets and one at Hong Leong produces ConnectFirst, because that is the only
 // answer that could be right. `format_key` on the account still overrides,
 // which is what a second CIMB product or a customer-edited layout would need.
+// CIMB has no biller entry on purpose. BizConverter does have a JomPAY sheet,
+// but Ayu Borneo pay suppliers from CIMB and every JomPay bill from Hong
+// Leong, so routing a utility there would be producing a file nobody uploads.
+// Setting biller_format_key on the account turns it on if that ever changes.
 const LAYOUTS = {
-  cimb: { transfer: 'cimb-bulk', biller: 'cimb-jompay' },
+  cimb: { transfer: 'cimb-bulk', biller: null },
   hlb: { transfer: 'hlb-connectfirst', biller: 'hlb-jompay' }
 };
 
@@ -648,5 +664,5 @@ async function attachReceipt(accountId, batchId, { fileName, contentType, bytes,
 
 module.exports = {
   syncBankAccounts, syncPayees, syncAll,
-  planBatch, planRuns, createBatch, createRuns, formatForRail, renderFile, lineForRender, railOf, splitByRail, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
+  planBatch, planRuns, createBatch, createRuns, formatForRail, doesBiller, renderFile, lineForRender, railOf, splitByRail, postToXero, attachReceipt, receiptFileName, formatFor, DETAILS_MAX, RECEIPT_MAX_BYTES
 };

@@ -962,6 +962,8 @@ function check(name, ok, detail) {
     check('the transfer row carries the two-digit BNM code', t[2] === '27', t);
     check('and strips the hyphen CIMB forbids', t[5] === 'SOS 26 1041', t[5]);
 
+    // Not selected by default any more — Ayu Borneo pay JomPay from Hong
+    // Leong — but still correct, and still reachable via biller_format_key.
     const j = row(jom, { contact_name: 'Indah Water', payee_bank_account_name: '7011',
                          payee_account: '880142300561', payee_details: 'BM 69',
                          payee_code: 'IWK', amount: 128.90, bill_date: '2026-09-18' });
@@ -974,13 +976,33 @@ function check(name, ok, detail) {
     const abm = (await req('GET', '/api/payments/bank-accounts?all=true', { cookie })).body.bankAccounts[0];
     await db.execute("UPDATE bank_accounts SET bank_name = 'CIMB Bank Berhad', format_key = NULL, biller_format_key = NULL WHERE id = ?", [abm.id]);
     const cimbBank = await require('../models/bankAccounts').getById(1, abm.id);
-    check('a CIMB paying account picks the CIMB layouts without being told',
-      (await pay.formatForRail(1, cimbBank, 'transfer')).format_key === 'cimb-bulk'
-      && (await pay.formatForRail(1, cimbBank, 'biller')).format_key === 'cimb-jompay');
+    check('a CIMB paying account picks the CIMB layout without being told',
+      (await pay.formatForRail(1, cimbBank, 'transfer')).format_key === 'cimb-bulk');
+    // Ayu Borneo pay suppliers from CIMB and every JomPay bill from Hong
+    // Leong, so a utility routed to CIMB would make a file nobody uploads.
+    check('and does NOT take JomPay, because that is not what the account is for',
+      (await pay.formatForRail(1, cimbBank, 'biller')) === null);
+    check('which the code can state rather than infer', pay.doesBiller(cimbBank) === false);
+
+    const bills = await db.query(
+      "SELECT id FROM bills WHERE account_id = 1 AND xero_tenant_id = ? LIMIT 20", [cimbBank.xero_tenant_id]);
+    const mixed = await pay.planRuns(1, { billIds: bills.map((b) => b.id),
+      bankAccountId: cimbBank.id, paymentDate: '2026-10-06' }).catch(() => null);
+    if (mixed) {
+      const biller = mixed.runs.find((r) => r.rail === 'biller');
+      if (biller) {
+        check('and says where those bills should go instead',
+          biller.warnings.some((w) => /does not pay JomPay/.test(w) && /Hong Leong/.test(w)),
+          biller.warnings);
+      }
+    }
+
     await db.execute("UPDATE bank_accounts SET bank_name = 'Hong Leong Bank' WHERE id = ?", [abm.id]);
     const hlbBank = await require('../models/bankAccounts').getById(1, abm.id);
     check('and a Hong Leong one still picks Hong Leong',
       (await pay.formatForRail(1, hlbBank, 'transfer')).format_key === 'hlb-connectfirst');
+    check('and still takes JomPay',
+      (await pay.formatForRail(1, hlbBank, 'biller')).format_key === 'hlb-jompay');
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
