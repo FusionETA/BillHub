@@ -35,6 +35,7 @@ OUT = os.path.join(HERE, '..', 'templates')
 
 SHEETS = [
     ('Bulk Payments - Without Email', 'cimb-bulk.xlsx'),
+    ('Bulk Payments - With Email', 'cimb-bulk-email.xlsx'),
     ('JomPAY Payment', 'cimb-jompay.xlsx'),
 ]
 HEADER_ROWS = 3

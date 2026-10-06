@@ -959,8 +959,25 @@ function check(name, ok, detail) {
     const t = row(bulk, { contact_name: 'Sinaran Office Supplies Sdn Bhd', payee_account: '514027718842',
                           payee_bank_account_name: 'Maybank', payee_code: 'SOS',
                           reference: 'SOS-26-1041', amount: 3280, bill_date: '2026-09-18' });
-    check('the transfer row carries the two-digit BNM code', t[2] === '27', t);
+    // The whole dropdown entry, not the two digits its column rule describes:
+    // the rule is about what BizConverter writes into the .txt, and their own
+    // filled sheets carry the label.
+    check('the transfer row carries the full BNM dropdown entry',
+      t[2] === '27-Malayan Banking Berhad', t);
     check('and strips the hyphen CIMB forbids', t[5] === 'SOS 26 1041', t[5]);
+
+    // The same seven columns plus six that drive the advice email.
+    const mail = await bankFormats.get(1, 'cimb-bulk-email');
+    check('the with-email layout is shipped with thirteen columns',
+      mail && JSON.parse(typeof mail.columns === 'string' ? mail.columns : JSON.stringify(mail.columns)).length === 13,
+      mail && mail.columns.length);
+    const m = row(mail, { contact_name: 'Sinaran Office Supplies Sdn Bhd', payee_account: '514027718842',
+                          payee_bank_account_name: 'Maybank', payee_code: 'SOS', payee_email: 'ar@sinaran.example.com',
+                          reference: 'SOS-26-1041', amount: 3280, bill_date: '2026-09-18' });
+    check('it carries the payee email', m[6] === 'ar@sinaran.example.com', m[6]);
+    check('and the bill date in the day/month/year the column names', m[10] === '18/09/2026', m[10]);
+    check('and repeats the reference as the detail number', m[9] === m[5], [m[5], m[9]]);
+    check('and the amount as the detail amount', m[12] === m[4], [m[4], m[12]]);
 
     // Not selected by default any more — Ayu Borneo pay JomPay from Hong
     // Leong — but still correct, and still reachable via biller_format_key.
