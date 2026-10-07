@@ -1171,6 +1171,38 @@ function check(name, ok, detail) {
       'the bank-code warning should not claim rejection wording it does not own');
   }
 
+  // ── A download must be what its name says ─────────────────────────────────
+  // The batch is named when it is created, from the layout — ".xlsm", because
+  // CIMB's layout fills their macro workbook. What comes out when that
+  // workbook is not on the server is the .xlsx fallback sheet. Serving one
+  // under the other's name is precisely what Excel refuses to open, and it
+  // did: "the file format or file extension is not valid".
+  {
+    console.log('\nA download is named for what was produced');
+    const bankFormats = require('../models/bankFormats');
+    const bf = require('../lib/bankFile');
+    await bankFormats.seedBuiltIns();
+    const fmt = await bankFormats.get(1, 'cimb-bulk');
+    check('the layout asks for the macro workbook', /\.xlsm$/.test(fmt.template), fmt.template);
+
+    const out = bf.render(fmt,
+      { reference: 'PAY-NAME', payment_date: '2026-10-07', currency_code: 'MYR', total: 1, line_count: 1, entity_code: 'MA' },
+      [{ contact_name: 'A Supplier Sdn Bhd', payee_account: '512088143077',
+         payee_bank_account_name: 'Maybank', amount: 1, bill_date: '2026-09-24' }]);
+
+    const fs = require('fs');
+    const path = require('path');
+    const have = fs.existsSync(path.join(__dirname, '..', 'templates', 'local', 'CIMB BizConverter.xlsm'));
+    if (have) {
+      check('with the workbook present it is .xlsm', /\.xlsm$/.test(out.fileName), out.fileName);
+    } else {
+      check('without it the name falls back to .xlsx too, not just the content',
+        /\.xlsx$/.test(out.fileName), out.fileName);
+      check('and it says why', out.warnings.some((w) => /BizConverter/.test(w)), out.warnings);
+    }
+    check('something was still produced either way', Boolean(out.buffer), out.fileName);
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();

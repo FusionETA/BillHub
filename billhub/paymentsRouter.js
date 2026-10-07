@@ -275,6 +275,19 @@ router.get('/batches/:id(\\d+)', async (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
+const extOf = (name) => String(name || '').split('.').pop().toLowerCase();
+
+// A macro-enabled workbook is a different type from a plain one, and Excel
+// checks that the type matches the extension before it will open anything.
+const MIME = {
+  xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  csv: 'text/csv; charset=utf-8',
+  txt: 'text/plain; charset=utf-8'
+};
+const mimeFor = (name) => MIME[extOf(name)] || 'application/octet-stream';
+
 // Downloading is what moves a batch from ready to downloaded, so the list shows
 // what is still waiting to be sent to the bank.
 router.get('/batches/:id(\\d+)/file', async (req, res) => {
@@ -283,11 +296,16 @@ router.get('/batches/:id(\\d+)/file', async (req, res) => {
     const { text, buffer, fileName, batch } = await payments.renderFile(accountId, Number(req.params.id));
     if (batch.status === 'cancelled') return res.status(409).json({ error: 'That batch was cancelled.' });
     await batches.markDownloaded(accountId, batch.id);
-    const name = batch.file_name || fileName;
+    // The name the renderer produced wins over the one stored when the batch
+    // was created. They differ when the bank's own workbook is not on this
+    // server: the batch was named .xlsm from the layout, and what came out is
+    // the .xlsx fallback sheet. Serving one as the other is exactly what Excel
+    // means by "the file format or file extension is not valid".
+    const stored = batch.file_name || fileName;
+    const name = extOf(stored) === extOf(fileName) ? stored : fileName;
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
     if (buffer) {
-      // The bank's own workbook, header and all.
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Type', mimeFor(name));
       return res.send(buffer);
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
