@@ -145,8 +145,27 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
     const lines = split[rail];
     if (!lines.length) continue;
 
-    const format = await formatForRail(accountId, plan.bank, rail);
+    let format = await formatForRail(accountId, plan.bank, rail);
     const warnings = [];
+
+    // The with-email sheet is preferred and is not always possible: its
+    // email column is mandatory, and most payees have none. Rather than
+    // produce lines CIMB will refuse, step down to the plain sheet for that
+    // run and say so — the alternative is a wall of per-line warnings and a
+    // file that cannot be used.
+    if (format && NEEDS_EMAIL[format.format_key]) {
+      const without = lines.filter((l) => !String(l.payeeEmail || '').trim());
+      if (without.length) {
+        const plain = await bankFormats.get(accountId, NEEDS_EMAIL[format.format_key]);
+        if (plain) {
+          warnings.push(`${without.length} of ${lines.length} payee(s) have no email address, `
+            + `so the plain "${plain.name}" sheet was used instead of the one that emails an advice: `
+            + `${without.slice(0, 3).map((l) => l.contactName).join(', ')}${without.length > 3 ? '…' : ''}. `
+            + 'Add their addresses in Xero to get the advice sheet.');
+          format = plain;
+        }
+      }
+    }
     if (!format) {
       warnings.push(
         rail !== 'biller'
@@ -308,8 +327,14 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
 // but Ayu Borneo pay suppliers from CIMB and every JomPay bill from Hong
 // Leong, so routing a utility there would be producing a file nobody uploads.
 // Setting biller_format_key on the account turns it on if that ever changes.
+// A layout that cannot be used without something, and what to use instead.
+const NEEDS_EMAIL = { 'cimb-bulk-email': 'cimb-bulk' };
+
 const LAYOUTS = {
-  cimb: { transfer: 'cimb-bulk', biller: null },
+  // The with-email sheet is the one Ayu Borneo want: it sends the payee an
+  // advice. It needs an email address on every line, so a payee without one
+  // is reported rather than silently producing a line CIMB will refuse.
+  cimb: { transfer: 'cimb-bulk-email', biller: null },
   hlb: { transfer: 'hlb-connectfirst', biller: 'hlb-jompay' }
 };
 

@@ -1007,8 +1007,10 @@ function check(name, ok, detail) {
     const abm = (await req('GET', '/api/payments/bank-accounts?all=true', { cookie })).body.bankAccounts[0];
     await db.execute("UPDATE bank_accounts SET bank_name = 'CIMB Bank Berhad', format_key = NULL, biller_format_key = NULL WHERE id = ?", [abm.id]);
     const cimbBank = await require('../models/bankAccounts').getById(1, abm.id);
-    check('a CIMB paying account picks the CIMB layout without being told',
-      (await pay.formatForRail(1, cimbBank, 'transfer')).format_key === 'cimb-bulk');
+    // The advice sheet is preferred; planRuns steps down to the plain one when
+    // a payee has no email, which is tested on its own further down.
+    check('a CIMB paying account picks a CIMB layout without being told',
+      (await pay.formatForRail(1, cimbBank, 'transfer')).format_key === 'cimb-bulk-email');
     // Ayu Borneo pay suppliers from CIMB and every JomPay bill from Hong
     // Leong, so a utility routed to CIMB would make a file nobody uploads.
     check('and does NOT take JomPay, because that is not what the account is for',
@@ -1225,6 +1227,53 @@ function check(name, ok, detail) {
       check('and it says why', out.warnings.some((w) => /BizConverter/.test(w)), out.warnings);
     }
     check('something was still produced either way', Boolean(out.buffer), out.fileName);
+  }
+
+  // ── The advice sheet, when it is possible ─────────────────────────────────
+  // The client prefers the sheet that emails the payee an advice. Its email
+  // column is mandatory and 87% of their payees have no address, so making it
+  // the default outright would mostly produce lines CIMB refuses.
+  {
+    console.log('\nPreferring the advice sheet without insisting on it');
+    const bf = require('../lib/bankFile');
+    const bankFormats = require('../models/bankFormats');
+    const pay = require('../billhub/payments');
+    await bankFormats.seedBuiltIns();
+
+    check('a CIMB account asks for the advice sheet first',
+      (await pay.formatForRail(1, { name: 'CIMB Bank 123', bank_name: 'CIMB Bank Berhad' }, 'transfer'))
+        .format_key === 'cimb-bulk-email');
+
+    // The entity code leads Hong Leong's narrative by their own convention and
+    // says nothing on a CIMB statement read against one entity.
+    const batch = { reference: 'X', payment_date: '2026-10-07', currency_code: 'MYR',
+                    total: 1, line_count: 1, entity_code: 'ABSETIAALAM' };
+    const line = { contact_name: 'Cwc Eng Plt', payee_account: '3208379420',
+                   payee_bank_account_name: 'PBBEMYKL', payee_details: 'Aud',
+                   payee_email: 'ar@cwc.example.com', reference: 'IV-06472', amount: 1,
+                   bill_date: '2026-04-26' };
+    const cols = (key, fmt) => bf.render(fmt, batch, [line]).text.trim().split(/\r?\n/)[1]
+      .split(',').map((v) => v.replace(/^"|"$/g, ''));
+
+    const plain = await bankFormats.get(1, 'cimb-bulk');
+    check('the CIMB description drops the entity code',
+      cols('cimb-bulk', plain)[6] === 'Aud 0426', cols('cimb-bulk', plain)[6]);
+    const mail = await bankFormats.get(1, 'cimb-bulk-email');
+    const m = cols('cimb-bulk-email', mail);
+    check('on the advice sheet too, in both description columns',
+      m[8] === 'Aud 0426' && m[11] === 'Aud 0426', { short: m[8], long: m[11] });
+
+    // Hong Leong keeps it: "BM 69 TNB 0826" is their own file's convention.
+    const hlb = await bankFormats.get(1, 'hlb-connectfirst');
+    const h = bf.render(hlb, { ...batch, entity_code: 'BM' },
+      [{ ...line, payee_details: '69', payee_code: 'TNB' }]).text.trim().split(/\r?\n/)[1].split(',');
+    check('Hong Leong still leads with the entity', /BM 69 TNB 0426/.test(h.join(' ')), h.join(' ').slice(0, 90));
+
+    // A mandatory column left empty is a line the bank refuses.
+    const noEmail = bf.render(mail, batch, [{ ...line, payee_email: null }]);
+    check('a missing mandatory field is reported by name',
+      noEmail.warnings.some((w) => /Beneficiary Email Address is required and empty/.test(w)),
+      noEmail.warnings);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
