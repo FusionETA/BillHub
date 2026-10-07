@@ -1135,6 +1135,42 @@ function check(name, ok, detail) {
     check('a missing sheet name is refused by name', err && /No Such Sheet/.test(err.message), err && err.message);
   }
 
+  // ── Warnings name the right bank ──────────────────────────────────────────
+  // A run paid from CIMB reported that a payee's bank was "not a bank Hong
+  // Leong lists", which sends whoever reads it to check the wrong list.
+  {
+    console.log('\nWarnings name the bank that was actually consulted');
+    const bf = require('../lib/bankFile');
+    const fmt = (bank) => ({ format_key: 'x', bank_name: bank, delimiter: ',', extension: 'csv',
+                             include_header: 0, columns: [{ header: 'c', field: 'payeeBankCode' }] });
+    const warn = (bank, value) => bf.render(fmt(bank),
+      { reference: 'X', payment_date: '2026-10-07', currency_code: 'MYR', total: 1, line_count: 1 },
+      [{ contact_name: 'C', payee_account: '1', payee_bank_account_name: value, amount: 1 }]).warnings.join(' ');
+
+    check('a CIMB run says CIMB', /does not name a bank CIMB Bank Berhad lists/.test(warn('CIMB Bank Berhad', 'Bank of Narnia')),
+      warn('CIMB Bank Berhad', 'Bank of Narnia'));
+    check('and a Hong Leong run says Hong Leong',
+      /does not name a bank Hong Leong Bank lists/.test(warn('Hong Leong Bank', 'Bank of Narnia')));
+
+    // A SWIFT code is wrong in a different way from a name nobody recognises:
+    // it identifies the bank exactly, so it is a question rather than a gap.
+    check('a SWIFT code is called one', /SWIFT\/BIC code/.test(warn('CIMB Bank Berhad', 'PBBEMYKL')),
+      warn('CIMB Bank Berhad', 'PBBEMYKL'));
+    check('and a bank name is not mistaken for one',
+      !/SWIFT/.test(warn('CIMB Bank Berhad', 'Bank of Narnia')));
+    // Eight or eleven characters with MY in the country position; "MAYBANK" is
+    // seven letters and must not trip it.
+    check('nor is something merely short and upper case',
+      !/SWIFT/.test(warn('CIMB Bank Berhad', 'MAYBANK')));
+
+    // The dialog used to append "the bank will reject them" to every warning,
+    // including one about a missing template, which it does not.
+    const planner = require('../billhub/payments');
+    check('the missing-account warning carries its own consequence',
+      /will reject them/.test(warn('CIMB Bank Berhad', 'Bank of Narnia')) === false,
+      'the bank-code warning should not claim rejection wording it does not own');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();

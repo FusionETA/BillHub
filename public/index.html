@@ -602,7 +602,10 @@
 
               {preview.warnings.map((w, i) => (
                 <div key={i} style={{ gridColumn: '1 / -1', background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#6b4d00', lineHeight: 1.6 }}>
-                  {w} Those lines would be blank, and the bank will reject them.
+                  {/* Each warning says its own consequence. Appending one
+                      here put "the bank will reject them" on the end of a
+                      message about a missing template, which it does not. */}
+                  {w}
                 </div>
               ))}
 

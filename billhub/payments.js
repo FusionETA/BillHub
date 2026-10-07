@@ -160,7 +160,8 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
     const withoutAccount = lines.filter((l) => !l.payeeAccount);
     if (withoutAccount.length) {
       warnings.push(`${withoutAccount.length} payee(s) have no ${rail === 'biller' ? 'biller account number' : 'bank account number'}: `
-        + `${withoutAccount.slice(0, 5).map((l) => l.contactName).join(', ')}${withoutAccount.length > 5 ? '…' : ''}.`);
+        + `${withoutAccount.slice(0, 5).map((l) => l.contactName).join(', ')}${withoutAccount.length > 5 ? '…' : ''}. `
+        + 'Those lines would be blank, and the bank will reject them.');
     }
 
     runs.push({
