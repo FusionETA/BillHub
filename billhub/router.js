@@ -191,11 +191,41 @@ router.post('/sync', async (req, res) => {
   }
 });
 
+// Pull only if the data has gone stale, and do not make the caller wait for
+// it. Opening the tab should give you current figures without turning every
+// page load into forty-one organisations' worth of Xero calls — so this is
+// what the UI asks on load, and the answer is usually "no, it is fresh".
+router.post('/sync/if-stale', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    const minutes = Number(process.env.SYNC_STALE_MINUTES || 10);
+    const [last, age] = await Promise.all([
+      syncState.lastSyncedAt(accountId),
+      syncState.minutesSinceSync(accountId)
+    ]);
+    // Never synced at all counts as stale; so does a clock that has slipped
+    // backwards, since the alternative is never syncing again.
+    const stale = age == null || age >= minutes;
+    const running = sync.isRunning(accountId);
+
+    if (stale && !running) {
+      // Deliberately not awaited: the page is waiting on this response, and a
+      // sync of every organisation takes about ten seconds.
+      sync.syncAccount(accountId).catch((e) => console.error(`[sync] on-load for ${accountId}:`, e.message));
+    }
+    res.json({
+      stale, running: running || stale, started: stale && !running,
+      lastSyncedAt: last, staleAfterMinutes: minutes, ageMinutes: age
+    });
+  } catch (err) { fail(res, err); }
+});
+
 router.get('/sync/status', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
     const rows = await syncState.listByAccount(accountId);
     res.json({
+      running: sync.isRunning(accountId),
       lastSyncedAt: await syncState.lastSyncedAt(accountId),
       tenants: rows.map((r) => ({
         tenantId: r.xero_tenant_id,

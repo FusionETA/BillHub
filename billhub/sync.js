@@ -214,7 +214,36 @@ function parseXeroDate(v) {
 }
 
 // Sync every connected org for an account, a few at a time.
-async function syncAccount(accountId, { full = false, tenantIds = null } = {}) {
+// One sync per account at a time. Without this, a scheduler tick landing on
+// top of a page load — or two people opening the tab at once — runs the whole
+// thing twice in parallel, against a Xero rate budget that is already shared
+// with WazzOCR. A second caller waits for the one in flight and gets its
+// result, which is what they wanted anyway.
+const inFlight = new Map();
+
+function isRunning(accountId) {
+  return inFlight.has(Number(accountId));
+}
+
+// Not async on purpose: an async function wraps its return in a fresh
+// promise, so a second caller would get an equivalent one rather than the
+// one in flight. Equivalent is enough for the result and not enough for
+// cancellation or for telling, in a test, that only one run happened.
+function syncAccount(accountId, opts = {}) {
+  const key = Number(accountId);
+  // A targeted sync of two organisations is not the same job as a full one,
+  // so only the unqualified runs share.
+  const shareable = !opts.tenantIds && !opts.full;
+  if (shareable && inFlight.has(key)) return inFlight.get(key);
+  const run = syncAccountOnce(accountId, opts);
+  if (shareable) {
+    inFlight.set(key, run);
+    run.finally(() => inFlight.delete(key));
+  }
+  return run;
+}
+
+async function syncAccountOnce(accountId, { full = false, tenantIds = null } = {}) {
   const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   let targets = await entities.listSyncable(accountId, wazzocrAccountId);
   if (tenantIds && tenantIds.length) {
@@ -284,4 +313,4 @@ function stopScheduler() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
-module.exports = { syncTenant, syncAccount, startScheduler, stopScheduler };
+module.exports = { syncTenant, syncAccount, isRunning, startScheduler, stopScheduler };

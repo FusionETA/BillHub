@@ -956,6 +956,42 @@
         }
       }
 
+      // Freshen on arrival, but only when the figures have actually gone stale,
+      // and never make the page wait for it. Syncing on every load would be
+      // forty-one organisations of Xero calls each time somebody refreshes or
+      // opens a second tab, against a rate budget shared with WazzOCR; syncing
+      // only at login would leave a tab open all day showing yesterday.
+      useEffect(() => {
+        let stopped = false;
+        let timer = null;
+
+        const waitForIt = async () => {
+          // Poll rather than hold the request open: the sync takes about ten
+          // seconds and the page is already usable with the figures it has.
+          for (let i = 0; i < 40 && !stopped; i += 1) {
+            await new Promise((r) => { timer = setTimeout(r, 3000); });
+            if (stopped) return;
+            const st = await api.get('/api/bills/sync/status').catch(() => null);
+            if (!st || st.running) continue;
+            setSyncing(false);
+            reload();
+            if (onSynced) onSynced();
+            return;
+          }
+          if (!stopped) setSyncing(false);
+        };
+
+        api.post('/api/bills/sync/if-stale')
+          .then((r) => {
+            if (stopped || !r || !r.running) return;
+            setSyncing(true);
+            return waitForIt();
+          })
+          .catch(() => {});
+
+        return () => { stopped = true; if (timer) clearTimeout(timer); };
+      }, []);
+
       // Exports exactly what is on screen — the current filters, not the whole table.
       function exportCsv() {
         const head = ['Entity', 'Entity name', 'From', 'Status', 'Reference', 'Bill date', 'Due date', 'Paid', 'Due', 'Currency', 'Files'];

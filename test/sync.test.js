@@ -307,6 +307,31 @@ const requests = [];
   await db.execute(`DELETE FROM ${CONNECTIONS} WHERE xero_tenant_id LIKE 'synct%'`);
   await db.execute(`DELETE FROM ${GRANTS} WHERE id = ?`, [grantId]);
 
+  // ── One sync at a time ────────────────────────────────────────────────────
+  // Opening the tab now asks for a sync when the figures have gone stale, so
+  // a scheduler tick landing on a page load — or two people arriving at once
+  // — would otherwise run forty-one organisations twice in parallel, against
+  // a Xero rate budget already shared with WazzOCR.
+  {
+    console.log('\nOne sync at a time');
+    check('nothing running to begin with', sync.isRunning(1) === false);
+
+    const a = sync.syncAccount(1);
+    check('it reports itself while in flight', sync.isRunning(1) === true);
+    const b = sync.syncAccount(1);
+    check('a second caller gets the one already going', a === b);
+
+    const [ra, rb] = await Promise.all([a, b]);
+    check('and the same result', ra === rb, { ra: !!ra, rb: !!rb });
+    check('and it lets go afterwards', sync.isRunning(1) === false);
+
+    // A targeted run is a different job and must not be handed the broad one.
+    const c = sync.syncAccount(1, { tenantIds: ['tenant-abm'] });
+    check('a targeted sync is not shared with a full one', c !== sync.syncAccount(1));
+    await c.catch(() => {});
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   await db.close();
   process.exit(fail ? 1 : 0);

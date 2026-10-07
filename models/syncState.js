@@ -75,4 +75,18 @@ async function lastSyncedAt(accountId) {
   return row?.at || null;
 }
 
-module.exports = { get, listByAccount, markRunning, markOk, markError, markContactsCursor, lastSyncedAt };
+// How long ago, measured by the database rather than by subtracting a MySQL
+// DATETIME from Date.now(). A DATETIME carries no timezone, so that
+// subtraction is only right when the database session and the Node process
+// agree on one — and when they do not it is out by whole hours, which showed
+// up here as a sync that had happened five hours in the future.
+async function minutesSinceSync(accountId) {
+  const row = await db.getOne(
+    `SELECT TIMESTAMPDIFF(MINUTE, MAX(last_run_at), NOW()) AS mins
+       FROM bill_sync_state WHERE account_id = ? AND last_status = 'ok'`,
+    [accountId]
+  );
+  return row && row.mins != null ? Number(row.mins) : null;
+}
+
+module.exports = { get, listByAccount, markRunning, markOk, markError, markContactsCursor, lastSyncedAt, minutesSinceSync };
