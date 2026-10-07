@@ -1168,8 +1168,18 @@ function check(name, ok, detail) {
 
     // A SWIFT code is wrong in a different way from a name nobody recognises:
     // it identifies the bank exactly, so it is a question rather than a gap.
-    check('a SWIFT code is called one', /SWIFT\/BIC code/.test(warn('CIMB Bank Berhad', 'PBBEMYKL')),
-      warn('CIMB Bank Berhad', 'PBBEMYKL'));
+    // A BIC names exactly one institution, so a confirmed one resolves and
+    // an unconfirmed one warns — it does not fall back to a near match.
+    const banks2 = require('../lib/malaysianBanks');
+    check('a confirmed BIC resolves in both schemes',
+      banks2.bankCode('PBBEMYKL', 'bnm') === '33' && banks2.bankCode('PBBEMYKL', 'duitnow') === 'PBBB');
+    check('including one carrying a branch', banks2.bankCode('PBBEMYKLXXX', 'bnm') === '33');
+    check('an unconfirmed BIC resolves to nothing rather than something close',
+      banks2.fromBic('ABCDMYKL') === null && banks2.bankCode('ABCDMYKL', 'bnm') === null);
+    check('and a bank name is not mistaken for a BIC', banks2.fromBic('Public Bank Berhad') === null);
+    check('an unmapped SWIFT code is still called one',
+      /SWIFT\/BIC code/.test(warn('CIMB Bank Berhad', 'ABCDMYKL')),
+      warn('CIMB Bank Berhad', 'ABCDMYKL'));
     check('and a bank name is not mistaken for one',
       !/SWIFT/.test(warn('CIMB Bank Berhad', 'Bank of Narnia')));
     // Eight or eleven characters with MY in the country position; "MAYBANK" is
