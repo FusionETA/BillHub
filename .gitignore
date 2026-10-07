@@ -7,3 +7,5 @@ certs/
 .DS_Store
 .devdata/
 *.bak
+templates/local/*
+!templates/local/README

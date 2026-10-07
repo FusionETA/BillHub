@@ -1,0 +1,10 @@
+# The bank's own workbooks live here, supplied per deployment.
+#
+# CIMB BizConverter is CIMB's licensed tool and a filled copy carries the
+# customer's company details, so it cannot ship with Bills Hub or go in a
+# public repository. Save yours from Excel as .xlsm (which keeps the macros
+# and, unlike .xls, is a format Bills Hub can fill) and drop it in here:
+#
+#   CIMB BizConverter.xlsm
+#
+# Everything Bills Hub does not write is copied through byte for byte.

@@ -1069,6 +1069,72 @@ function check(name, ok, detail) {
     check('and nothing is written past the rows given', rowOf(5) === '', rowOf(5));
   }
 
+  // ── Filling one sheet of the bank's own workbook ──────────────────────────
+  // BizConverter is not an upload format, it is an application that reads a
+  // whole workbook: CompanyInfo is compulsory, the biller lists are looked up,
+  // and eighteen sheets have to be there. Handing it a one-sheet file was
+  // wrong — what it wants back is its own workbook with the payments in it.
+  {
+    console.log('\nFilling one sheet and leaving the rest alone');
+    const { readZip, writeZip, fillTemplate, sheetPathByName, inflate } = require('../lib/xlsx');
+
+    // A stand-in for BizConverter: several named sheets, a shared string
+    // table, and a macro part — the things that have to survive.
+    const sheetXml = (rows) =>
+      Buffer.from('<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        + '<sheetData>' + rows + '</sheetData></worksheet>');
+    const names = ['Introduction', 'CompanyInfo', 'Bulk Payments - With Email',
+                   'Bulk Payments - Without Email', 'BNM Code'];
+    const entries = [
+      { name: 'xl/workbook.xml', data: Buffer.from('<?xml version="1.0"?><workbook><sheets>'
+          + names.map((n, i) => `<sheet name="${n}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')
+          + '</sheets></workbook>') },
+      { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<?xml version="1.0"?><Relationships>'
+          + names.map((n, i) => `<Relationship Id="rId${i + 1}" Target="worksheets/sheet${i + 1}.xml"/>`).join('')
+          + '</Relationships>') },
+      { name: 'xl/sharedStrings.xml', data: Buffer.from('<sst><si><t>shared</t></si></sst>') },
+      { name: 'xl/vbaProject.bin', data: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3]) },
+      { name: 'xl/calcChain.xml', data: Buffer.from('<calcChain><c r="A1"/></calcChain>') }
+    ];
+    names.forEach((n, i) => entries.push({
+      name: `xl/worksheets/sheet${i + 1}.xml`,
+      data: sheetXml(`<row r="1"><c r="A1" t="inlineStr"><is><t>${n} header</t></is></c></row>`)
+    }));
+    const book = writeZip(entries);
+
+    check('a sheet is found by name, not by file order',
+      sheetPathByName(readZip(book), 'Bulk Payments - Without Email') === 'xl/worksheets/sheet4.xml',
+      sheetPathByName(readZip(book), 'Bulk Payments - Without Email'));
+
+    const filled = fillTemplate(book, [['Lembah Jaya', 'LJH', '27-Malayan Banking Berhad']],
+      { sheetName: 'Bulk Payments - Without Email', headerRows: 1 });
+    const after = readZip(filled);
+    const byName = Object.fromEntries(after.map((e) => [e.name, inflate(e)]));
+    const before = Object.fromEntries(readZip(book).map((e) => [e.name, inflate(e)]));
+
+    const target = 'xl/worksheets/sheet4.xml';
+    const others = Object.keys(before).filter((n) => n !== target && n !== 'xl/calcChain.xml');
+    const changed = others.filter((n) => !byName[n] || !byName[n].equals(before[n]));
+    check('every other part is byte for byte identical', changed.length === 0, changed);
+    check('including the other sheets', byName['xl/worksheets/sheet2.xml'].equals(before['xl/worksheets/sheet2.xml']));
+    check('the shared string table', byName['xl/sharedStrings.xml'].equals(before['xl/sharedStrings.xml']));
+    check('and the macros', byName['xl/vbaProject.bin'].equals(before['xl/vbaProject.bin']));
+
+    check('the named sheet has the records', /Lembah Jaya/.test(byName[target].toString('utf8')));
+    check('and keeps its own header row',
+      /Bulk Payments - Without Email header/.test(byName[target].toString('utf8')));
+    check('a sheet in the same workbook is untouched',
+      !/Lembah Jaya/.test(byName['xl/worksheets/sheet3.xml'].toString('utf8')));
+
+    // A stale calcChain against changed cells makes Excel call the file corrupt.
+    check('the stale calcChain is dropped', !byName['xl/calcChain.xml']);
+
+    let err = null;
+    try { fillTemplate(book, [['x']], { sheetName: 'No Such Sheet', headerRows: 1 }); }
+    catch (e) { err = e; }
+    check('a missing sheet name is refused by name', err && /No Such Sheet/.test(err.message), err && err.message);
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();

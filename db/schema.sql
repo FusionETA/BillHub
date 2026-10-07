@@ -210,6 +210,10 @@ CREATE TABLE IF NOT EXISTS bank_formats (
   -- A workbook the bank supplied, with its header already in it. Rows go
   -- underneath; everything else in the file is left exactly as issued.
   template       VARCHAR(128) NULL,
+  -- Which sheet inside that template the records go into. A bank's own tool is
+  -- a whole workbook — BizConverter has eighteen sheets — so the file alone
+  -- does not say where to write.
+  template_sheet VARCHAR(64) NULL,
   template_header_rows INT NOT NULL DEFAULT 1,
   columns        JSON NOT NULL,
   header_row     JSON NULL,          -- optional file-level header record

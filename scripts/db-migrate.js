@@ -41,6 +41,12 @@ const hasColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: "bank_formats.template_sheet — which sheet of the bank's own workbook to fill",
+    check: hasColumn('bank_formats', 'template_sheet'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE bank_formats ADD COLUMN template_sheet VARCHAR(64) NULL'
+  },
+  {
     why: "payment_batch_lines.bill_date — the bill's own period, for the JomPay Ref-2",
     check: hasColumn('payment_batch_lines', 'bill_date'),
     needed: (row) => Number(row.n) === 0,
