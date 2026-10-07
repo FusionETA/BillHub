@@ -919,6 +919,20 @@ function check(name, ok, detail) {
       "SELECT name FROM bank_formats WHERE account_id = 1 AND format_key = 'hlb-jompay'");
     check('an account\'s own layout is left alone', mine && mine.name === 'Ours, edited', mine);
     await db.execute("DELETE FROM bank_formats WHERE account_id = 1 AND format_key = 'hlb-jompay'");
+
+    // The insert path, which only runs on a database that does not already
+    // have the layout — so every test here took the update path instead, and
+    // an INSERT listing seventeen columns against sixteen values went to a
+    // deployment before anything noticed.
+    await db.execute("DELETE FROM bank_formats WHERE account_id IS NULL AND format_key = 'cimb-bulk'");
+    await bankFormats.seedBuiltIns();
+    const reborn = await bankFormats.get(1, 'cimb-bulk');
+    check('a layout missing from the database is inserted, not just updated',
+      Boolean(reborn), 'cimb-bulk did not come back');
+    check('with every column it was given',
+      reborn && reborn.template_sheet === 'Bulk Payments - Without Email'
+      && Number(reborn.template_header_rows) === 3,
+      reborn && { sheet: reborn.template_sheet, hdr: reborn.template_header_rows });
   }
 
   // ── CIMB ──────────────────────────────────────────────────────────────────

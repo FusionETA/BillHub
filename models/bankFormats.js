@@ -48,7 +48,7 @@ async function seedBuiltIns() {
       `INSERT INTO bank_formats
         (account_id, format_key, name, bank_name, delimiter, extension, include_header,
          line_ending, quote_fields, date_format, payment_mode, template, template_sheet, template_header_rows, columns, verified, notes)
-       VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [f.format_key, f.name, f.bank_name, f.delimiter, f.extension, f.include_header,
        f.line_ending, f.quote_fields ? 1 : 0, f.date_format || 'YYYY-MM-DD', f.payment_mode || null,
        f.template || null, f.template_sheet || null, f.template_header_rows || 1,
