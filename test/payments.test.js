@@ -1209,7 +1209,9 @@ function check(name, ok, detail) {
     const bf = require('../lib/bankFile');
     await bankFormats.seedBuiltIns();
     const fmt = await bankFormats.get(1, 'cimb-bulk');
-    check('the layout asks for the macro workbook', /\.xlsm$/.test(fmt.template), fmt.template);
+    // BizConverter takes .xlsx and refuses .xlsm, so that is what the layout
+    // asks for — even though the copy on disk may well be the macro one.
+    check('the layout asks for a plain workbook', /\.xlsx$/.test(fmt.template), fmt.template);
 
     const out = bf.render(fmt,
       { reference: 'PAY-NAME', payment_date: '2026-10-07', currency_code: 'MYR', total: 1, line_count: 1, entity_code: 'MA' },
@@ -1218,9 +1220,13 @@ function check(name, ok, detail) {
 
     const fs = require('fs');
     const path = require('path');
-    const have = fs.existsSync(path.join(__dirname, '..', 'templates', 'local', 'CIMB BizConverter.xlsm'));
+    const local = path.join(__dirname, '..', 'templates', 'local');
+    const have = fs.existsSync(path.join(local, 'CIMB BizConverter.xlsx'))
+      || fs.existsSync(path.join(local, 'CIMB BizConverter.xlsm'));
     if (have) {
-      check('with the workbook present it is .xlsm', /\.xlsm$/.test(out.fileName), out.fileName);
+      check('what comes out is .xlsx either way', /\.xlsx$/.test(out.fileName), out.fileName);
+      check('with the macros taken out of it',
+        !require('../lib/xlsx').readZip(out.buffer).some((e) => /vba/i.test(e.name)));
     } else {
       check('without it the name falls back to .xlsx too, not just the content',
         /\.xlsx$/.test(out.fileName), out.fileName);
@@ -1279,6 +1285,50 @@ function check(name, ok, detail) {
     const cleared = inflate(e2.find((z) => z.name === sheetPathByName(e2, 'Bulk Payments - Without Email'))).toString('utf8');
     const dataRows = [...cleared.matchAll(/<row[^>]*r="(\d+)"/g)].map((m) => Number(m[1])).filter((n) => n > 3);
     check('an empty companion sheet is written, not left as it was', dataRows.length === 0, dataRows);
+  }
+
+  // ── BizConverter takes .xlsx ──────────────────────────────────────────────
+  // It refuses .xlsm, and the workbook a customer has is the macro one. Rather
+  // than make somebody re-save a file to a format nobody told them about, the
+  // macros come out when it is filled.
+  {
+    console.log('\nMacros come out, everything else stays');
+    const { readZip, writeZip, stripMacros, inflate } = require('../lib/xlsx');
+    const entries = [
+      { name: '[Content_Types].xml', data: Buffer.from('<Types>'
+          + '<Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>'
+          + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>'
+          + '</Types>') },
+      { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships>'
+          + '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/>'
+          + '<Relationship Id="rId24" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>'
+          + '</Relationships>') },
+      { name: 'xl/vbaProject.bin', data: Buffer.from([0xd0, 0xcf, 0x11, 0xe0]) },
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from('<worksheet><sheetData/></worksheet>') },
+      { name: 'xl/sharedStrings.xml', data: Buffer.from('<sst><si><t>keep me</t></si></sst>') }
+    ];
+    const out = readZip(stripMacros(readZip(writeZip(entries))).length
+      ? writeZip(stripMacros(readZip(writeZip(entries)))) : Buffer.alloc(0));
+
+    const names = out.map((e) => e.name);
+    check('the VBA part is gone', !names.includes('xl/vbaProject.bin'), names);
+    check('and everything else stays', names.includes('xl/sharedStrings.xml')
+      && names.includes('xl/worksheets/sheet1.xml'), names);
+
+    const ct = inflate(out.find((e) => e.name === '[Content_Types].xml')).toString('utf8');
+    check('the workbook is declared as a plain one',
+      /spreadsheetml\.sheet\.main\+xml/.test(ct) && !/macroEnabled/.test(ct), ct);
+    check('and the bin content type goes with it', !/Extension="bin"/.test(ct), ct);
+
+    const rels = inflate(out.find((e) => e.name === 'xl/_rels/workbook.xml.rels')).toString('utf8');
+    check('the relationship to the VBA project is removed', !/vbaProject/.test(rels), rels);
+    check('but the sheet relationship survives', /worksheets\/sheet1\.xml/.test(rels), rels);
+
+    // A rewritten part holds compressed bytes plus a crc; hand-building one
+    // put two empty files in the workbook the first time.
+    check('rewritten parts are not empty',
+      inflate(out.find((e) => e.name === '[Content_Types].xml')).length > 0
+      && inflate(out.find((e) => e.name === 'xl/_rels/workbook.xml.rels')).length > 0);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
