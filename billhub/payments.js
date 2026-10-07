@@ -148,22 +148,21 @@ async function planRuns(accountId, { billIds, bankAccountId, paymentDate }) {
     let format = await formatForRail(accountId, plan.bank, rail);
     const warnings = [];
 
-    // The with-email sheet is preferred and is not always possible: its
-    // email column is mandatory, and most payees have none. Rather than
-    // produce lines CIMB will refuse, step down to the plain sheet for that
-    // run and say so — the alternative is a wall of per-line warnings and a
-    // file that cannot be used.
-    if (format && NEEDS_EMAIL[format.format_key]) {
-      const without = lines.filter((l) => !String(l.payeeEmail || '').trim());
-      if (without.length) {
-        const plain = await bankFormats.get(accountId, NEEDS_EMAIL[format.format_key]);
-        if (plain) {
-          warnings.push(`${without.length} of ${lines.length} payee(s) have no email address, `
-            + `so the plain "${plain.name}" sheet was used instead of the one that emails an advice: `
-            + `${without.slice(0, 3).map((l) => l.contactName).join(', ')}${without.length > 3 ? '…' : ''}. `
-            + 'Add their addresses in Xero to get the advice sheet.');
-          format = plain;
-        }
+    // CIMB's two bulk sheets are both in the one workbook, so a run is not
+    // forced into either: the payees with an email go in the sheet that
+    // sends them an advice, the rest in the plain one. Worth saying, because
+    // the converter runs one module at a time and two populated sheets means
+    // two conversions.
+    if (format && PAIRED_SHEETS[format.format_key]) {
+      const withEmail = lines.filter((l) => String(l.payeeEmail || '').trim()).length;
+      const without = lines.length - withEmail;
+      if (withEmail && without) {
+        warnings.push(`${withEmail} payee(s) have an email address and ${without} do not, so both `
+          + 'CIMB sheets are filled — "With Email" for the first, "Without Email" for the rest. '
+          + 'Convert each module separately in BizConverter.');
+      } else if (!withEmail) {
+        warnings.push('No payee in this run has an email address, so only the "Without Email" '
+          + 'sheet is filled. Add addresses in Xero to have CIMB email an advice.');
       }
     }
     if (!format) {
@@ -327,9 +326,6 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
 // but Ayu Borneo pay suppliers from CIMB and every JomPay bill from Hong
 // Leong, so routing a utility there would be producing a file nobody uploads.
 // Setting biller_format_key on the account turns it on if that ever changes.
-// A layout that cannot be used without something, and what to use instead.
-const NEEDS_EMAIL = { 'cimb-bulk-email': 'cimb-bulk' };
-
 const LAYOUTS = {
   // The with-email sheet is the one Ayu Borneo want: it sends the payee an
   // advice. It needs an email address on every line, so a payee without one
@@ -432,9 +428,36 @@ async function renderFile(accountId, batchId) {
     batch.format_key || batch.bank_format_key || layoutsFor(batch).transfer);
   if (!format) throw err(`Bank format "${batch.format_key}" is not defined.`, 404);
   const lineRows = await batches.lines(batchId);
-  const out = render(format, batch, lineRows);
+  const split = await emailSplit(accountId, format, lineRows);
+  const out = render(format, batch, split.keep || lineRows, { companion: split.companion });
   return { ...out, batch, format };
 }
+
+// CIMB's two bulk sheets differ only in whether the payee is emailed an
+// advice, and both live in the same workbook. So a run is not forced into one
+// of them: the payees with an address go in the sheet that emails them, the
+// rest go in the plain one, and both sheets are written — which also clears
+// whatever the template had sitting in the one we are not using.
+async function emailSplit(accountId, format, lineRows) {
+  const mate = PAIRED_SHEETS[format.format_key];
+  if (!mate) return {};
+  const companionFormat = await bankFormats.get(accountId, mate);
+  if (!companionFormat) return {};
+  const hasEmail = (l) => Boolean(String(l.payee_email || '').trim());
+  // `format` is the one that keeps the lines it is for; the companion takes
+  // the others. Either side may end up empty, and writing an empty sheet is
+  // the point.
+  const mine = format.format_key === 'cimb-bulk-email' ? hasEmail : (l) => !hasEmail(l);
+  return {
+    keep: lineRows.filter(mine),
+    companion: { format: companionFormat, lines: lineRows.filter((l) => !mine(l)) }
+  };
+}
+
+const PAIRED_SHEETS = {
+  'cimb-bulk': 'cimb-bulk-email',
+  'cimb-bulk-email': 'cimb-bulk'
+};
 
 // ── Posting to Xero ─────────────────────────────────────────────────────────
 

@@ -1229,51 +1229,56 @@ function check(name, ok, detail) {
     check('something was still produced either way', Boolean(out.buffer), out.fileName);
   }
 
-  // ── The advice sheet, when it is possible ─────────────────────────────────
-  // The client prefers the sheet that emails the payee an advice. Its email
-  // column is mandatory and 87% of their payees have no address, so making it
-  // the default outright would mostly produce lines CIMB refuses.
+  // ── Both CIMB sheets, one workbook ────────────────────────────────────────
+  // The two bulk sheets differ only in whether CIMB emails the payee an
+  // advice, and both live in the same BizConverter. Forcing a run into one of
+  // them meant either lines the bank refuses, or no advice for the payees who
+  // could have had one — with 87% of payees lacking an address, almost always
+  // the latter.
   {
-    console.log('\nPreferring the advice sheet without insisting on it');
+    console.log('\nBoth CIMB sheets, filled from one run');
     const bf = require('../lib/bankFile');
     const bankFormats = require('../models/bankFormats');
-    const pay = require('../billhub/payments');
+    const { readZip, inflate } = require('../lib/xlsx');
     await bankFormats.seedBuiltIns();
 
-    check('a CIMB account asks for the advice sheet first',
-      (await pay.formatForRail(1, { name: 'CIMB Bank 123', bank_name: 'CIMB Bank Berhad' }, 'transfer'))
-        .format_key === 'cimb-bulk-email');
-
-    // The entity code leads Hong Leong's narrative by their own convention and
-    // says nothing on a CIMB statement read against one entity.
-    const batch = { reference: 'X', payment_date: '2026-10-07', currency_code: 'MYR',
-                    total: 1, line_count: 1, entity_code: 'ABSETIAALAM' };
-    const line = { contact_name: 'Cwc Eng Plt', payee_account: '3208379420',
-                   payee_bank_account_name: 'PBBEMYKL', payee_details: 'Aud',
-                   payee_email: 'ar@cwc.example.com', reference: 'IV-06472', amount: 1,
-                   bill_date: '2026-04-26' };
-    const cols = (key, fmt) => bf.render(fmt, batch, [line]).text.trim().split(/\r?\n/)[1]
-      .split(',').map((v) => v.replace(/^"|"$/g, ''));
-
-    const plain = await bankFormats.get(1, 'cimb-bulk');
-    check('the CIMB description drops the entity code',
-      cols('cimb-bulk', plain)[6] === 'Aud 0426', cols('cimb-bulk', plain)[6]);
     const mail = await bankFormats.get(1, 'cimb-bulk-email');
-    const m = cols('cimb-bulk-email', mail);
-    check('on the advice sheet too, in both description columns',
-      m[8] === 'Aud 0426' && m[11] === 'Aud 0426', { short: m[8], long: m[11] });
+    const plain = await bankFormats.get(1, 'cimb-bulk');
+    const batch = { reference: 'X', payment_date: '2026-10-07', currency_code: 'MYR',
+                    total: 4, line_count: 4, entity_code: 'ABSETIAALAM' };
+    const mk = (name, email) => ({ contact_name: name, payee_account: '512088143077',
+      payee_bank_account_name: 'Maybank', payee_details: 'Aud', payee_email: email,
+      reference: 'IV-1', amount: 1, bill_date: '2026-04-26' });
 
-    // Hong Leong keeps it: "BM 69 TNB 0826" is their own file's convention.
-    const hlb = await bankFormats.get(1, 'hlb-connectfirst');
-    const h = bf.render(hlb, { ...batch, entity_code: 'BM' },
-      [{ ...line, payee_details: '69', payee_code: 'TNB' }]).text.trim().split(/\r?\n/)[1].split(',');
-    check('Hong Leong still leads with the entity', /BM 69 TNB 0426/.test(h.join(' ')), h.join(' ').slice(0, 90));
+    const withEmail = [mk('Has Email Sdn Bhd', 'ar@has.example.com')];
+    const without = [mk('No Email Sdn Bhd', null)];
+    const out = bf.render(mail, batch, withEmail, { companion: { format: plain, lines: without } });
+    check('a workbook came out', Boolean(out.buffer));
 
-    // A mandatory column left empty is a line the bank refuses.
-    const noEmail = bf.render(mail, batch, [{ ...line, payee_email: null }]);
-    check('a missing mandatory field is reported by name',
-      noEmail.warnings.some((w) => /Beneficiary Email Address is required and empty/.test(w)),
-      noEmail.warnings);
+    const e = readZip(out.buffer);
+    const sheetText = (name) => {
+      const { sheetPathByName } = require('../lib/xlsx');
+      const path = sheetPathByName(e, name);
+      return inflate(e.find((z) => z.name === path)).toString('utf8');
+    };
+    const emailSheet = sheetText('Bulk Payments - With Email');
+    const plainSheet = sheetText('Bulk Payments - Without Email');
+
+    check('the payee with an address is on the advice sheet',
+      /Has Email Sdn Bhd/.test(emailSheet) && !/Has Email Sdn Bhd/.test(plainSheet));
+    check('and the one without is on the plain sheet',
+      /No Email Sdn Bhd/.test(plainSheet) && !/No Email Sdn Bhd/.test(emailSheet));
+    check('neither appears twice',
+      (emailSheet.match(/Has Email Sdn Bhd/g) || []).length === 1);
+
+    // Writing the companion sheet even when empty is what clears whatever the
+    // template had in it — otherwise a module nobody filled still converts.
+    const onlyEmail = bf.render(mail, batch, withEmail, { companion: { format: plain, lines: [] } });
+    const e2 = readZip(onlyEmail.buffer);
+    const { sheetPathByName } = require('../lib/xlsx');
+    const cleared = inflate(e2.find((z) => z.name === sheetPathByName(e2, 'Bulk Payments - Without Email'))).toString('utf8');
+    const dataRows = [...cleared.matchAll(/<row[^>]*r="(\d+)"/g)].map((m) => Number(m[1])).filter((n) => n > 3);
+    check('an empty companion sheet is written, not left as it was', dataRows.length === 0, dataRows);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
