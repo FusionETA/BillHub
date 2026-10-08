@@ -498,7 +498,7 @@ carries exactly this:
 | Field | Synced? | What it is |
 | --- | --- | --- |
 | `Contact.Name` | yes | the supplier |
-| `Contact.Addresses` | — | usually the *supplier's* own address, not the premises — but see below |
+| `Contact.Addresses` | — | the supplier's own address — or the premises, when the contact bills one |
 | `Reference`, `InvoiceNumber` | yes | free text |
 | `LineItems[].Description` | **no** | free text, often where a bookkeeper writes the premises |
 | `LineItems[].Tracking` | **no** | tracking category options, e.g. `Region: Tawau` |
@@ -509,9 +509,45 @@ The two unsynced ones are absent because the bill list is fetched
 limit. They are read one bill at a time, and only when a rule asks for them.
 
 So a premises address can only reach Bills Hub from the PDF — which is
-WazzOCR's job, and lands in `bills.premises_address` — or from text somebody
-typed. **Most bills will never have one**, and that is why there are two kinds
-of rule rather than one.
+WazzOCR's job, and lands in `bills.premises_address` — or from somewhere
+somebody put it. **Most bills will never have one**, and that is why there
+are two kinds of rule rather than one.
+
+An address rule is matched against these, in order, which is also
+cheapest-first:
+
+| Source | Cost | What it is |
+| --- | --- | --- |
+| `bills.premises_address` | free | Read off the document, or typed here. Authoritative. |
+| The supplier contact's address | one call **per contact** | Where somebody puts the premises in Xero. |
+| Reference and line descriptions | one call **per bill** | Where a bookkeeper writes it today. |
+
+On an account where one contact carries hundreds of bills, the contact is
+read once and the line items would be read hundreds of times — which is why
+the contact is tried first.
+
+#### The supplier contact's address
+
+Two things about it are easy to get wrong, both checked against real
+contacts rather than remembered.
+
+**Xero's UI and its API disagree about the names.** The "Billing address"
+somebody fills in comes back as `AddressType: POBOX`; "Delivery address" is
+`STREET`. Reading only `STREET` — which the first version did — reports an
+empty contact for a field somebody carefully filled in. Both are read.
+
+**Nobody agrees where the postcode goes.** Xero holds `City` and
+`PostalCode` as separate fields with no hint of order, and a Malaysian
+address prints `68100 Batu Caves` while the obvious join gives
+`Batu Caves, 68100`. Matching is containment on a stripped key, so one
+ordering silently fails against an otherwise identical address. The
+contact's address is therefore offered **both ways round**, rather than
+guessing a convention or loosening the matcher for everybody.
+
+Cached for half an hour, per contact. A contact that bills many premises can
+only hold one address, so this helps exactly where the contact is one per
+premises — `--addresses` says which situation a supplier is in, and
+distinguishes "none has an address" from "none could be read".
 
 The contact's own address is the one tempting exception. For a single
 contact billing many buildings it is the supplier's head office: the same on
@@ -525,10 +561,8 @@ npm run recharge-preview -- --addresses --supplier "Tenaga Nasional"
 ```
 
 reads the contacts (one call per fifty, not per bill) and says whether they
-all share one address — the supplier's — or have one each, which would make
-address rules viable. It distinguishes "none has an address" from "none
-could be read", because those are different answers and reporting the first
-when the second is true talks somebody out of an option that was open.
+all share one address — the supplier's — or have one each, which makes
+address rules the right tool for them.
 
 ### Two kinds of rule, tried in order
 

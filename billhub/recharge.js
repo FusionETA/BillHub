@@ -95,6 +95,69 @@ async function findOrCreateContact(accountId, tenantId, name) {
 const _textCache = new Map();          // billId -> { description, tracking, accountCode, at }
 const TEXT_TTL_MS = 5 * 60 * 1000;
 
+// The supplier contact's own address, which is where somebody can put the
+// premises when the bill itself does not carry one.
+//
+// Cached per CONTACT, not per bill. One contact carries 1,681 bills on this
+// account; fetching per bill would be 1,681 calls for one answer. An address
+// on a contact also changes about never, so the window is long.
+const _contactCache2 = new Map();      // `${tenantId}|${contactId}` -> { text, at }
+const CONTACT_TTL_MS = 30 * 60 * 1000;
+
+// Both address types, because Xero's UI and its API disagree about the
+// names: the "Billing address" somebody fills in comes back as POBOX, and
+// "Delivery address" as STREET. Reading only one is how a field somebody
+// carefully filled in goes unnoticed. Checked against real contacts rather
+// than remembered.
+// Emitted in both orders, because nobody agrees where the postcode goes.
+// Xero holds City and PostalCode as separate fields and gives no hint which
+// comes first; a Malaysian address prints "68100 Batu Caves" while the
+// obvious join produces "Batu Caves, 68100". Matching is containment on a
+// key with separators stripped, so one ordering silently fails to match an
+// address that is otherwise identical.
+//
+// Rather than guess a convention, or loosen the matcher for everybody, the
+// contact's address is offered both ways round and whichever the rule was
+// written as will match.
+function addressText(contact) {
+  const out = [];
+  for (const a of contact?.Addresses || []) {
+    const lines = [a.AddressLine1, a.AddressLine2, a.AddressLine3, a.AddressLine4]
+      .map((v) => String(v || '').trim()).filter(Boolean);
+    const city = String(a.City || '').trim();
+    const region = String(a.Region || '').trim();
+    const post = String(a.PostalCode || '').trim();
+    if (!lines.length && !city && !post) continue;
+
+    const cityFirst = [...lines, city, region, post].filter(Boolean).join(', ');
+    const postFirst = [...lines, post, city, region].filter(Boolean).join(', ');
+    out.push(cityFirst);
+    if (postFirst !== cityFirst) out.push(postFirst);
+  }
+  return out.join(' | ');
+}
+
+async function contactAddress(accountId, bill, { fetch = true } = {}) {
+  if (!bill.contact_id) return '';
+  const key = `${bill.xero_tenant_id}|${bill.contact_id}`;
+  const hit = _contactCache2.get(key);
+  if (hit && Date.now() - hit.at < CONTACT_TTL_MS) return hit.text;
+  if (!fetch) return '';
+
+  let text = '';
+  try {
+    const payload = await xero.api(accountId, bill.xero_tenant_id, `/Contacts/${bill.contact_id}`);
+    text = addressText(payload?.Contacts?.[0]);
+  } catch (e) {
+    console.error(`[recharge] could not read the contact for bill ${bill.id}: ${e.message}`);
+  }
+  // Cached either way: a contact that cannot be read fails every time, and
+  // asking again on every bill would turn one dead organisation into a
+  // steady trickle of calls that can never work.
+  _contactCache2.set(key, { text, at: Date.now() });
+  return text;
+}
+
 // The parts of a bill that cost nothing to look at.
 function localFields(bill) {
   return {
@@ -138,14 +201,25 @@ async function remoteFields(accountId, bill, { fetch = true } = {}) {
   return out;
 }
 
-// Everything an address rule can be matched against: what somebody read off
-// the document, plus the free text where a bookkeeper writes the premises.
+// Everything an address rule can be matched against, best source first:
+//
+//   bills.premises_address   read off the document by WazzOCR, or typed here
+//   the contact's address    where somebody puts the premises in Xero when
+//                            the contact is one per premises
+//   reference, line items    free text, where a bookkeeper writes it
+//
+// A read address is the whole answer and nothing is fetched for it. The
+// other two each cost a Xero call, the contact one per contact and the line
+// items one per bill — so the contact is tried first, being far cheaper on
+// an account where one contact carries hundreds of bills.
 async function premisesText(accountId, bill, { fetch = true } = {}) {
   const f = localFields(bill);
   const local = [f.premises, f.reference, f.invoice_number].filter(Boolean).join(' ');
-  // A read address is the whole answer; there is nothing better to go and ask
-  // Xero for.
   if (f.premises) return { text: local, source: bill.premises_source || 'manual' };
+
+  const contact = await contactAddress(accountId, bill, { fetch });
+  if (contact) return { text: `${local} ${contact}`.trim(), source: 'contact' };
+
   const r = await remoteFields(accountId, bill, { fetch });
   return { text: `${local} ${r.description}`.trim(), source: r.description ? 'xero' : 'reference' };
 }
@@ -835,5 +909,6 @@ module.exports = {
   decide, loadRules, premisesText, planRun, createRun, postRun, suggestions,
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
-  isPaid, OUTCOMES, _contactCache, _textCache
+  isPaid, OUTCOMES, contactAddress, addressText,
+  _contactCache, _textCache, _contactCache2
 };

@@ -21,10 +21,17 @@ const calls = [];
 let invoiceSeq = 0;
 let failOn = null;        // { tenantId, type } -> that Invoices POST throws
 let lineItems = {};       // xeroInvoiceId -> [{ Description }]
+let contactAddresses = {};// contactId -> [{ AddressType, AddressLine1, ... }]
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
 
+  // A single contact by id: where the premises lives when somebody puts it
+  // on the supplier in Xero rather than on the bill.
+  const oneContact = path.match(/^\/Contacts\/([^?]+)$/);
+  if (oneContact && (opts.method || 'GET') === 'GET') {
+    return { Contacts: [{ ContactID: oneContact[1], Addresses: contactAddresses[oneContact[1]] || [] }] };
+  }
   if (path.startsWith('/Contacts') && (opts.method || 'GET') === 'GET') {
     // Pretend the counterparty contact does not exist, so the create path runs.
     return { Contacts: [] };
@@ -332,6 +339,54 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   await verdict(fromLines);
   check('and not read again — a repeat costs Xero nothing',
     calls.filter((c) => /^\/Invoices\//.test(c.path)).length === 0, calls.map((c) => c.path));
+
+  console.log('\nThe premises on the supplier contact');
+  // Where it goes when somebody fills in Xero's "Billing address" on a
+  // contact that bills one premises. Xero returns that box as POBOX and the
+  // delivery one as STREET, so both are read — checking only STREET would
+  // miss the field people actually fill in.
+  const CONTACT_ADDR = 'Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves';
+  await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9'], premisesAddress: CONTACT_ADDR, ownerTenantId: kk.tenantId }
+  });
+  contactAddresses['c-Tenaga Nasional Berhad - Lot 9'] = [
+    { AddressType: 'STREET' },
+    { AddressType: 'POBOX', AddressLine1: 'Lot 9, Jalan Perusahaan Empat\n', City: 'Batu Caves', PostalCode: '68100' }
+  ];
+  const onContact = await makeBill(abm.tenantId, {
+    ref: 'TNB-LOT9-0826', supplier: 'Tenaga Nasional Berhad - Lot 9', total: 1850.00
+  });
+  const vContact = await verdict(onContact);
+  check('an address on the contact decides the bill',
+    vContact.outcome === 'recharge' && vContact.ownerCode === 'ABKK', vContact);
+  check('and the bill itself carried nothing to match',
+    (await db.getOne('SELECT premises_address FROM bills WHERE id = ?', [onContact])).premises_address === null);
+
+  // One contact carries 1,681 bills on the live account. Reading it per bill
+  // would be 1,681 calls for one answer.
+  calls.length = 0;
+  await verdict(onContact);
+  check('the contact is not read again for the same bill',
+    calls.filter((c) => /^\/Contacts\//.test(c.path)).length === 0, calls.map((c) => c.path));
+  const sibling = await makeBill(abm.tenantId, {
+    ref: 'TNB-LOT9-0926', supplier: 'Tenaga Nasional Berhad - Lot 9', total: 1910.00
+  });
+  calls.length = 0;
+  check('nor for another bill from the same contact',
+    (await verdict(sibling)).outcome === 'recharge'
+    && calls.filter((c) => /^\/Contacts\//.test(c.path)).length === 0, calls.map((c) => c.path));
+
+  // The bill's own address still wins: WazzOCR read it off the document,
+  // and the contact is only where somebody put it by hand. Both rules cover
+  // this supplier, so the two sources genuinely compete.
+  const MOVED = 'Lot 44, Jalan Perindustrian Tujuh, 47100 Puchong';
+  await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9'], premisesAddress: MOVED, ownerTenantId: kj.tenantId }
+  });
+  await db.execute("UPDATE bills SET premises_address = ?, premises_source = 'ocr' WHERE id = ?", [MOVED, sibling]);
+  const vMoved = await verdict(sibling);
+  check('a premises read off the document outranks the contact',
+    vMoved.ownerCode === 'ABKJ' && vMoved.address === MOVED, vMoved);
 
   console.log('\nAsking what a bill would do before it is paid');
   const ahead = await req('POST', '/api/recharge/decide', {

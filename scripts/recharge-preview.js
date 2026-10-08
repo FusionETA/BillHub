@@ -90,6 +90,10 @@ function premisesFromReference(reference) {
 
 // Does the supplier's Xero contact carry an address, and is it the premises?
 //
+// Both Xero address types are read: its UI labels POBOX the "Billing
+// address" and STREET the "Delivery address", so looking at one only is how
+// a field somebody carefully filled in gets reported as empty.
+//
 // Worth asking, because a Xero contact has an Addresses block and it would
 // be the tidiest place for a premises to live. The catch is whose address it
 // is: for one contact billing many buildings it is the SUPPLIER's own —
@@ -119,10 +123,10 @@ async function contactAddresses(accountId, rows) {
       try {
         const payload = await xero.api(accountId, tenantId, `/Contacts?IDs=${chunk.join(',')}`);
         for (const c of payload?.Contacts || []) {
-          const street = (c.Addresses || []).find((a) => a.AddressType === 'STREET') || {};
-          const parts = [street.AddressLine1, street.AddressLine2, street.AddressLine3,
-            street.City, street.PostalCode].filter(Boolean);
-          out.push({ name: c.Name, address: parts.join(', ') });
+          // Both types. Xero's UI calls POBOX the "Billing address" and
+          // STREET the "Delivery address", so reading only one misses
+          // whichever box somebody actually filled in.
+          out.push({ name: c.Name, address: recharge.addressText(c) });
         }
       } catch (e) {
         console.error(`[preview] could not read contacts in ${tenantId}: ${e.message}`);
@@ -226,12 +230,12 @@ async function contactAddresses(accountId, rows) {
     console.log(`\n${found.length} supplier contact(s), ${read.length} read from Xero`);
     console.log('─'.repeat(78));
     if (failed.length) console.log(`  could not be read        ${String(failed.length).padStart(4)}`);
-    console.log(`  carry a street address   ${String(withAddress.length).padStart(4)} / ${read.length}`);
+    console.log(`  carry an address         ${String(withAddress.length).padStart(4)} / ${read.length}`);
     console.log(`  distinct addresses       ${String(distinct.size).padStart(4)}`);
     console.log('');
     for (const f of found.slice(0, 24)) {
       console.log(`  ${clip(f.name, 44)}`);
-      console.log(`      ${f.failed ? '(could not read)' : (f.address || '(no street address on the contact)')}`);
+      console.log(`      ${f.failed ? '(could not read)' : (f.address || '(no address on the contact)')}`);
     }
     if (found.length > 24) console.log(`  … and ${found.length - 24} more`);
 
