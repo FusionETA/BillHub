@@ -4,6 +4,7 @@
 //   npm run recharge-preview -- --supplier "Tenaga Nasional"
 //   npm run recharge-preview -- --entity ABM --limit 60
 //   npm run recharge-preview -- --suppliers --supplier "Tenaga Nasional"
+//   npm run recharge-preview -- --addresses --supplier "Tenaga Nasional"
 //   npm run recharge-preview -- --text --supplier "Tenaga Nasional"
 //
 // Read-only, all the way down. It creates no runs, writes nothing to Bills
@@ -23,6 +24,7 @@
 require('../lib/env');
 const db = require('../db');
 const recharge = require('../billhub/recharge');
+const xero = require('../lib/xero');
 const model = require('../models/recharge');
 const premises = require('../lib/premises');
 
@@ -84,6 +86,51 @@ function premisesFromReference(reference) {
   const spaced = /^.*?\s+-\s+(.+)$/.exec(ref);
   if (spaced) return spaced[1].trim();
   return null;
+}
+
+// Does the supplier's Xero contact carry an address, and is it the premises?
+//
+// Worth asking, because a Xero contact has an Addresses block and it would
+// be the tidiest place for a premises to live. The catch is whose address it
+// is: for one contact billing many buildings it is the SUPPLIER's own —
+// Tenaga Nasional's head office, the same on every bill, useless for
+// deciding which building the electricity was for.
+//
+// But a contact created per meter ("Tenaga Nasional Berhad - TD 11-1") may
+// well have the site address on it, because whoever set it up had nowhere
+// else to put it. That is a question about real data, so this reads the
+// contacts and reports rather than assuming either way.
+//
+// One call per 50 contacts, not per bill: contacts are fetched by id in
+// batches, so this is cheap even against hundreds of them.
+async function contactAddresses(accountId, rows) {
+  const byTenant = new Map();
+  for (const b of rows) {
+    if (!b.contact_id) continue;
+    if (!byTenant.has(b.xero_tenant_id)) byTenant.set(b.xero_tenant_id, new Map());
+    byTenant.get(b.xero_tenant_id).set(b.contact_id, b.contact_name);
+  }
+
+  const out = [];
+  for (const [tenantId, contacts] of byTenant) {
+    const ids = [...contacts.keys()];
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      try {
+        const payload = await xero.api(accountId, tenantId, `/Contacts?IDs=${chunk.join(',')}`);
+        for (const c of payload?.Contacts || []) {
+          const street = (c.Addresses || []).find((a) => a.AddressType === 'STREET') || {};
+          const parts = [street.AddressLine1, street.AddressLine2, street.AddressLine3,
+            street.City, street.PostalCode].filter(Boolean);
+          out.push({ name: c.Name, address: parts.join(', ') });
+        }
+      } catch (e) {
+        console.error(`[preview] could not read contacts in ${tenantId}: ${e.message}`);
+        for (const id of chunk) out.push({ name: contacts.get(id), address: null, failed: true });
+      }
+    }
+  }
+  return out;
 }
 
 (async () => {
@@ -167,6 +214,54 @@ function premisesFromReference(reference) {
     return [...groups.entries()]
       .filter(([, members]) => members.length >= 2)
       .sort((a, b) => b[1].length - a[1].length);
+  }
+
+  if (has('addresses')) {
+    const found = await contactAddresses(ACCOUNT_ID, matching);
+    const failed = found.filter((f) => f.failed);
+    const read = found.filter((f) => !f.failed);
+    const withAddress = read.filter((f) => f.address);
+    const distinct = new Set(withAddress.map((f) => f.address));
+
+    console.log(`\n${found.length} supplier contact(s), ${read.length} read from Xero`);
+    console.log('─'.repeat(78));
+    if (failed.length) console.log(`  could not be read        ${String(failed.length).padStart(4)}`);
+    console.log(`  carry a street address   ${String(withAddress.length).padStart(4)} / ${read.length}`);
+    console.log(`  distinct addresses       ${String(distinct.size).padStart(4)}`);
+    console.log('');
+    for (const f of found.slice(0, 24)) {
+      console.log(`  ${clip(f.name, 44)}`);
+      console.log(`      ${f.failed ? '(could not read)' : (f.address || '(no street address on the contact)')}`);
+    }
+    if (found.length > 24) console.log(`  … and ${found.length - 24} more`);
+
+    console.log('\n  Reading this:');
+    // "None of them has an address" and "none of them could be read" are
+    // different answers, and reporting the first when the second is true is
+    // how a report talks somebody out of an option that was open.
+    if (!read.length) {
+      console.log('   · None of them could be read, so this says nothing either way.');
+      console.log('     Those organisations have no working Xero connection here.');
+    } else if (!withAddress.length) {
+      console.log('   · None of them has one, so there is nothing here for an address');
+      console.log('     rule to match. Use a recharge rule on the reference instead.');
+    } else if (distinct.size === 1 && found.length > 1) {
+      console.log(`   · All of them share one address — "${clip([...distinct][0], 48)}".`);
+      console.log('     That is the supplier\'s own address, not the premises being billed,');
+      console.log('     so it cannot say which building a bill is for. A recharge rule on');
+      console.log('     the reference is what distinguishes them.');
+    } else if (distinct.size === withAddress.length) {
+      console.log(`   · ${distinct.size} contacts, ${distinct.size} different addresses — one per contact.`);
+      console.log('     That looks like the premises rather than the supplier, which means');
+      console.log('     address rules would work on these. Check a couple against the real');
+      console.log('     bills before trusting it.');
+    } else {
+      console.log(`   · ${withAddress.length} contacts share ${distinct.size} address(es). Partly the supplier\'s own and`);
+      console.log('     partly per-premises, so neither rule type covers all of them alone.');
+    }
+    console.log('');
+    await db.close();
+    return;
   }
 
   if (has('suppliers')) {

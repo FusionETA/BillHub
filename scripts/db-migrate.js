@@ -95,6 +95,26 @@ const deadColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    // Dropping start_date took it out of this index too, leaving an upgraded
+    // database with (account_id, enabled) where a fresh one has created_at
+    // on the end — and created_at is now what the lookup filters on.
+    why: 'recharge_text_rules.idx_text_rule_lookup — created_at replaces start_date in it',
+    check: `SELECT
+        (SELECT COUNT(*) FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_text_rules'
+            AND INDEX_NAME = 'idx_text_rule_lookup') AS present,
+        (SELECT COUNT(*) FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_text_rules'
+            AND INDEX_NAME = 'idx_text_rule_lookup' AND COLUMN_NAME = 'created_at') AS correct`,
+    needed: (row) => Number(row.present) > 0 && Number(row.correct) === 0,
+    // One ALTER, not two: this index also covers the foreign key on
+    // account_id, and dropping it on its own leaves that uncovered — MySQL
+    // refuses. Replacing it in a single statement never exposes the gap.
+    sql: `ALTER TABLE recharge_text_rules
+            DROP INDEX idx_text_rule_lookup,
+            ADD INDEX idx_text_rule_lookup (account_id, enabled, created_at)`
+  },
+  {
     why: 'bills.marked_paid_at — when Bills Hub itself marked the bill paid',
     check: hasColumn('bills', 'marked_paid_at'),
     needed: (row) => Number(row.n) === 0,

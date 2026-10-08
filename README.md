@@ -498,7 +498,7 @@ carries exactly this:
 | Field | Synced? | What it is |
 | --- | --- | --- |
 | `Contact.Name` | yes | the supplier |
-| `Contact.Addresses` | — | the *supplier's* address, not the premises |
+| `Contact.Addresses` | — | usually the *supplier's* own address, not the premises — but see below |
 | `Reference`, `InvoiceNumber` | yes | free text |
 | `LineItems[].Description` | **no** | free text, often where a bookkeeper writes the premises |
 | `LineItems[].Tracking` | **no** | tracking category options, e.g. `Region: Tawau` |
@@ -512,6 +512,23 @@ So a premises address can only reach Bills Hub from the PDF — which is
 WazzOCR's job, and lands in `bills.premises_address` — or from text somebody
 typed. **Most bills will never have one**, and that is why there are two kinds
 of rule rather than one.
+
+The contact's own address is the one tempting exception. For a single
+contact billing many buildings it is the supplier's head office: the same on
+every bill, and useless for deciding which building. But a contact created
+per meter may well carry the site address, because whoever set it up had
+nowhere else to put it. Which of those is true is a question about real
+data, so:
+
+```bash
+npm run recharge-preview -- --addresses --supplier "Tenaga Nasional"
+```
+
+reads the contacts (one call per fifty, not per bill) and says whether they
+all share one address — the supplier's — or have one each, which would make
+address rules viable. It distinguishes "none has an address" from "none
+could be read", because those are different answers and reporting the first
+when the second is true talks somebody out of an option that was open.
 
 ### Two kinds of rule, tried in order
 
