@@ -682,7 +682,10 @@ reference  001170153115 - TD 11-1
 lines      001170153115 - TD 11-1 TD 11-1 ELECTRIC OCTOBER 2026
 ```
 
-One Xero contact per meter, with the premises in the contact's own name.
+That shape exists — but it is the minority. Across Ayu Borneo's 2,250 paid
+TNB bills, 98% sit on four generic contacts (`TENAGA NASIONAL BERHAD`,
+`Tenaga Nasional Berhad (old)`, …) with no premises in the name at all. The
+premises is in the **reference**: `001170153115 - TD 11-1`.
 
 `--suppliers` is the report that follows from that, and it is free: contact
 names are synced, so it lists every supplier across every matching bill with
@@ -698,9 +701,19 @@ worklist.
   "is exactly", not "contains" — "TD 11-1" is also inside "TD 11-10".
 ```
 
-That last line is derived from the codes actually present, not warned about
-in the abstract: a `contains` rule for the shorter code claims the longer
-one's bills and pays the wrong company.
+It also says what share of the bills that pattern covers, so a pattern
+covering 2% is not mistaken for the answer, and for the rest it reads a real
+reference and suggests the rule for it:
+
+```
+      Reference  ends with  "WM Hostel 1-2"   →  the entity that occupies it
+```
+
+`ends with` rather than `contains`, pinning the premises to the end where it
+is — a reference ending `WM Hostel 1-20` contains `WM Hostel 1-2` too, and a
+`contains` rule would claim it and pay the wrong company. Where the premises
+codes present do collide that way, the report names the real pair rather
+than warning in the abstract.
 
 `--text` reads line items, so it costs a Xero call per bill and can only
 afford a sample. It now prints the supplier pattern first, because where that

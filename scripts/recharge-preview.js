@@ -88,7 +88,8 @@ function shortestAmbiguous(members) {
   // would report three bills where the answer is three hundred.
   const matching = await recharge.candidateBills(ACCOUNT_ID, { limit: 5000, supplier, tenantId });
   const bills = matching.slice(0, limit);
-  if (matching.length > bills.length) {
+  // Only --text reads bills back from Xero; the rest is local and complete.
+  if (has('text') && matching.length > bills.length) {
     console.log(`${matching.length} paid, un-recharged bill(s) match; reading the most recent ${bills.length}.`);
     console.log('Raise --limit to read more (each one costs a Xero call).');
   }
@@ -111,13 +112,19 @@ function shortestAmbiguous(members) {
     const byName = new Map();
     for (const b of rows) {
       const name = b.contact_name || '(no supplier)';
-      if (!byName.has(name)) byName.set(name, { bills: 0, payers: new Map() });
+      if (!byName.has(name)) byName.set(name, { bills: 0, payers: new Map(), samples: [] });
       const e = byName.get(name);
       e.bills += 1;
+      // The reference is synced, so showing it is free — and on a contact
+      // whose name carries no premises it is the only place one can be.
+      const ref = (b.reference || b.invoice_number || '').trim();
+      if (ref && e.samples.length < 3 && !e.samples.includes(ref)) e.samples.push(ref);
       e.payers.set(b.entity_code || b.xero_tenant_id, (e.payers.get(b.entity_code || b.xero_tenant_id) || 0) + 1);
     }
     return [...byName.entries()]
-      .map(([name, e]) => ({ name, bills: e.bills, payers: [...e.payers.keys()] }))
+      .map(([name, e]) => ({
+        name, bills: e.bills, payers: [...e.payers.keys()], samples: e.samples
+      }))
       .sort((a, b) => b.bills - a.bills || a.name.localeCompare(b.name));
   }
 
@@ -146,9 +153,11 @@ function shortestAmbiguous(members) {
     const table = supplierTable(matching);
     console.log(`\n${table.length} supplier contact(s) across ${matching.length} paid, un-recharged bill(s)`);
     console.log('─'.repeat(78));
-    console.log(`  ${pad('CONTACT', 46)}${'BILLS'.padStart(6)}   PAID BY`);
     for (const t of table) {
-      console.log(`  ${pad(clip(t.name, 45), 46)}${String(t.bills).padStart(6)}   ${clip(t.payers.join(' '), 22)}`);
+      console.log(`\n  ${clip(t.name, 60)}`);
+      console.log(`    ${t.bills} paid bill(s) · paid by ${clip(t.payers.join(' '), 60)}`);
+      // Where the premises has to be, if it is not in the contact name.
+      for (const r of t.samples) console.log(`    ref  "${clip(r, 62)}"`);
     }
 
     const groups = perPremisesGroups(table);
@@ -160,11 +169,47 @@ function shortestAmbiguous(members) {
       console.log('');
       console.log(`      Supplier  is exactly  "${members[0].name}"   →  ?`);
       console.log('');
-      console.log(`  "is exactly", not "contains" — ${shortestAmbiguous(members) || 'a code like TD 11-1'}.`);
+      const clash = shortestAmbiguous(members);
+      if (clash) console.log(`  "is exactly", not "contains" — ${clash}.`);
+      else console.log('  Prefer "is exactly": a short premises code is often inside a longer one.');
     }
-    if (!groups.length && table.length > 1) {
-      console.log('\n  No "<supplier> - <premises>" pattern here, so the premises is not in');
-      console.log('  the contact name. Run with --text to see what the bills themselves say.');
+    // The shape that actually dominates: a handful of generic contacts
+    // carrying most of the bills, with the premises somewhere in the
+    // reference instead. Worth saying how much of the total that is, so a
+    // pattern covering 2% is not mistaken for the answer.
+    const named = groups.reduce((n, [, m]) => n + m.reduce((x, t) => x + t.bills, 0), 0);
+    const generic = matching.length - named;
+    if (generic > 0) {
+      const pc = Math.round((generic / matching.length) * 100);
+      console.log(`\n  ${generic} of the ${matching.length} bill(s) — ${pc}% — are on a contact whose name`);
+      console.log('  carries no premises. For those the premises can only be in the');
+      console.log('  reference, so the rule goes on the reference instead:');
+
+      // Their references read "<account number> - <premises>", so the
+      // premises is the tail. "ends with" pins it there, which "contains"
+      // does not: a reference ending "WM Hostel 1-20" contains "WM Hostel
+      // 1-2" and a contains rule would claim it.
+      const sample = table
+        .filter((t) => !/\s+-\s+/.test(t.name))
+        .flatMap((t) => t.samples)
+        .find((r) => /\s+-\s+/.test(r));
+      if (sample) {
+        const tail = sample.split(/\s+-\s+/).slice(1).join(' - ').trim();
+        console.log('');
+        console.log(`      Reference  ends with  "${tail}"   →  the entity that occupies it`);
+        console.log('');
+        console.log(`  Taken from "${clip(sample, 56)}". "ends with" rather than`);
+        console.log('  "contains" pins the premises to the end, where it is — a reference');
+        console.log(`  ending "${tail}0" contains "${tail}" too.`);
+      } else {
+        console.log('  Look at the references above and match whichever part names the');
+        console.log('  premises, pinning it with "ends with" or "is exactly" where you can.');
+      }
+    }
+    if (new Set(table.flatMap((t) => t.payers)).size > 3) {
+      console.log('\n  These are paid by several entities. Only the ones paid by a company');
+      console.log('  that does not occupy the premises need recharging at all — narrow');
+      console.log('  with --entity <CODE> to the company that pays on behalf of others.');
     }
     console.log('');
     await db.close();
