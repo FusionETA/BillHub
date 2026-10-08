@@ -92,7 +92,7 @@ async function findOrCreateContact(accountId, tenantId, name) {
 // `bills.premises_address` is where WazzOCR puts what it read; until then a
 // premises can still be matched from whatever a bookkeeper typed into the
 // reference or the line descriptions.
-const _textCache = new Map();          // billId -> { description, tracking, at }
+const _textCache = new Map();          // billId -> { description, tracking, accountCode, at }
 const TEXT_TTL_MS = 5 * 60 * 1000;
 
 // The parts of a bill that cost nothing to look at.
@@ -111,21 +111,29 @@ function localFields(bill) {
 async function remoteFields(accountId, bill, { fetch = true } = {}) {
   const hit = _textCache.get(bill.id);
   if (hit && Date.now() - hit.at < TEXT_TTL_MS) return hit;
-  if (!fetch) return { description: '', tracking: '', at: 0 };
+  if (!fetch) return { description: '', tracking: '', accountCode: null, at: 0 };
 
   let description = '';
   let tracking = '';
+  let accountCode = null;
   try {
     const payload = await xero.api(accountId, bill.xero_tenant_id, `/Invoices/${bill.xero_invoice_id}`);
     const lines = payload?.Invoices?.[0]?.LineItems || [];
     description = lines.map((l) => l.Description).filter(Boolean).join(' ');
     tracking = lines.flatMap((l) => (l.Tracking || []).map((t) => `${t.Name} ${t.Option}`)).join(' ');
+    // The account the cost was booked to. A recharge moves the cost, not its
+    // nature: electricity stays electricity in whichever company ends up
+    // carrying it. A bill with several lines gets the biggest one's code,
+    // since the recharge itself is a single line.
+    accountCode = lines
+      .filter((l) => l.AccountCode)
+      .sort((a, b) => Math.abs(Number(b.LineAmount || 0)) - Math.abs(Number(a.LineAmount || 0)))[0]?.AccountCode || null;
   } catch (e) {
     // Not fatal. Without them the bill simply fails to match, which reads as
     // "no rule covers this" rather than as a wrong recharge.
     console.error(`[recharge] could not read line items for bill ${bill.id}: ${e.message}`);
   }
-  const out = { description, tracking, at: Date.now() };
+  const out = { description, tracking, accountCode, at: Date.now() };
   _textCache.set(bill.id, out);
   return out;
 }
@@ -362,13 +370,6 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
 // there is no split to work out, because a premises belongs to one entity.
 async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null, textRuleId = null }) {
   const settings = await model.getSettings(accountId);
-  if (!settings.ar_account_code || !settings.ap_account_code) {
-    throw err(
-      'Set the recharge account codes first — a recharge posts to a receivable account in the payer and an expense account in the subsidiary, and those differ per chart of accounts.',
-      400
-    );
-  }
-
   const [bill] = await bills.getManyByIds(accountId, [Number(billId)]);
   if (!bill) throw err('Bill not found.', 404);
 
@@ -494,8 +495,29 @@ async function postRun(accountId, runId) {
   }
 
   const settings = await model.getSettings(accountId);
-  if (!settings.ar_account_code || !settings.ap_account_code) {
-    throw err('Set the recharge account codes before posting.', 400);
+
+  // Which ledger account the two documents post to.
+  //
+  // A recharge moves a cost between companies; it does not change what the
+  // cost is. So both sides carry the account the original bill was booked
+  // to: the payer's expense nets to zero, and the company that actually
+  // used the electricity carries it as electricity. Nobody has to configure
+  // anything, and nothing has to be kept in step with a chart of accounts.
+  //
+  // Read off the bill in Xero, which must have had an account code or Xero
+  // would not have let it be approved in the first place. An account code
+  // set in the settings overrides it, for a group that wants a dedicated
+  // intercompany account instead.
+  const { accountCode: billCode } = await remoteFields(accountId, {
+    id: run.bill_id, xero_tenant_id: run.payer_tenant_id, xero_invoice_id: run.xero_invoice_id
+  });
+  const arCode = settings.ar_account_code || billCode;
+  const apCode = settings.ap_account_code || billCode;
+  if (!arCode || !apCode) {
+    throw err(
+      `Could not read which account "${run.bill_reference || run.supplier_name}" was booked to, `
+      + 'so there is nothing to post the recharge against. Open the bill in Xero and check it has '
+      + 'an account code on its lines.', 400);
   }
 
   const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
@@ -548,7 +570,7 @@ async function postRun(accountId, runId) {
                 Description: description,
                 Quantity: 1,
                 UnitAmount: Number(line.amount),
-                AccountCode: settings.ar_account_code,
+                AccountCode: arCode,
                 TaxType: taxType
               }]
             }]
@@ -581,7 +603,7 @@ async function postRun(accountId, runId) {
                 Description: description,
                 Quantity: 1,
                 UnitAmount: Number(line.amount),
-                AccountCode: settings.ap_account_code,
+                AccountCode: apCode,
                 TaxType: taxType
               }]
             }]

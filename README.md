@@ -703,13 +703,28 @@ The address that decided a recharge is snapshotted onto the run, and the run
 records which rule raised it. A rule can be edited or deleted later, and the
 reason a cost moved between two companies has to stay readable.
 
-### Account codes
+### Which account it posts to
 
-A recharge needs a receivable code in the payer and an expense code in the
-owner. Those differ per chart of accounts, so they are configuration and a
-recharge is refused until they are set — the same reasoning as the bank file
-layouts. Counterparty contacts are found by name in each Xero and created if
-missing.
+Nothing to configure. Xero will not approve an invoice without an account
+code on its lines, so both documents need one — but a recharge moves a cost
+between companies without changing what the cost is, so both sides carry the
+account **the original bill was already booked to**.
+
+Electricity stays electricity: the payer's expense nets to zero, and the
+company that actually used it carries it in the right category. Read off the
+bill in Xero, which must have had a code or Xero would not have let it be
+approved in the first place. A bill with several lines gives up the code of
+its largest, since the recharge itself is one line.
+
+Setting `ar_account_code` / `ap_account_code` on `recharge_settings`
+overrides it, for a group that wants a dedicated intercompany account
+instead. There is no UI for that — asking everyone to configure something
+that is almost always derivable is how a tool acquires a settings page
+nobody understands.
+
+If the owner's chart of accounts has no such code, Xero rejects that one line
+and says so against the run; the retry creates only what is missing.
+Counterparty contacts are found by name in each Xero and created if missing.
 
 ### Demo data
 
@@ -784,7 +799,7 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
 | `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
 | `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
-| `PATCH` | `/api/recharge/settings` | Account codes, tax type, reference prefix |
+| `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, due days |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Address rules |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/text-rules[/:id]` | Recharge rules |
 | `POST` | `/api/recharge/text-rules/preview` | What a rule would act on, before saving it |

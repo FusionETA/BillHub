@@ -1333,7 +1333,6 @@
       const [textRuleFor, setTextRuleFor] = useState(null); // recharge rule, same convention
       const [ruleQuery, setRuleQuery] = useState('');
       const [ruleEntity, setRuleEntity] = useState('');
-      const [showSettings, setShowSettings] = useState(false);
       const reload = () => setNonce(n => n + 1);
 
       useEffect(() => {
@@ -1458,7 +1457,6 @@
             </p>
           </div>
           <span style={{ flex: 1 }} />
-          <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>Account codes</Button>
           <Button variant="outline" size="sm" onClick={() => setRuleFor({})}>New address rule</Button>
           <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
         </div>
@@ -1467,13 +1465,6 @@
           <div style={{ flex: 1 }}>
             <strong>Testing mode is on.</strong> The rules run against real Xero data, but nothing is sent to Xero — a recharge drafted now is marked <em>Testing mode</em>, cannot be posted, and disappears from this list when testing mode is turned off.
           </div>
-        </div>}
-
-        {!data.settings.configured && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--amber-500)', borderRadius: 10, padding: '14px 18px', marginBottom: 16 }}>
-          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-body)' }}>
-            <strong style={{ color: 'var(--text-heading)' }}>Set the recharge account codes first.</strong> A recharge posts to a receivable account in the payer and an expense account in the subsidiary, and those differ per chart of accounts.
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>Set them</Button>
         </div>}
 
         <div style={{ borderBottom: '1.5px solid var(--border-subtle)', marginBottom: 20 }}>
@@ -1741,9 +1732,6 @@
           onClose={() => setTextRuleFor(null)} onToast={onToast}
           onSaved={() => { setTextRuleFor(null); reload(); }} />
 
-        <RechargeSettingsDialog open={showSettings} settings={data.settings}
-          onClose={() => setShowSettings(false)} onToast={onToast}
-          onSaved={() => { setShowSettings(false); reload(); }} />
       </div>;
     }
 
@@ -2010,45 +1998,6 @@
               style={busy || !ready ? { opacity: .5, pointerEvents: 'none' } : null}>
               {busy ? 'Saving…' : 'Save rule'}
             </Button>
-          </div>
-        </div>
-      </Dialog>;
-    }
-
-    function RechargeSettingsDialog({ open, settings, onClose, onSaved, onToast }) {
-      const [form, setForm] = useState(settings);
-      const [busy, setBusy] = useState(false);
-      useEffect(() => { if (open) setForm(settings); }, [open, settings]);
-      const set = (patch) => setForm(f => ({ ...f, ...patch }));
-
-      async function save() {
-        setBusy(true);
-        try {
-          await request('/api/recharge/settings', { method: 'PATCH', body: form });
-          onToast({ title: 'Account codes saved', message: 'Recharges will post to these accounts.' });
-          onSaved();
-        } catch (e) {
-          onToast({ title: 'Could not save', message: e.message, tone: 'error' });
-        } finally { setBusy(false); }
-      }
-
-      return <Dialog open={open} onClose={onClose} title="Recharge account codes"
-        description="Where the two sides of a recharge post in Xero." size="md">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <Input label="Payer — receivable account" placeholder="260" value={form.arAccountCode || ''}
-            onChange={v => set({ arAccountCode: v })} hint="On the invoice raised in the paying entity." />
-          <Input label="Subsidiary — expense account" placeholder="429" value={form.apAccountCode || ''}
-            onChange={v => set({ apAccountCode: v })} hint="On the mirror bill in the subsidiary." />
-          <Input label="Tax type" placeholder="NONE" value={form.taxType || ''} onChange={v => set({ taxType: v })}
-            hint="Xero tax type code, e.g. NONE or ZERORATED." />
-          <Input label="Reference prefix" placeholder="IC-" value={form.referencePrefix || ''} onChange={v => set({ referencePrefix: v })} />
-          <Input label="Payment terms (days)" type="number" value={String(form.dueDays || 30)} onChange={v => set({ dueDays: Number(v) })} />
-          <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-            These codes must exist in every organisation a recharge touches. If one does not, Xero rejects that line and it is reported against the recharge — nothing is left half-posted.
-          </div>
-          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" size="md" onClick={save} style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>Save</Button>
           </div>
         </div>
       </Dialog>;

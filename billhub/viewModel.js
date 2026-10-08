@@ -520,13 +520,13 @@ function rechargeTextRuleCard(r, waiting = 0) {
 
 function rechargeSettings(s) {
   return {
+    // Optional overrides. Left unset — which is the normal case — a recharge
+    // posts to whichever account the original bill was booked to.
     arAccountCode: s.ar_account_code || null,
     apAccountCode: s.ap_account_code || null,
     taxType: s.tax_type || 'NONE',
     referencePrefix: s.reference_prefix || 'IC-',
-    dueDays: Number(s.due_days || 30),
-    // Nothing can be posted until both codes are set.
-    configured: Boolean(s.ar_account_code && s.ap_account_code)
+    dueDays: Number(s.due_days || 30)
   };
 }
 

@@ -3,7 +3,8 @@
 //   GET    /api/recharge                    the Recharge view model
 //   GET    /api/recharge/suggestions        paid bills a rule covers, not yet recharged
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
-//   PATCH  /api/recharge/settings           account codes, tax type, reference prefix
+//   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
+//                                          and optional account-code overrides
 //   GET/POST/PATCH/DELETE /api/recharge/rules[/:id]
 //   POST   /api/recharge/plan               dry-run a recharge
 //   POST   /api/recharge/runs               create one (nothing in Xero yet)

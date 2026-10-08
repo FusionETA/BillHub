@@ -93,15 +93,17 @@ const WISMA  = 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu';
 
 let billSeq = 0;
 // A paid bill in `tenant`, optionally with the premises already read onto it.
-async function makeBill(tenant, { ref, supplier, total, address = null, paid = true, lines = null, tracking = null, paidOn = '2026-08-08' }) {
+async function makeBill(tenant, { ref, supplier, total, address = null, paid = true, lines = null, tracking = null, paidOn = '2026-08-08', accountCode = '445' }) {
   billSeq += 1;
   const xid = `beefbeef-0000-4000-8000-${String(billSeq).padStart(12, '0')}`;
-  if (lines || tracking) {
-    lineItems[xid] = (lines || ['Line']).map((d) => ({
-      Description: d,
-      Tracking: (tracking || []).map((t) => ({ Name: t[0], Option: t[1] }))
-    }));
-  }
+  // Every bill in Xero has an account code on its lines — Xero will not
+  // approve one without. The recharge takes its own code from here.
+  lineItems[xid] = (lines || ['Line']).map((d) => ({
+    Description: d,
+    AccountCode: accountCode,
+    LineAmount: total,
+    Tracking: (tracking || []).map((t) => ({ Name: t[0], Option: t[1] }))
+  }));
   const res = await db.execute(
     `INSERT INTO bills (account_id, xero_tenant_id, xero_invoice_id, invoice_number, reference,
        contact_id, contact_name, xero_status, bill_date, due_date, fully_paid_on, currency_code,
@@ -184,20 +186,22 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('punctuation in a bracketed name is dropped, not carried into a bank file',
     entityRef.short({ code: 'X', short_name: 'Something (K.J-1)' }) === 'KJ1');
 
-  console.log('\nAccount codes are required before anything posts');
+  console.log('\nAccount codes come off the bill, not from a settings page');
   const billKilang = await makeBill(abm.tenantId, {
     ref: 'TNB-GRP-0726', supplier: 'Tenaga Nasional Berhad', total: 17980.00, address: KILANG
   });
+  // Nothing to configure. A recharge moves a cost between companies without
+  // changing what the cost is, so both documents carry the account the
+  // original bill was booked to.
   const noCodes = await req('POST', '/api/recharge/plan', {
     cookie, body: { billId: billKilang, ownerTenantId: kj.tenantId }
   });
-  check('planning is refused until the codes are set',
-    noCodes.status === 400 && /account codes/.test(noCodes.body.error), noCodes.body.error);
+  check('planning needs no account codes set up first', noCodes.status === 200, noCodes.body);
 
   const cfg = await req('PATCH', '/api/recharge/settings', {
-    cookie, body: { arAccountCode: '260', apAccountCode: '429', taxType: 'NONE', referencePrefix: 'IC-', dueDays: 30 }
+    cookie, body: { taxType: 'NONE', referencePrefix: 'IC-', dueDays: 30 }
   });
-  check('settings save and report configured', cfg.body.settings.configured === true, cfg.body.settings);
+  check('the settings that remain still save', cfg.status === 200 && cfg.body.settings.referencePrefix === 'IC-', cfg.body.settings);
 
   console.log('\nAddress rules');
   const rule = await req('POST', '/api/recharge/rules', {
@@ -379,9 +383,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('the AR invoice is authorised, the subsidiary bill is a draft',
     ar[0].body.Invoices[0].Status === 'AUTHORISED' && ap[0].body.Invoices[0].Status === 'DRAFT',
     { ar: ar[0].body.Invoices[0].Status, ap: ap[0].body.Invoices[0].Status });
-  check('each side uses its own configured account code',
-    ar[0].body.Invoices[0].LineItems[0].AccountCode === '260'
-    && ap[0].body.Invoices[0].LineItems[0].AccountCode === '429',
+  // The payer's electricity expense nets to zero and the company that used
+  // the electricity carries it as electricity. Nobody configured anything.
+  check('both sides post to the account the original bill was booked to',
+    ar[0].body.Invoices[0].LineItems[0].AccountCode === '445'
+    && ap[0].body.Invoices[0].LineItems[0].AccountCode === '445',
     { ar: ar[0].body.Invoices[0].LineItems[0].AccountCode, ap: ap[0].body.Invoices[0].LineItems[0].AccountCode });
   check('both sides carry the same amount and reference',
     ar[0].body.Invoices[0].LineItems[0].UnitAmount === ap[0].body.Invoices[0].LineItems[0].UnitAmount
@@ -403,6 +409,22 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const cancelPosted = await req('POST', `/api/recharge/runs/${runId}/cancel`, { cookie });
   check('a posted recharge cannot be cancelled', cancelPosted.status === 409, cancelPosted.body.error);
 
+  // A group that wants a dedicated intercompany account can still say so.
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { arAccountCode: '260', apAccountCode: '429' } });
+  const overridden = await makeBill(abm.tenantId, {
+    ref: 'TNB-OVERRIDE-0826', supplier: 'Tenaga Nasional Berhad', total: 90.00,
+    address: KILANG, accountCode: '445'
+  });
+  const ovRun = await req('POST', '/api/recharge/runs', { cookie, body: { billId: overridden } });
+  calls.length = 0;
+  await req('POST', `/api/recharge/runs/${ovRun.body.id}/post`, { cookie });
+  const ovInv = calls.filter((c) => c.path === '/Invoices' && c.method === 'POST');
+  check('a configured account code overrides the bill\'s own',
+    ovInv.find((c) => c.body.Invoices[0].Type === 'ACCREC').body.Invoices[0].LineItems[0].AccountCode === '260'
+    && ovInv.find((c) => c.body.Invoices[0].Type === 'ACCPAY').body.Invoices[0].LineItems[0].AccountCode === '429',
+    ovInv.map((c) => `${c.body.Invoices[0].Type}:${c.body.Invoices[0].LineItems[0].AccountCode}`));
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { arAccountCode: '', apAccountCode: '' } });
+
   console.log('\nA failure on one side leaves an exact record');
   const billWisma = await makeBill(abm.tenantId, {
     ref: 'JANS-WL-0826', supplier: 'Jabatan Air Negeri Sabah', total: 1240.50, address: WISMA
@@ -417,7 +439,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const halfLine = await db.getOne('SELECT ar_invoice_id, ap_invoice_id, line_error FROM recharge_run_lines WHERE run_id = ?', [run2.body.id]);
   check('the AR side that succeeded is remembered', Boolean(halfLine.ar_invoice_id), halfLine);
   check('the AP side is still missing, with the reason',
-    !halfLine.ap_invoice_id && /Account code 429/.test(halfLine.line_error), halfLine.line_error);
+    !halfLine.ap_invoice_id && /Account code 445 does not exist/.test(halfLine.line_error), halfLine.line_error);
 
   failOn = null;
   calls.length = 0;
