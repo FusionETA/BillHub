@@ -8,10 +8,13 @@
 # Reports what the deployment is before it touches anything, pulls, migrates,
 # runs the read-only preflight, restarts, and reports again.
 #
-# Safe to re-run. The migration only ever adds — the schema is all
-# CREATE TABLE IF NOT EXISTS and every column change checks
-# information_schema first — and the preflight makes no Xero call, so a
-# borrowed refresh token is never rotated by running this.
+# Safe to re-run: every column change checks information_schema first, and
+# the preflight makes no Xero call, so a borrowed refresh token is never
+# rotated by running this.
+#
+# The migration mostly adds, but it is no longer only-adds: a few retired
+# columns are dropped, and each of those first counts the rows that would
+# lose something and does nothing if there are any. Read what it prints.
 #
 # It will not run with uncommitted changes in the checkout: on a server those
 # are usually a hand-edit someone made under pressure and forgot, and a pull
