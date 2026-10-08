@@ -360,7 +360,9 @@ function premisesFromReference(reference) {
     console.log('─'.repeat(78));
     for (const { bill, verdict } of rows) {
       const total = Number(bill.total).toLocaleString('en-MY', { minimumFractionDigits: 2 });
-      console.log(`  ${pad(clip(bill.contact_name, 26), 27)}${pad(clip(bill.reference || bill.invoice_number, 16), 17)}${total.padStart(12)}`
+      // The reference gets the room, because on these bills it is where the
+      // premises is and the premises is the whole question.
+      console.log(`  ${pad(clip(bill.contact_name, 22), 23)}${pad(clip(bill.reference || bill.invoice_number, 28), 29)}${total.padStart(11)}`
         + (verdict.ownerCode ? `  → ${verdict.ownerCode}` : ''));
       if (key !== 'recharge' || process.argv.includes('--why')) {
         console.log(`    ${clip(verdict.reason, 70)}`);

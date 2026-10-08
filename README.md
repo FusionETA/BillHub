@@ -787,12 +787,26 @@ Counterparty contacts are found by name in each Xero and created if missing.
 
 ### Demo data
 
-`npm run recharge-preview` reports what the rules would do without doing any
-of it — see above. `node scripts/demo-recharge.js` seeds six address rules, three recharge rules
-and ten bills covering every branch of the decision — three matched by a
-premises, two by a recharge rule, and five where nothing should happen (the
-owner paid its own bill, unpaid, no premises match, a failed second condition,
-and one paid before its rule's start date). `--reset` removes them.
+`node scripts/demo-recharge.js` seeds a local account shaped like the live
+one: 25 bills, mostly on a single generic TNB contact with the premises in
+the reference (`006975997185-TS-17-M`), all paid by the management company.
+Three address rules and six recharge rules cover some of them, and two
+premises are deliberately left unruled so there is something to write.
+
+Every branch of the decision is on screen at once — recharged, the owner
+paid its own bill, out of scope by date, a failed second condition, a
+reference with no premises in it, and one unpaid. `CT-9-13-1` and
+`CT-9-13-10` belong to **different** entities on purpose: write that rule
+with `contains` instead of `ends with` and the mistake shows up as a cost
+charged to the wrong company rather than as a hypothetical.
+
+`--reset` removes it all, including rules earlier versions of the script
+left behind.
+
+Posting cannot be exercised locally: it writes a document into each of two
+organisations, so it needs two live Xero connections, and the mock ones have
+none. Everything up to Post works, and `test/recharge.test.js` covers the
+posting itself against a stubbed Xero.
 
 ## Status mapping
 
