@@ -638,7 +638,7 @@ async function postRun(accountId, runId) {
 // cannot be recharged — planRun refuses them — so there is no sense reading
 // them, and a dead tenant's orphaned bills would otherwise cost a failing
 // Xero call each.
-async function candidateBills(accountId, { limit = 200, billIds = null } = {}) {
+async function candidateBills(accountId, { limit = 200, billIds = null, supplier = null, tenantId = null } = {}) {
   const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   const live = (await entities.listByAccount(accountId, wazzocrAccountId)).map((e) => e.xero_tenant_id);
   if (!live.length) return [];
@@ -660,6 +660,17 @@ async function candidateBills(accountId, { limit = 200, billIds = null } = {}) {
   if (billIds && billIds.length) {
     where.push(`b.id IN (${billIds.map(() => '?').join(',')})`);
     params.push(...billIds.map(Number));
+  }
+  // Narrowed in SQL, not after the fact. Filtering a page of results would
+  // report "3 bills" where the answer is three hundred, and a report that
+  // undercounts is worse than no report.
+  if (supplier) {
+    where.push('b.contact_name LIKE ?');
+    params.push(`%${String(supplier).replace(/[%_]/g, '\\$&')}%`);
+  }
+  if (tenantId) {
+    where.push('b.xero_tenant_id = ?');
+    params.push(tenantId);
   }
   return db.query(
     `SELECT b.* FROM bills b WHERE ${where.join(' AND ')}

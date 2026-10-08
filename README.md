@@ -669,9 +669,24 @@ npm run recharge-preview -- --text --supplier "Tenaga Nasional"
 `--text` answers the question the address side always raises: a Xero bill has
 no premises field, so what can Bills Hub actually see? It reports, per
 supplier, how many bills carry an address WazzOCR read, how many have one in
-the reference, how many have one in the line items, and how many have nothing
-— then prints the real text so a rule can be written to match it. That turns
-"will address rules work?" from a guess into a worklist.
+the reference, how many have one in the line items, and how many have no
+street address at all — then prints the real text so a rule can be written to
+match it.
+
+Run against Ayu Borneo's own TNB bills it answered plainly: **none of them
+carries a street address, and none needs to.** Their bills look like
+
+```
+supplier   Tenaga Nasional Berhad - TD 11-1
+reference  001170153115 - TD 11-1
+lines      001170153115 - TD 11-1 TD 11-1 ELECTRIC OCTOBER 2026
+```
+
+One Xero contact per meter, with the premises in the contact's own name. So
+the report notices that — several contacts sharing a long prefix — and says
+to use a recharge rule on the supplier rather than an address rule, matching
+**is exactly** rather than **contains**, because `TD 11-1` is also inside
+`TD 11-10` and that mistake pays the wrong company.
 
 **Testing mode** covers the rest of the flow. Rules run against real Xero
 data, suggestions appear as normal, and a recharge can be drafted — but the

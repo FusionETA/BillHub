@@ -24,6 +24,7 @@ const db = require('../db');
 const recharge = require('../billhub/recharge');
 const model = require('../models/recharge');
 const premises = require('../lib/premises');
+const entityRef = require('../lib/entityRef');
 
 const ACCOUNT_ID = Number(process.env.DEMO_ACCOUNT_ID || process.env.BILLHUB_ACCOUNT_ID || 1);
 
@@ -63,18 +64,21 @@ const clip = (s, n) => {
     console.log('No rules yet, so nothing would be recharged. Add one on the Recharge tab.\n');
   }
 
-  let bills = await recharge.candidateBills(ACCOUNT_ID, { limit: Math.max(limit, 20) });
-  if (supplier) {
-    const key = premises.normalise(supplier);
-    bills = bills.filter((b) => premises.normalise(b.contact_name).includes(key));
-  }
+  let tenantId = null;
   if (entity) {
     const ent = await db.getOne('SELECT xero_tenant_id FROM entities WHERE account_id = ? AND code = ?',
       [ACCOUNT_ID, entity]);
     if (!ent) { console.error(`No entity with the code "${entity}".`); process.exit(1); }
-    bills = bills.filter((b) => b.xero_tenant_id === ent.xero_tenant_id);
+    tenantId = ent.xero_tenant_id;
   }
-  bills = bills.slice(0, limit);
+  // Both filters go into the query. Narrowing a page of results afterwards
+  // would report three bills where the answer is three hundred.
+  const matching = await recharge.candidateBills(ACCOUNT_ID, { limit: 5000, supplier, tenantId });
+  const bills = matching.slice(0, limit);
+  if (matching.length > bills.length) {
+    console.log(`${matching.length} paid, un-recharged bill(s) match; reading the most recent ${bills.length}.`);
+    console.log('Raise --limit to read more (each one costs a Xero call).');
+  }
 
   if (!bills.length) {
     console.log('No paid, un-recharged bills match that.\n');
@@ -103,7 +107,7 @@ const clip = (s, n) => {
       if (stored) { tally.read += 1; where = 'read off the document'; }
       else if (looksLikeAddress(refText)) { tally.reference += 1; where = 'in the reference'; }
       else if (looksLikeAddress(lineText)) { tally.lines += 1; where = 'in the line items'; }
-      else { tally.nothing += 1; where = 'nowhere'; }
+      else { tally.nothing += 1; where = 'no street address on it'; }
 
       if (samples.length < 12) {
         samples.push({ b, where, refText: refText.trim(), lineText, stored });
@@ -115,7 +119,7 @@ const clip = (s, n) => {
     console.log(`  premises read off the document   ${pct(tally.read)}   (WazzOCR writes this)`);
     console.log(`  address-like text in the reference ${pct(tally.reference)}`);
     console.log(`  address-like text in the line items${pct(tally.lines)}`);
-    console.log(`  nothing that could carry an address${pct(tally.nothing)}`);
+    console.log(`  no street address anywhere on it  ${pct(tally.nothing)}`);
 
     console.log('\n  What is actually on them:');
     for (const s of samples) {
@@ -126,12 +130,44 @@ const clip = (s, n) => {
       if (s.lineText) console.log(`      lines    "${clip(s.lineText, 68)}"`);
     }
 
+    // The pattern Ayu Borneo actually uses: one Xero contact per meter,
+    // "Tenaga Nasional Berhad - TD 11-1". The premises is in the supplier
+    // name, so there is nothing to match an address against and nothing
+    // wrong with that — it just means a different kind of rule.
+    const names = [...new Set(matching.map((b) => b.contact_name).filter(Boolean))];
+    const sharedPrefix = entityRef.commonPrefix(names);
+    const perPremises = names.length > 1 && sharedPrefix.length >= 6;
+
     console.log('\n  Reading this:');
-    console.log('   · Anything in the first row is ready for an address rule today.');
-    console.log('   · Lines and references are where a bookkeeper writes the premises —');
-    console.log('     write the rule exactly as the text there spells it.');
-    console.log('   · The last row is what recharge rules are for: match the supplier,');
-    console.log('     the reference or a tracking category instead.\n');
+    if (tally.read) {
+      console.log(`   · ${tally.read} bill(s) carry an address somebody read off the document.`);
+      console.log('     Those are ready for an address rule today.');
+    }
+    if (tally.reference || tally.lines) {
+      console.log(`   · ${tally.reference + tally.lines} have address-like text in the reference or`);
+      console.log('     the line items. An address rule works on those if it is written');
+      console.log('     exactly as the text above spells it.');
+    }
+    if (perPremises) {
+      console.log(`\n   · ${names.length} different Xero contacts here share the name "${sharedPrefix.trim()}":`);
+      for (const n of names.slice(0, 14)) {
+        console.log(`       ${n}   (${matching.filter((b) => b.contact_name === n).length} paid bill(s))`);
+      }
+      if (names.length > 14) console.log(`       … and ${names.length - 14} more`);
+      console.log('\n     That is one contact per premises, so the premises is already in');
+      console.log('     the supplier name. Nothing to match an address against, and');
+      console.log('     nothing wrong with that — use a recharge rule instead:');
+      console.log('');
+      console.log(`         Supplier  is exactly  "${names[0]}"   →  the entity that occupies it`);
+      console.log('');
+      console.log('     "is exactly" rather than "contains": a code like TD 11-1 is also');
+      console.log('     inside TD 11-10, and that mistake pays the wrong company.');
+    } else if (tally.nothing === bills.length) {
+      console.log('   · None of them carries anything an address rule could match.');
+      console.log('     Use a recharge rule: match the supplier, the reference, the');
+      console.log('     line description or a tracking category instead.');
+    }
+    console.log('');
     await db.close();
     return;
   }
