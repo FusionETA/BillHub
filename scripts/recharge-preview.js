@@ -66,6 +66,26 @@ function shortestAmbiguous(members) {
   return null;
 }
 
+// The premises code inside a reference.
+//
+// Ayu Borneo's TNB references are the meter's account number, then the
+// premises: "006975997185-TS-17-M", "000323819565-HQ-J-28-02". The premises
+// itself contains hyphens, so the split is after the account number — a run
+// of ten or more digits — not at the first hyphen. Some are written with
+// spaces around the dash instead, "001170153115 - TD 11-1", so both.
+//
+// Returns null rather than guessing when there is no account number to split
+// on: a reference this cannot read is one somebody has to look at, and
+// saying so beats inventing a premises for it.
+function premisesFromReference(reference) {
+  const ref = String(reference || '').trim();
+  const withAccount = /^\s*\d{10,}\s*-\s*(.+)$/.exec(ref);
+  if (withAccount) return withAccount[1].trim();
+  const spaced = /^.*?\s+-\s+(.+)$/.exec(ref);
+  if (spaced) return spaced[1].trim();
+  return null;
+}
+
 (async () => {
   const limit = Number(arg('limit', 60));
   const supplier = arg('supplier');
@@ -189,21 +209,42 @@ function shortestAmbiguous(members) {
       // premises is the tail. "ends with" pins it there, which "contains"
       // does not: a reference ending "WM Hostel 1-20" contains "WM Hostel
       // 1-2" and a contains rule would claim it.
-      const sample = table
-        .filter((t) => !/\s+-\s+/.test(t.name))
-        .flatMap((t) => t.samples)
-        .find((r) => /\s+-\s+/.test(r));
-      if (sample) {
-        const tail = sample.split(/\s+-\s+/).slice(1).join(' - ').trim();
+      // How many distinct premises are in those references — which is how
+      // many rules this comes to, and the only number that says whether
+      // this is ten minutes of typing or an import.
+      const byPremises = new Map();
+      const unreadable = [];
+      for (const b of matching) {
+        if (/\s+-\s+/.test(b.contact_name || '')) continue;   // premises is in the name
+        const code = premisesFromReference(b.reference || b.invoice_number);
+        if (!code) { unreadable.push(b); continue; }
+        byPremises.set(code, (byPremises.get(code) || 0) + 1);
+      }
+      const premisesList = [...byPremises.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+      if (premisesList.length) {
+        console.log(`\n  ${premisesList.length} distinct premises in those references:`);
+        for (const [code, n] of premisesList.slice(0, 30)) {
+          console.log(`      ${pad(code, 26)}${String(n).padStart(4)} bill(s)`);
+        }
+        if (premisesList.length > 30) console.log(`      … and ${premisesList.length - 30} more`);
+
+        const first = premisesList[0][0];
         console.log('');
-        console.log(`      Reference  ends with  "${tail}"   →  the entity that occupies it`);
+        console.log(`      Reference  ends with  "-${first}"   →  the entity that occupies it`);
         console.log('');
-        console.log(`  Taken from "${clip(sample, 56)}". "ends with" rather than`);
-        console.log('  "contains" pins the premises to the end, where it is — a reference');
-        console.log(`  ending "${tail}0" contains "${tail}" too.`);
-      } else {
-        console.log('  Look at the references above and match whichever part names the');
-        console.log('  premises, pinning it with "ends with" or "is exactly" where you can.');
+        console.log('  "ends with" rather than "contains", and keep the leading dash: it');
+        console.log('  pins the premises to the end of the reference, where it is.');
+        console.log(`\n  That is ${premisesList.length} rule(s) — one per premises. If that is more than you`);
+        console.log('  want to type, the mapping of premises to entity can be imported');
+        console.log('  from a spreadsheet instead.');
+      }
+      if (unreadable.length) {
+        console.log(`\n  ${unreadable.length} reference(s) have no account number to split on, so the`);
+        console.log('  premises could not be read out of them. A few to look at:');
+        for (const b of unreadable.slice(0, 5)) {
+          console.log(`      "${clip(b.reference || b.invoice_number || '(none)', 56)}"`);
+        }
       }
     }
     if (new Set(table.flatMap((t) => t.payers)).size > 3) {

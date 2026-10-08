@@ -702,18 +702,31 @@ worklist.
 ```
 
 It also says what share of the bills that pattern covers, so a pattern
-covering 2% is not mistaken for the answer, and for the rest it reads a real
-reference and suggests the rule for it:
+covering 2% is not mistaken for the answer — and for the rest it reads the
+premises out of the references and counts them, which is the number of rules
+the job comes to:
 
 ```
-      Reference  ends with  "WM Hostel 1-2"   →  the entity that occupies it
+  157 of the 157 bill(s) — 100% — are on a contact whose name
+  carries no premises.
+
+  43 distinct premises in those references:
+      TS-17-M                      9 bill(s)
+      HQ-J-28-02                   6 bill(s)
+      …
+
+      Reference  ends with  "-TS-17-M"   →  the entity that occupies it
 ```
 
-`ends with` rather than `contains`, pinning the premises to the end where it
-is — a reference ending `WM Hostel 1-20` contains `WM Hostel 1-2` too, and a
-`contains` rule would claim it and pay the wrong company. Where the premises
-codes present do collide that way, the report names the real pair rather
-than warning in the abstract.
+The split is after the meter's account number — a run of ten or more
+digits — not at the first hyphen, because the premises contains hyphens of
+its own (`HQ-J-28-02`). A reference with no account number to split on is
+reported for somebody to look at rather than guessed at.
+
+`ends with` rather than `contains`, keeping the leading dash: it pins the
+premises to the end of the reference, where it is. `CT-9-13-1` is inside
+`CT-9-13-10`, and a `contains` rule would claim both and pay the wrong
+company.
 
 `--text` reads line items, so it costs a Xero call per bill and can only
 afford a sample. It now prints the supplier pattern first, because where that
