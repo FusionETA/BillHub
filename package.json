@@ -11,7 +11,7 @@
     "db:test": "node scripts/db-test.js",
     "create-account": "node scripts/create-account.js",
     "sync": "node scripts/sync-bills.js",
-    "test": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/api.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/sync.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/grant.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/payments.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/digest.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/recharge.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/safety.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/ownmode.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/openaccess.test.js",
+    "test": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/api.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/sync.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/grant.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/payments.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/digest.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/recharge.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/safety.test.js && node test/migrate.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/ownmode.test.js && DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/openaccess.test.js",
     "test:api": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/api.test.js",
     "test:sync": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/sync.test.js",
     "test:seed": "DB_NAME=${BILLHUB_TEST_DB:-billhub_suite} node test/seed.js",
@@ -37,7 +37,8 @@
     "bank-names": "node scripts/bank-names.js",
     "ready-to-pay": "node scripts/ready-to-pay.js",
     "payee-codes": "node scripts/payee-codes.js",
-    "recharge-preview": "node scripts/recharge-preview.js"
+    "recharge-preview": "node scripts/recharge-preview.js",
+    "test:migrate": "node test/migrate.test.js"
   },
   "engines": {
     "node": ">=18"

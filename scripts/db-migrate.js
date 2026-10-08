@@ -47,6 +47,25 @@ const isNullable = (table, column) => `
   SELECT IS_NULLABLE AS yn FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`;
 
+// Add a column only if it is missing, as a statement that can sit in front of
+// another. An adjustment that needs a column some *other* adjustment adds is
+// the coupling this file exists to avoid — see the note above — so instead of
+// relying on list order, the adjustment carries what it needs with it.
+const ensureColumn = (table, column, definition) => `
+  SET @needed := (SELECT COUNT(*) = 0 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}');
+  SET @sql := IF(@needed, 'ALTER TABLE ${table} ADD COLUMN ${column} ${definition}', 'DO 0');
+  PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s`;
+
+// Drop a column only if it is there. The mirror of ensureColumn, for a
+// column that exists on some databases and never existed on others — an
+// unconditional DROP would be a hard stop on the ones that never had it.
+const dropColumnIfPresent = (table, column) => `
+  SET @present := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}');
+  SET @sql := IF(@present, 'ALTER TABLE ${table} DROP COLUMN ${column}', 'DO 0');
+  PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s`;
+
 // Retiring columns, guarded by a count that mentions them.
 //
 // A plain `WHERE settled = 1` cannot be the check: MySQL parses the whole
@@ -83,7 +102,10 @@ const ADJUSTMENTS = [
     why: 'recharge_runs.uq_run_bill — one LIVE run per bill, per mode',
     check: hasColumn('recharge_runs', 'live_bill_id'),
     needed: (row) => Number(row.n) === 0,
-    sql: `ALTER TABLE recharge_runs
+    // The key names test_mode, which another adjustment adds. Carried here
+    // rather than assumed, so this does not depend on list order.
+    sql: `${ensureColumn('recharge_runs', 'test_mode', 'TINYINT(1) NOT NULL DEFAULT 0')};
+          ALTER TABLE recharge_runs
             DROP INDEX uq_run_bill,
             ADD COLUMN live_bill_id BIGINT UNSIGNED GENERATED ALWAYS AS
               (IF(status = 'cancelled', NULL, bill_id)) VIRTUAL,
@@ -157,14 +179,23 @@ const ADJUSTMENTS = [
     // parses the whole statement before any guard can skip it. Carried, not
     // simply dropped: a rule whose supplier vanished would widen silently
     // from one supplier to every supplier.
-    why: 'recharge_rules.supplier_name / bill_type — moved into recharge_rule_suppliers',
+    why: 'recharge_rules.supplier_name — moved into recharge_rule_suppliers',
     check: hasColumn('recharge_rules', 'supplier_name'),
     needed: (row) => Number(row.n) === 1,
     sql: `INSERT IGNORE INTO recharge_rule_suppliers (rule_id, supplier_name, supplier_key)
           SELECT id, supplier_name, LOWER(REGEXP_REPLACE(supplier_name, '[^a-zA-Z0-9]', ''))
             FROM recharge_rules
            WHERE supplier_name IS NOT NULL AND supplier_name <> '';
-          ALTER TABLE recharge_rules DROP COLUMN supplier_name, DROP COLUMN bill_type`
+          ALTER TABLE recharge_rules DROP COLUMN supplier_name`
+  },
+  {
+    // Carried a bill type for part of this release and then stopped: the
+    // supplier already says what kind of bill it is. Only ever existed on a
+    // database that saw the middle of the release, so the drop is guarded.
+    why: 'recharge_rules.bill_type — the supplier already says what kind of bill it is',
+    check: hasColumn('recharge_rules', 'bill_type'),
+    needed: (row) => Number(row.n) === 1,
+    sql: dropColumnIfPresent('recharge_rules', 'bill_type')
   },
   {
     why: 'recharge_text_rules — rules that match on supplier, reference or other text',
@@ -226,23 +257,37 @@ const ADJUSTMENTS = [
        + 'ADD COLUMN premises_source VARCHAR(16) NULL'
   },
   {
-    why: 'recharge_rules — premises address, its match key, the owning entity and the bill type',
+    why: 'recharge_rules — premises address, its match key and the owning entity',
     check: hasColumn('recharge_rules', 'premises_address'),
     needed: (row) => Number(row.n) === 0,
     sql: 'ALTER TABLE recharge_rules '
-       + "ADD COLUMN bill_type VARCHAR(24) NOT NULL DEFAULT 'other', "
        + 'ADD COLUMN premises_address VARCHAR(512) NULL, '
        + 'ADD COLUMN address_key VARCHAR(512) NULL, '
        + 'ADD COLUMN owner_tenant_id VARCHAR(64) NULL, '
        + 'ADD COLUMN rule_key CHAR(64) NULL'
   },
   {
-    // The old table demanded a payer on every rule. A rule no longer has one,
-    // so a NOT NULL here would reject every rule the new dialog creates.
-    why: 'recharge_rules.payer_tenant_id — no longer part of a rule, so nullable',
-    check: isNullable('recharge_rules', 'payer_tenant_id'),
-    needed: (row) => row && row.yn === 'NO',
-    sql: 'ALTER TABLE recharge_rules MODIFY payer_tenant_id VARCHAR(64) NULL'
+    // The old table demanded a payer on every rule. A rule names a premises
+    // and nothing else now, so the column goes — but only where nothing is
+    // stored in it, and nullable first so an older database that still has
+    // values can at least accept new rules.
+    why: 'recharge_rules.payer_tenant_id — a rule names a premises, not a payer',
+    check: hasColumn('recharge_rules', 'payer_tenant_id'),
+    needed: (row) => Number(row.n) === 1,
+    sql: `ALTER TABLE recharge_rules MODIFY payer_tenant_id VARCHAR(64) NULL;
+          ${dropIfUnused('recharge_rules', ['payer_tenant_id'], 'payer_tenant_id IS NOT NULL')}`
+  },
+  {
+    // The lookup index led with payer_tenant_id, which no longer exists and
+    // was never what a rule is found by. Left alone, an upgraded database
+    // and a fresh one disagree about their own indexes.
+    why: 'recharge_rules.idx_rule_lookup — rules are found by account and enabled, not by payer',
+    check: `SELECT COUNT(*) AS n FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rules'
+               AND INDEX_NAME = 'idx_rule_lookup' AND COLUMN_NAME = 'payer_tenant_id'`,
+    needed: (row) => Number(row.n) === 1,
+    sql: `ALTER TABLE recharge_rules DROP INDEX idx_rule_lookup;
+          ALTER TABLE recharge_rules ADD INDEX idx_rule_lookup (account_id, enabled)`
   },
   {
     why: 'recharge_rules — one rule per supplier + premises',

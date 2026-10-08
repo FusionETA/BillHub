@@ -75,8 +75,12 @@ function refused(fn) {
   // likelier that was. A deployment found it the hard way.
   //
   // Column position is cosmetic, so the rule is simply that none of them say
-  // AFTER. Cheap to check, and it rules out the whole class rather than the
-  // three instances.
+  // AFTER. Cheap to check, and it rules out that shape of the problem.
+  //
+  // It does not rule out the others — a key or a DROP naming a column some
+  // later adjustment adds reads perfectly well and still stops a deployment
+  // dead. Only running the whole migration against an older schema catches
+  // those, which is test/migrate.test.js.
   {
     console.log('\nMigration adjustments');
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'db-migrate.js'), 'utf8');
