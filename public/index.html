@@ -332,16 +332,24 @@
 
           {open && <div style={{ position: 'absolute', zIndex: 30, top: 52, left: 0, right: 0, background: 'var(--surface-card)', border: '1.5px solid var(--border-default)', borderRadius: 12, boxShadow: '0 12px 32px rgba(16,24,40,.16)', padding: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{value.length} of {options.length} selected</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                {value.length} of {options.length} selected
+                {q && shown.length !== options.length ? ` · ${shown.length} match "${q}"` : ''}
+              </span>
               <span style={{ flex: 1 }} />
               {value.length > 0 && <button type="button" onClick={() => onChange([])}
                 style={{ border: 'none', background: 'none', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer', padding: 0 }}>Clear</button>}
             </div>
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers"
               style={{ width: '100%', boxSizing: 'border-box', height: 40, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 12px', fontFamily: 'var(--font-body)', fontSize: 13.5, color: 'var(--text-body)', background: 'var(--surface-card)', outline: 'none', marginBottom: 8 }} />
-            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {/* Every match, not a page of them. A cap here was silently
+                cutting an 887-supplier list off at D, and a list that
+                quietly omits what you are looking for is worse than a slow
+                one — the checkboxes are cheap, and the search narrows it
+                long before the length is a problem. */}
+            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
               {shown.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>No supplier matches "{q}".</div>}
-              {shown.slice(0, 200).map(name => (
+              {shown.map(name => (
                 <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 2px', fontSize: 13.5, color: 'var(--text-body)', cursor: 'pointer' }}>
                   <input type="checkbox" checked={chosen.has(name)} onChange={() => toggle(name)}
                     style={{ width: 17, height: 17, accentColor: 'var(--color-primary)', cursor: 'pointer' }} />
