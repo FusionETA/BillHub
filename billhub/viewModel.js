@@ -495,7 +495,7 @@ function rechargeTextRuleCard(r, waiting = 0) {
     operatorLabel: rechargeModel.operatorLabel(c.operator),
     value: c.value
   }));
-  const start = r.start_date ? shortDate(r.start_date) : null;
+  const written = r.created_at ? shortDate(r.created_at) : null;
   return {
     id: r.id,
     name: r.name,
@@ -507,13 +507,12 @@ function rechargeTextRuleCard(r, waiting = 0) {
     ownerTenantId: r.owner_tenant_id,
     ownerCode: r.owner_code || '—',
     ownerShort: r.owner_short || '—',
-    startDate: r.start_date ? String(r.start_date instanceof Date
-      ? r.start_date.toISOString().slice(0, 10)
-      : r.start_date).slice(0, 10) : null,
     on: Boolean(r.enabled),
     waiting: Number(waiting) || 0,
     waitingLabel: waiting ? `${waiting} paid bill${waiting === 1 ? '' : 's'} waiting` : null,
-    meta: `Bills paid on or after ${start || '—'} · `
+    // What the rule covers, said in terms of the only two moments that
+    // decide it: when the rule was written, and whether it has been run.
+    meta: `Bills marked paid here after ${written || 'it was written'} · `
         + (r.last_run_at ? `last run ${shortDate(r.last_run_at)}` : 'Not run yet')
   };
 }

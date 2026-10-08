@@ -237,9 +237,13 @@ router.get('/text-rules', async (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
-// How many paid bills a rule *would* act on, asked before it is saved. The
-// dialog shows this so nobody has to save a rule to find out whether it hits
-// anything — and so "Run now on these bills after saving" can say how many.
+// Whether a rule's conditions pick out the bills somebody means.
+//
+// Not "how many will this draft": a rule acts on bills marked paid after it
+// was written, so for a rule that does not exist yet the answer is always
+// none. What the dialog needs is confirmation that the conditions are
+// right, which the bills already paid can give — so this matches them
+// ignoring that test, and says plainly that those ones are behind it.
 router.post('/text-rules/preview', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
@@ -250,15 +254,19 @@ router.post('/text-rules/preview', async (req, res) => {
       match_mode: body.matchMode === 'any' ? 'any' : 'all',
       payer_tenant_id: body.payerTenantId || null,
       owner_tenant_id: body.ownerTenantId || null,
-      start_date: body.startDate || null
+      // A rule being typed has not been written yet, so nothing is behind
+      // it: the preview shows what it would catch from here on.
+      created_at: new Date()
     };
-    if (!draft.conditions.length || !draft.owner_tenant_id || !draft.start_date) {
+    if (!draft.conditions.length || !draft.owner_tenant_id) {
       return res.json({ count: 0, bills: [], incomplete: true });
     }
-    const bills = await recharge.waitingFor(accountId, draft, { limit: 200 });
+    const bills = await recharge.waitingFor(accountId, draft, { limit: 200, ignoreWritten: true });
     res.json({
       count: bills.length,
       incomplete: false,
+      // Every one of them is already paid, so the rule will not touch any.
+      alreadyPaid: true,
       bills: bills.slice(0, 8).map((b) => ({
         id: b.id, supplier: b.contact_name,
         reference: b.reference || b.invoice_number,
@@ -276,12 +284,11 @@ router.post('/text-rules', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
     const id = await model.createTextRule(accountId, req.body || {});
-    // Saving a rule only ever creates the rule. Acting on the bills already
-    // paid is a separate, explicit act — asked for in the dialog, done here.
-    let ran = null;
-    if ((req.body || {}).runNow === true) ran = await recharge.runTextRule(accountId, id);
+    // Saving a rule only creates the rule. It acts on bills marked paid
+    // after this moment and on nothing before it, so there is nothing to
+    // sweep up here.
     const rule = await model.getTextRule(accountId, id);
-    res.status(201).json({ ok: true, id, ran, rule: vm.rechargeTextRuleCard(rule, 0) });
+    res.status(201).json({ ok: true, id, rule: vm.rechargeTextRuleCard(rule, 0) });
   } catch (err) {
     console.error('[recharge] create rule failed:', err.message);
     fail(res, err, 400);
@@ -292,10 +299,8 @@ router.patch('/text-rules/:id(\\d+)', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
     await model.updateTextRule(accountId, Number(req.params.id), req.body || {});
-    let ran = null;
-    if ((req.body || {}).runNow === true) ran = await recharge.runTextRule(accountId, Number(req.params.id));
     const rule = await model.getTextRule(accountId, Number(req.params.id));
-    res.json({ ok: true, ran, rule: vm.rechargeTextRuleCard(rule, 0) });
+    res.json({ ok: true, rule: vm.rechargeTextRuleCard(rule, 0) });
   } catch (err) { fail(res, err, 400); }
 });
 

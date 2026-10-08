@@ -528,9 +528,14 @@ async function applyPaidLocally(accountId, batch, lines) {
       `UPDATE bills
           SET amount_paid = amount_paid + ?, amount_due = GREATEST(amount_due - ?, 0),
               xero_status = IF(amount_due - ? <= 0, 'PAID', xero_status),
-              fully_paid_on = IF(amount_due - ? <= 0, ?, fully_paid_on)
+              fully_paid_on = IF(amount_due - ? <= 0, ?, fully_paid_on),
+              -- Set here and nowhere else. The sync overwrites the other
+              -- three from Xero, so none of them can say whether a bill was
+              -- paid through Bills Hub or straight in Xero — and a recharge
+              -- follows from the first, not the second.
+              marked_paid_at = IF(amount_due - ? <= 0, COALESCE(marked_paid_at, NOW()), marked_paid_at)
         WHERE account_id = ? AND id = ?`,
-      [l.amount, l.amount, l.amount, l.amount, batch.payment_date, accountId, l.bill_id]
+      [l.amount, l.amount, l.amount, l.amount, batch.payment_date, l.amount, accountId, l.bill_id]
     );
   }
 }

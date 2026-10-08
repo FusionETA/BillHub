@@ -79,7 +79,6 @@ const TEXT_RULES = [
   }
 ];
 
-const START = '2026-08-01';
 const PAID_ON = '2026-09-20';
 
 // Everything this script writes, so --reset can find it again.
@@ -140,9 +139,11 @@ function billRows() {
     payer: 'ABM', total: 6420.00, paidOn: PAID_ON, note: 'recharge rule -> ABKJ'
   });
   add({
+    // Marked paid in Bills Hub long before the rule was written, so the rule
+    // does not reach it. The one case that proves the cut exists.
     supplier: 'KWSP (EPF)', reference: 'EPF-0726',
-    payer: 'ABM', total: 6180.00, paidOn: '2026-07-15',
-    note: `out of scope — paid before ${START}`
+    payer: 'ABM', total: 6180.00, paidOn: '2026-07-15', beforeRules: true,
+    note: 'out of scope — marked paid before the rule was written'
   });
   add({
     supplier: 'Petronas Dagangan Berhad', reference: 'PDB-FLEET-0926',
@@ -266,31 +267,53 @@ async function reset() {
     await model.createTextRule(ACCOUNT_ID, {
       name: r.name, matchMode: 'all', conditions: r.conditions,
       payerTenantId: r.payer ? byCode.get(r.payer) : null,
-      ownerTenantId: byCode.get(r.owner), startDate: START
+      ownerTenantId: byCode.get(r.owner)
     });
     console.log(`  + ${r.owner.padEnd(6)} ${r.name}`);
   }
 
   console.log('\nBills');
+  // The rules were written a moment ago. A bill marked paid after that is in
+  // scope; the one marked paid before it is not, which is the whole point of
+  // the cut and has to be visible on screen.
+  const now = Date.now();
+  // Local time, not toISOString(). MySQL writes created_at from its own
+  // clock and mysql2 reads a DATETIME back as local, so a UTC string here
+  // lands eight hours in the past and every bill looks older than the rule
+  // that was written a second before it.
+  const stamp = (t) => {
+    const d = new Date(t);
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} `
+         + `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  };
+  const afterRules = stamp(now + 60000);
+  const beforeRules = stamp(now - 90 * 86400000);
   const rows = billRows();
   for (const b of rows) {
     const paid = Boolean(b.paidOn);
     await db.execute(
       `INSERT INTO bills (account_id, xero_tenant_id, xero_invoice_id, invoice_number, reference,
          contact_id, contact_name, xero_status, bill_date, due_date, fully_paid_on, currency_code,
-         sub_total, total_tax, total, amount_paid, amount_due, premises_address, premises_source)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,'MYR',?,0,?,?,?,?,?)
+         sub_total, total_tax, total, amount_paid, amount_due, premises_address, premises_source,
+         marked_paid_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,'MYR',?,0,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE
          reference = VALUES(reference), contact_name = VALUES(contact_name),
          xero_status = VALUES(xero_status), fully_paid_on = VALUES(fully_paid_on),
          amount_paid = VALUES(amount_paid), amount_due = VALUES(amount_due),
-         premises_address = VALUES(premises_address), premises_source = VALUES(premises_source)`,
+         premises_address = VALUES(premises_address), premises_source = VALUES(premises_source),
+         marked_paid_at = VALUES(marked_paid_at)`,
       [
         ACCOUNT_ID, byCode.get(b.payer), b.xid, `INV-${b.reference}`.slice(0, 255), b.reference,
         contactId(b.supplier), b.supplier,
         paid ? 'PAID' : 'AUTHORISED', '2026-09-01', '2026-09-28', b.paidOn,
         b.total, b.total, paid ? b.total : 0, paid ? 0 : b.total,
-        b.address || null, b.address ? 'ocr' : null
+        b.address || null, b.address ? 'ocr' : null,
+        // What the engine actually keys on. Dated a minute after the rules
+        // for everything in scope, and well before them for the one bill
+        // that is meant to fall outside.
+        paid ? (b.beforeRules ? beforeRules : afterRules) : null
       ]
     );
     console.log(`  ${b.payer.padEnd(5)} ${b.reference.padEnd(27)} ${b.total.toFixed(2).padStart(9)}  ${b.note}`);

@@ -165,6 +165,12 @@ CREATE TABLE IF NOT EXISTS bills (
   -- 'manual' (typed in Bills Hub). Worth knowing, because one of these is a
   -- transcription and the other two are guesses at where someone wrote it.
   premises_source  VARCHAR(16) NULL,
+  -- When Bills Hub itself marked this bill paid. Distinct from fully_paid_on
+  -- and xero_status, which the sync overwrites from Xero and so cannot say
+  -- who decided: a bill paid directly in Xero looks identical to one paid
+  -- through here. A recharge keys on this one, because a recharge is a
+  -- consequence of an action somebody took in Bills Hub.
+  marked_paid_at   DATETIME NULL,
   updated_date_utc DATETIME NULL,          -- Xero's UpdatedDateUTC
   synced_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_bill (account_id, xero_tenant_id, xero_invoice_id),
@@ -529,9 +535,9 @@ CREATE TABLE IF NOT EXISTS recharge_rule_suppliers (
 -- so these rules match on that text instead.
 --
 -- Only consulted when no address rule matched. A rule acts on bills marked
--- paid on or after its start date, so creating one cannot quietly reach back
--- through years of history; reaching back is a deliberate act (Run now, or
--- moving the date).
+-- paid in Bills Hub after the rule was written — created_at is the line, so
+-- writing a rule cannot quietly reach back through years of history and
+-- there is no separate date to keep in step with it.
 CREATE TABLE IF NOT EXISTS recharge_text_rules (
   id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   account_id      BIGINT UNSIGNED NOT NULL,
@@ -542,14 +548,11 @@ CREATE TABLE IF NOT EXISTS recharge_text_rules (
   -- one particular company paid.
   payer_tenant_id VARCHAR(64) NULL,
   owner_tenant_id VARCHAR(64) NOT NULL,
-  -- Bills marked paid before this are out of scope. Defaults to the day the
-  -- rule was written.
-  start_date      DATE NOT NULL,
   enabled         TINYINT(1) NOT NULL DEFAULT 1,
   last_run_at     DATETIME NULL,
   position        INT DEFAULT 0,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_text_rule_lookup (account_id, enabled, start_date),
+  INDEX idx_text_rule_lookup (account_id, enabled, created_at),
   CONSTRAINT fk_trule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

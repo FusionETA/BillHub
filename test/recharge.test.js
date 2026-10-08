@@ -82,6 +82,15 @@ function req(method, path, { body, cookie } = {}) {
   });
 }
 
+// Marking a bill paid in Bills Hub, after something else has happened.
+// A recharge rule only reaches bills marked paid after it was written, so a
+// test that writes the rule second has to say when the paying happened.
+async function paidNow(...ids) {
+  for (const id of ids) {
+    await db.execute('UPDATE bills SET marked_paid_at = NOW() WHERE id = ?', [id]);
+  }
+}
+
 let pass = 0, fail = 0;
 function check(name, ok, detail) {
   if (ok) { pass += 1; console.log('  ok    ' + name); }
@@ -107,12 +116,12 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const res = await db.execute(
     `INSERT INTO bills (account_id, xero_tenant_id, xero_invoice_id, invoice_number, reference,
        contact_id, contact_name, xero_status, bill_date, due_date, fully_paid_on, currency_code,
-       total, amount_paid, amount_due, premises_address, premises_source)
-     VALUES (1,?,?,?,?,?,?,?,'2026-07-28','2026-08-25',?,'MYR',?,?,?,?,?)`,
+       total, amount_paid, amount_due, premises_address, premises_source, marked_paid_at)
+     VALUES (1,?,?,?,?,?,?,?,'2026-07-28','2026-08-25',?,'MYR',?,?,?,?,?, IF(?, NOW(), NULL))`,
     [tenant, xid, `INV-${ref}`, ref, `c-${supplier}`, supplier,
      paid ? 'PAID' : 'AUTHORISED', paid ? paidOn : null,
      total, paid ? total : 0, paid ? 0 : total,
-     address, address ? 'ocr' : null]
+     address, address ? 'ocr' : null, paid ? 1 : 0]
   );
   // The id of the row just written, not of whatever else shares the
   // reference — the seed carries its own EPF-0826.
@@ -250,6 +259,27 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
   check('a second supplier at a different premises is fine', water.status === 201, water.body);
 
+  console.log('\nPaid means paid HERE');
+  // The sync writes xero_status and fully_paid_on from Xero, so both are
+  // true of every bill anyone has ever settled directly in Xero —
+  // thousands of them, none the result of anything done in Bills Hub.
+  const inXeroOnly = await makeBill(abm.tenantId, {
+    ref: 'TNB-XERO-0826', supplier: 'Tenaga Nasional Berhad', total: 1200.00, address: KILANG
+  });
+  await db.execute('UPDATE bills SET marked_paid_at = NULL WHERE id = ?', [inXeroOnly]);
+  const vXero = await verdict(inXeroOnly);
+  check('a bill settled in Xero but not here does not set a recharge going',
+    vXero.outcome === 'unpaid', vXero);
+  check('and says where the paying has to happen',
+    /marked paid in Bills Hub/.test(vXero.reason), vXero.reason);
+  check('it is not offered as a candidate either',
+    !(await req('GET', '/api/recharge/suggestions', { cookie })).body.suggestions
+      .some((x) => x.reference === 'TNB-XERO-0826'));
+  await paidNow(inXeroOnly);
+  check('marking it paid here is what makes it one',
+    (await verdict(inXeroOnly)).outcome === 'recharge');
+  await db.execute('DELETE FROM bills WHERE id = ?', [inXeroOnly]);
+
   console.log('\nThe four steps');
   async function verdict(billId) {
     return (await req('GET', `/api/recharge/bills/${billId}/decide`, { cookie })).body;
@@ -322,8 +352,9 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const notPaid = await req('POST', '/api/recharge/plan', {
     cookie, body: { billId: unpaidBill, ownerTenantId: kj.tenantId }
   });
-  check('an unpaid bill cannot be recharged',
-    notPaid.status === 400 && /has not been paid/.test(notPaid.body.error), notPaid.body.error);
+  check('a bill not marked paid in Bills Hub cannot be recharged',
+    notPaid.status === 400 && /has not been marked paid in Bills Hub/.test(notPaid.body.error),
+    notPaid.body.error);
 
   const plan = await req('POST', '/api/recharge/plan', { cookie, body: { billId: billKilang } });
   check('the rules work out the plan on their own', plan.status === 200, plan.body);
@@ -537,6 +568,8 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const epfJul = await makeBill(abm.tenantId, {
     ref: 'EPF-0726', supplier: 'KWSP (EPF)', total: 6180.00, paidOn: '2026-07-15'
   });
+  // Marked paid long before any rule here was written.
+  await db.execute("UPDATE bills SET marked_paid_at = '2026-07-15 09:00:00' WHERE id = ?", [epfJul]);
   const fuel = await makeBill(abm.tenantId, {
     ref: 'PDB-FLEET-0826', supplier: 'Petronas Dagangan Berhad', total: 3180.40, paidOn: '2026-08-20'
   });
@@ -545,48 +578,47 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
 
   const noCond = await req('POST', '/api/recharge/text-rules', {
-    cookie, body: { name: 'Everything', ownerTenantId: kj.tenantId, startDate: '2026-08-01', conditions: [] }
+    cookie, body: { name: 'Everything', ownerTenantId: kj.tenantId, conditions: [] }
   });
   check('a rule with no conditions is refused — it would match every paid bill',
     noCond.status === 400 && /at least one condition/.test(noCond.body.error), noCond.body.error);
 
   const blank = await req('POST', '/api/recharge/text-rules', {
-    cookie, body: { name: 'Blank', ownerTenantId: kj.tenantId, startDate: '2026-08-01',
+    cookie, body: { name: 'Blank', ownerTenantId: kj.tenantId,
       conditions: [{ field: 'supplier', operator: 'contains', value: '  ' }] }
   });
   check('a condition with no value is refused for the same reason',
     blank.status === 400 && /needs a word or phrase/.test(blank.body.error), blank.body.error);
 
-  const badDate = await req('POST', '/api/recharge/text-rules', {
-    cookie, body: { name: 'Bad date', ownerTenantId: kj.tenantId, startDate: 'last August',
-      conditions: [{ field: 'supplier', operator: 'is', value: 'KWSP (EPF)' }] }
-  });
-  check('a start date that is not a date is refused',
-    badDate.status === 400 && /start date is required/.test(badDate.body.error), badDate.body.error);
-
-  const noDate = await req('POST', '/api/recharge/text-rules', {
-    cookie, body: { name: 'Defaults to today', ownerTenantId: kj.tenantId,
+  // There is no start date to get wrong any more: a rule covers bills marked
+  // paid after it was written, and created_at says when that was. One fewer
+  // field, and no second date to disagree with the first.
+  const dated = await req('POST', '/api/recharge/text-rules', {
+    cookie, body: { name: 'No date needed', ownerTenantId: kj.tenantId,
       conditions: [{ field: 'supplier', operator: 'is', value: 'NOBODY AT ALL' }] }
   });
-  check('leaving the start date out dates the rule from today, so it reaches back over nothing',
-    noDate.status === 201 && noDate.body.rule.startDate === new Date().toISOString().slice(0, 10),
-    noDate.body.rule && noDate.body.rule.startDate);
-  await req('DELETE', '/api/recharge/text-rules/' + noDate.body.id, { cookie });
+  check('a rule needs no start date', dated.status === 201, dated.body);
+  check('and nothing already paid is in its scope',
+    (await req('GET', '/api/recharge/text-rules', { cookie })).body.rules
+      .find((r) => r.id === dated.body.id).waiting === 0);
+  await req('DELETE', '/api/recharge/text-rules/' + dated.body.id, { cookie });
 
   const epfRule = await req('POST', '/api/recharge/text-rules', {
     cookie,
     body: {
       name: 'EPF paid centrally for Kajang staff', matchMode: 'all',
       conditions: [{ field: 'supplier', operator: 'is', value: 'KWSP (EPF)' }],
-      payerTenantId: abm.tenantId, ownerTenantId: kj.tenantId, startDate: '2026-08-01'
+      payerTenantId: abm.tenantId, ownerTenantId: kj.tenantId
     }
   });
   check('a recharge rule is created', epfRule.status === 201, epfRule.body);
   check('and reads back as its conditions',
     epfRule.body.rule.conditions[0].fieldLabel === 'Supplier'
     && epfRule.body.rule.conditions[0].operatorLabel === 'is exactly', epfRule.body.rule.conditions);
-  check('saving it alone recharges nothing', epfRule.body.ran === null, epfRule.body.ran);
+  check('saving it alone recharges nothing', epfRule.body.ran === undefined, epfRule.body.ran);
 
+  // The rule exists; now the bill is paid. That order is the feature.
+  await paidNow(epfAug);
   const vEpf = await verdict(epfAug);
   check('a bill its conditions match is recharged',
     vEpf.outcome === 'recharge' && vEpf.ownerCode === 'ABKJ', vEpf);
@@ -596,8 +628,8 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const vJul = await verdict(epfJul);
   check('a bill paid before the start date is out of scope, not unmatched',
     vJul.outcome === 'out-of-scope', vJul);
-  check('and says how to include it',
-    /Move the rule's start date back/.test(vJul.reason), vJul.reason);
+  check('and says plainly that nothing will happen to it',
+    /only ever acts on bills marked paid after it was written/.test(vJul.reason), vJul.reason);
 
   // Two conditions, both of which must hold.
   const fuelRule = await req('POST', '/api/recharge/text-rules', {
@@ -608,10 +640,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
         { field: 'supplier', operator: 'contains', value: 'Petronas' },
         { field: 'reference', operator: 'starts_with', value: 'PDB-FLEET' }
       ],
-      ownerTenantId: kk.tenantId, startDate: '2026-08-01'
+      ownerTenantId: kk.tenantId
     }
   });
   check('a two-condition rule is created', fuelRule.status === 201, fuelRule.body);
+  await paidNow(fuel, fuelCardBill);
   check('a bill meeting both is recharged', (await verdict(fuel)).outcome === 'recharge');
   check('a bill meeting only one is not',
     (await verdict(fuelCardBill)).outcome === 'no-rule', await verdict(fuelCardBill));
@@ -642,9 +675,10 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     body: {
       name: 'All TNB to KK', matchMode: 'all',
       conditions: [{ field: 'supplier', operator: 'contains', value: 'Tenaga' }],
-      ownerTenantId: kk.tenantId, startDate: '2026-08-01'
+      ownerTenantId: kk.tenantId
     }
   });
+  await paidNow(both);
   const vBoth = await verdict(both);
   check('the address rule decides, not the supplier-wide recharge rule',
     vBoth.outcome === 'recharge' && vBoth.ownerCode === 'ABKJ', vBoth);
@@ -658,27 +692,32 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     cookie,
     body: {
       conditions: [{ field: 'supplier', operator: 'contains', value: 'Petronas' }],
-      matchMode: 'all', ownerTenantId: kj.tenantId, startDate: '2026-08-01'
+      matchMode: 'all', ownerTenantId: kj.tenantId
     }
   });
   check('the dialog counts what a rule would act on before it is saved',
     preview.body.count === 1 && preview.body.bills[0].reference === 'PDB-CARD-0826', preview.body);
 
+  // The preview answers "do these conditions pick out what I mean", so it
+  // looks past the written-date test — a rule that does not exist yet would
+  // otherwise always report nothing, which checks nothing.
   const previewEpf = await req('POST', '/api/recharge/text-rules/preview', {
     cookie,
     body: {
       conditions: [{ field: 'supplier', operator: 'is', value: 'KWSP (EPF)' }],
-      matchMode: 'all', payerTenantId: abm.tenantId, ownerTenantId: kj.tenantId, startDate: '2026-08-01'
+      matchMode: 'all', payerTenantId: abm.tenantId, ownerTenantId: kj.tenantId
     }
   });
-  check('and counts nothing for a rule an existing one already covers',
-    previewEpf.body.count === 0, previewEpf.body);
+  check('it shows bills already paid as evidence the conditions are right',
+    previewEpf.body.count === 1 && previewEpf.body.alreadyPaid === true, previewEpf.body);
+  check('and they are all behind the rule, so none of them will be drafted',
+    previewEpf.body.bills.every((b) => b.reference === 'EPF-0726'), previewEpf.body.bills);
 
   const selfPreview = await req('POST', '/api/recharge/text-rules/preview', {
     cookie,
     body: {
       conditions: [{ field: 'supplier', operator: 'is', value: 'KWSP (EPF)' }],
-      matchMode: 'all', ownerTenantId: abm.tenantId, startDate: '2026-08-01'
+      matchMode: 'all', ownerTenantId: abm.tenantId
     }
   });
   check('recharging the payer to itself counts nothing', selfPreview.body.count === 0, selfPreview.body);
@@ -718,7 +757,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     body: {
       name: 'All Petronas to KJ', matchMode: 'all',
       conditions: [{ field: 'supplier', operator: 'contains', value: 'Petronas' }],
-      ownerTenantId: kj.tenantId, startDate: '2026-08-01'
+      ownerTenantId: kj.tenantId
     }
   });
   const secondList = await req('GET', '/api/recharge/text-rules', { cookie });
@@ -740,7 +779,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     body: {
       name: 'Anything tracked to Tawau', matchMode: 'all',
       conditions: [{ field: 'tracking', operator: 'contains', value: 'Tawau' }],
-      ownerTenantId: kk.tenantId, startDate: '2026-08-01'
+      ownerTenantId: kk.tenantId
     }
   });
   check('a rule can match a Xero tracking category', trackRule.status === 201, trackRule.body);
@@ -751,7 +790,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     body: {
       name: 'Rent by description', matchMode: 'all',
       conditions: [{ field: 'description', operator: 'contains', value: 'Office rent' }],
-      ownerTenantId: kk.tenantId, startDate: '2026-08-01'
+      ownerTenantId: kk.tenantId
     }
   });
   check('a rule can match a line description too', descRule.status === 201, descRule.body);

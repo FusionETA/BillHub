@@ -192,18 +192,24 @@ function asDate(v) {
   return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
 }
 
-// A rule acts on bills marked paid on or after its start date. Without this a
-// new rule would reach back through every paid bill in the history the moment
-// it was saved.
+function asTime(v) {
+  if (!v) return null;
+  const t = v instanceof Date ? v.getTime() : Date.parse(String(v).replace(' ', 'T'));
+  return Number.isFinite(t) ? t : null;
+}
+
+// A rule acts on bills marked paid in Bills Hub *after the rule was written*.
+//
+// Writing a rule must not reach back through the history and start claiming
+// bills somebody settled months ago; that is a deliberate act, and Run now
+// is where it lives. The rule's own created_at is the line — there is no
+// separate date to set, and so no way for the two to disagree.
 function withinStart(bill, rule) {
-  const paid = asDate(bill.fully_paid_on);
-  const start = asDate(rule.start_date);
-  if (!start) return true;
-  // A bill recorded as paid with no date recorded cannot be placed either
-  // side of the line, and silently including it would be the dangerous
-  // choice of the two.
+  const paid = asTime(bill.marked_paid_at);
   if (!paid) return false;
-  return paid >= start;
+  const written = asTime(rule.created_at);
+  if (!written) return true;
+  return paid >= written;
 }
 
 // ── Deciding ────────────────────────────────────────────────────────────────
@@ -219,8 +225,14 @@ function withinStart(bill, rule) {
 //   done          already recharged
 const OUTCOMES = ['unpaid', 'no-rule', 'out-of-scope', 'own', 'recharge', 'done'];
 
+// Paid *here*. Not bill.xero_status, which the sync overwrites from Xero and
+// which is therefore true of every bill anyone has ever settled directly in
+// Xero — thousands of them, none the result of an action in Bills Hub.
+//
+// A recharge is a consequence of marking a bill paid on the Bills tab, so
+// that is the moment it keys on and the only one.
 function isPaid(bill) {
-  return bill.xero_status === 'PAID' || Number(bill.amount_paid) > 0;
+  return Boolean(bill.marked_paid_at);
 }
 
 // Load both rule sets once, so a scan over many bills does not re-query.
@@ -315,7 +327,11 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
   const all = rules || (await loadRules(accountId));
 
   if (!assumePaid && !isPaid(bill)) {
-    return { outcome: 'unpaid', reason: 'Not paid yet. A bill is only recharged once the money has left the group.' };
+    return {
+      outcome: 'unpaid',
+      reason: 'Not marked paid in Bills Hub yet. A recharge follows from paying a bill here — '
+            + 'one settled directly in Xero does not set one going.'
+    };
   }
 
   const hit = await matchAddressRule(accountId, bill, all.address, { fetch });
@@ -333,14 +349,14 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
     if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
     if (withinStart(bill, rule)) continue;
     if (!await conditionsMatch(accountId, bill, rule, { fetch })) continue;
-    const paid = asDate(bill.fully_paid_on);
     return {
       outcome: 'out-of-scope',
       rule,
       kind: 'text',
-      reason: paid
-        ? `"${rule.name}" matches this bill, but it was paid on ${paid} and the rule only acts on bills paid from ${asDate(rule.start_date)}. Move the rule's start date back to include it.`
-        : `"${rule.name}" matches this bill, but no payment date is recorded against it, so it cannot be placed inside the rule's window.`
+      reason: `"${rule.name}" matches this bill, but the bill was marked paid on `
+            + `${asDate(bill.marked_paid_at)}, before the rule was written on ${asDate(rule.created_at)}. `
+            + 'A rule only ever acts on bills marked paid after it was written, so this one is '
+            + 'outside it. Nothing will happen to it.'
     };
   }
 
@@ -377,7 +393,9 @@ async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null,
   // that has not left the group.
   if (!isPaid(bill)) {
     throw err(
-      `"${bill.reference || bill.invoice_number}" has not been paid yet, so there is nothing to recharge. Pay it first.`,
+      `"${bill.reference || bill.invoice_number}" has not been marked paid in Bills Hub, so there is `
+      + 'nothing to recharge yet. Pay it from the Bills tab first — a bill settled directly in Xero '
+      + 'does not set a recharge going.',
       400
     );
   }
@@ -651,7 +669,9 @@ async function candidateBills(accountId, { limit = 200, billIds = null, supplier
   const where = [
     'b.account_id = ?',
     `b.xero_tenant_id IN (${live.map(() => '?').join(',')})`,
-    "(b.xero_status = 'PAID' OR b.amount_paid > 0)",
+    // Marked paid in Bills Hub. A bill settled straight in Xero was not an
+    // action here and does not set a recharge going.
+    'b.marked_paid_at IS NOT NULL',
     `NOT EXISTS (SELECT 1 FROM recharge_runs r
                   WHERE r.account_id = b.account_id AND r.bill_id = b.id
                     AND r.status <> 'cancelled' ${heldByTest})`
@@ -732,7 +752,11 @@ async function suggestions(accountId, { limit = 50 } = {}) {
 // Paid bills this one rule would act on: in scope by date and payer, no
 // address rule has claimed them, and its conditions hold. The card's "N paid
 // bills waiting" badge and Run now are the same question asked twice.
-async function waitingFor(accountId, rule, { rules = null, limit = 200 } = {}) {
+// `ignoreWritten` drops the "paid after the rule was written" test. Only the
+// dialog's preview uses it, and only to answer a different question: not
+// "what will this draft" — which for a rule that does not exist yet is
+// always nothing — but "are these conditions picking out the bills I mean".
+async function waitingFor(accountId, rule, { rules = null, limit = 200, ignoreWritten = false } = {}) {
   const all = rules || (await loadRules(accountId));
 
   // Rules are tried in order and the first match wins, so a bill an earlier
@@ -751,7 +775,7 @@ async function waitingFor(accountId, rule, { rules = null, limit = 200 } = {}) {
   const out = [];
   for (const bill of candidates) {
     if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
-    if (!withinStart(bill, rule)) continue;
+    if (!ignoreWritten && !withinStart(bill, rule)) continue;
     // Recharging an entity to itself does nothing.
     if (rule.owner_tenant_id === bill.xero_tenant_id) continue;
     // An address rule outranks every recharge rule.

@@ -95,6 +95,40 @@ const deadColumn = (table, column) => `
 
 const ADJUSTMENTS = [
   {
+    why: 'bills.marked_paid_at — when Bills Hub itself marked the bill paid',
+    check: hasColumn('bills', 'marked_paid_at'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE bills ADD COLUMN marked_paid_at DATETIME NULL'
+  },
+  {
+    // Bills Hub has been marking bills paid since before the column existed,
+    // and the payment batches record exactly which and when. Backfilling
+    // keeps that history rather than making every past payment look like
+    // something Xero did on its own.
+    why: 'bills.marked_paid_at — backfill from the payment batches that set it',
+    check: `SELECT COUNT(*) AS n FROM bills b
+              JOIN payment_batch_lines l ON l.bill_id = b.id
+              JOIN payment_batches pb ON pb.id = l.batch_id
+             WHERE pb.test_mode = 0 AND l.xero_payment_id IS NOT NULL
+               AND b.marked_paid_at IS NULL`,
+    needed: (row) => Number(row.n) > 0,
+    sql: `UPDATE bills b
+            JOIN payment_batch_lines l ON l.bill_id = b.id
+            JOIN payment_batches pb ON pb.id = l.batch_id AND pb.account_id = b.account_id
+             SET b.marked_paid_at = COALESCE(pb.xero_posted_at, pb.created_at)
+           WHERE pb.test_mode = 0 AND l.xero_payment_id IS NOT NULL
+             AND b.marked_paid_at IS NULL`
+  },
+  {
+    // Replaced by the rule's own created_at: a rule acts on bills marked
+    // paid in Bills Hub after it was written, so a second date to keep in
+    // step with that was only ever a way for the two to disagree.
+    why: 'recharge_text_rules.start_date — the rule\'s created_at is the line now',
+    check: hasColumn('recharge_text_rules', 'start_date'),
+    needed: (row) => Number(row.n) === 1,
+    sql: 'ALTER TABLE recharge_text_rules DROP COLUMN start_date'
+  },
+  {
     // The old key counted cancelled runs and testing-mode runs against the
     // real one, which is not what "a bill is recharged once" means. Replaced
     // with a generated column, because MySQL has no partial index and NULL

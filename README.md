@@ -528,32 +528,46 @@ optional payer filter and the entity to recharge to. This is what covers rent,
 tenancies, supplier bills and central payroll deductions — everything with no
 address on it.
 
-Address rules are checked first. A recharge rule is only consulted once no
-address rule has claimed the bill, and among recharge rules the first match in
-order wins.
+**Address rules are checked first.** When one matches, recharge rules are not
+consulted for that bill at all; among recharge rules, the first match in order
+wins. Both rule tabs carry the order as a two-step strip rather than a
+sentence in a paragraph, because "address rules go first" is the single fact
+that explains why a recharge rule somebody wrote did not fire.
 
 Every decision ends in one of six outcomes, so a caller never infers one from
 a null: `unpaid`, `no-rule`, `out-of-scope`, `own`, `recharge`, `done`.
-`out-of-scope` is kept apart from `no-rule` because the two call for opposite
-actions — a rule *does* cover that bill, it was paid before the rule's start
-date, and the fix is to move the date rather than write another rule.
+`out-of-scope` is kept apart from `no-rule` because the two say different
+things: a rule *does* cover that bill, it was simply marked paid before the
+rule existed, and writing another rule will not change that.
 
-### Start dates, waiting and Run now
+### What sets a recharge going
 
-A recharge rule acts on bills **marked paid on or after its start date**, which
-defaults to the day it was written. Without that, saving a rule would reach
-back through every paid bill in the history the moment it was created.
-Reaching back is then a deliberate act: move the date, and press **Run now**.
+Marking a bill paid **in Bills Hub**. Nothing else.
 
-Run now drafts a recharge for every bill the rule is waiting on. *Drafts only* —
-nothing reaches Xero until each one is posted, which is what makes the button
-safe to press. The "N paid bills waiting" badge and Run now are the same
-question asked twice.
+Not `xero_status`, and not `fully_paid_on`: the sync overwrites both from
+Xero, so they are true of every bill anyone has ever settled directly in
+Xero — thousands of them, none the consequence of an action here. A recharge
+follows from someone paying a bill on the Bills tab, so `bills.marked_paid_at`
+records that moment and the engine keys on it alone. It is written by
+`applyPaidLocally` and by nothing else; the sync never touches it.
 
-The rule dialog asks it a third time, before the rule exists, so nobody has to
-save a rule to find out whether it hits anything. A rule still being typed has
-no id and therefore ranks last, so it only counts what no saved rule has
-already claimed — counting more would promise a draft that never arrives.
+A recharge rule then acts on bills marked paid **after the rule was written**.
+The rule's own `created_at` is the line, so there is no start date to set and
+no second date to fall out of step with the first. A new rule reaches back
+over nothing, which is why writing one is safe on an account with years of
+paid bills behind it.
+
+**Run now** drafts a recharge for every bill the rule is waiting on — the ones
+paid since it was written that nobody has drafted yet. *Drafts only*: nothing
+reaches Xero until each is posted, which is what makes the button safe to
+press. The "N paid bills waiting" badge and Run now are the same question
+asked twice.
+
+The rule dialog asks a different question. "How many will this draft" is
+always none for a rule that does not exist yet, so instead it matches the
+conditions against bills **already** paid and reports them as what they are:
+outside the rule, untouched, but evidence that the conditions pick out the
+bills somebody means.
 
 ### Matching an address
 

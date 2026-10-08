@@ -294,20 +294,15 @@ function cleanConditions(list) {
   return out;
 }
 
-function validateTextRule({ name, ownerTenantId, startDate }) {
+function validateTextRule({ name, ownerTenantId }) {
   if (!name || !String(name).trim()) throw bad('A rule needs a name, so it can be recognised in the list.');
   if (!ownerTenantId) throw bad('Choose the entity to recharge to.');
-  if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(startDate))) {
-    throw bad('A start date is required — it is what stops a new rule reaching back through years of paid bills.');
-  }
 }
 
 async function createTextRule(accountId, {
-  name, matchMode = 'all', conditions = [], payerTenantId = null, ownerTenantId,
-  startDate = null, enabled = true
+  name, matchMode = 'all', conditions = [], payerTenantId = null, ownerTenantId, enabled = true
 }) {
-  const start = startDate || new Date().toISOString().slice(0, 10);
-  validateTextRule({ name, ownerTenantId, startDate: start });
+  validateTextRule({ name, ownerTenantId });
   const conds = cleanConditions(conditions);
   if (payerTenantId && payerTenantId === ownerTenantId) {
     throw bad('A rule that pays and recharges to the same entity would do nothing.');
@@ -316,10 +311,10 @@ async function createTextRule(accountId, {
   return db.transaction(async (conn) => {
     const [res] = await conn.execute(
       `INSERT INTO recharge_text_rules
-         (account_id, name, match_mode, payer_tenant_id, owner_tenant_id, start_date, enabled)
-       VALUES (?,?,?,?,?,?,?)`,
+         (account_id, name, match_mode, payer_tenant_id, owner_tenant_id, enabled)
+       VALUES (?,?,?,?,?,?)`,
       [accountId, String(name).trim(), matchMode === 'any' ? 'any' : 'all',
-       payerTenantId || null, ownerTenantId, start, enabled ? 1 : 0]
+       payerTenantId || null, ownerTenantId, enabled ? 1 : 0]
     );
     let i = 0;
     for (const c of conds) {
@@ -339,12 +334,9 @@ async function updateTextRule(accountId, id, fields = {}) {
 
   const merged = {
     name: fields.name ?? current.name,
-    ownerTenantId: fields.ownerTenantId ?? current.owner_tenant_id,
-    startDate: fields.startDate ?? (current.start_date instanceof Date
-      ? current.start_date.toISOString().slice(0, 10)
-      : String(current.start_date).slice(0, 10))
+    ownerTenantId: fields.ownerTenantId ?? current.owner_tenant_id
   };
-  const touches = ['name', 'ownerTenantId', 'startDate', 'matchMode', 'payerTenantId'].some((k) => k in fields);
+  const touches = ['name', 'ownerTenantId', 'matchMode', 'payerTenantId'].some((k) => k in fields);
   if (touches) validateTextRule(merged);
   const conds = 'conditions' in fields ? cleanConditions(fields.conditions) : null;
 
@@ -360,7 +352,6 @@ async function updateTextRule(accountId, id, fields = {}) {
     if ('matchMode' in fields) { sets.push('match_mode = ?'); params.push(fields.matchMode === 'any' ? 'any' : 'all'); }
     if ('payerTenantId' in fields) { sets.push('payer_tenant_id = ?'); params.push(fields.payerTenantId || null); }
     if ('ownerTenantId' in fields) { sets.push('owner_tenant_id = ?'); params.push(fields.ownerTenantId); }
-    if ('startDate' in fields) { sets.push('start_date = ?'); params.push(merged.startDate); }
     if ('enabled' in fields) { sets.push('enabled = ?'); params.push(fields.enabled ? 1 : 0); }
     if ('position' in fields) { sets.push('position = ?'); params.push(Number(fields.position) || 0); }
     if (sets.length) {

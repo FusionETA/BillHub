@@ -1321,6 +1321,29 @@
       </a>;
     }
 
+    // Which rule set decides, and in what order. Shown on both rule tabs
+    // rather than described once in a paragraph, because "address rules are
+    // checked first" is the single thing that explains why a recharge rule
+    // somebody wrote did not fire.
+    function RuleOrder({ active }) {
+      const step = (n, title, sub, on) => (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flex: 1, minWidth: 220, opacity: on ? 1 : .62 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--color-primary)' : 'var(--neutral-200)', color: on ? '#fff' : 'var(--neutral-600)', fontSize: 12, fontWeight: 700 }}>{n}</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>{sub}</div>
+          </div>
+        </div>
+      );
+      return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: 18, flexWrap: 'wrap' }}>
+        {step(1, 'Address rules', 'The premises printed on the bill.', active === 'rules')}
+        <div style={{ alignSelf: 'center', fontSize: 12.5, fontWeight: 700, color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>
+          if none matches →
+        </div>
+        {step(2, 'Recharge rules', 'Supplier, reference or other text on the bill.', active === 'text')}
+      </div>;
+    }
+
     // One line of address, with a pin, used on rule cards and run cards alike.
     function AddressLine({ address, size = 13 }) {
       if (!address) return null;
@@ -1614,8 +1637,9 @@
           const entityCount = new Set(data.ruleCards.map(r => r.ownerTenantId)).size;
 
           return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <RuleOrder active="rules" />
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-              The premises address on a bill is the real owner of the cost. If the address belongs to the bill header entity, it pays its own bill. If it belongs to another entity, the header entity pays first and 100% is recharged to the address owner. <strong style={{ color: 'var(--text-body)' }}>Address rules are checked before recharge rules.</strong>
+              The premises address on a bill is the real owner of the cost. If the address belongs to the bill header entity, it pays its own bill. If it belongs to another entity, the header entity pays first and 100% is recharged to the address owner. <strong style={{ color: 'var(--text-body)' }}>When an address rule matches, recharge rules are not consulted for that bill at all.</strong>
             </p>
 
             {data.ruleCards.length === 0
@@ -1675,8 +1699,9 @@
         })()}
 
         {tab === 'text' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <RuleOrder active="text" />
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-            For bills with no matching address rule. A rule acts on bills marked paid on or after its start date — so a new rule cannot quietly reach back through years of history. If a bill was paid before the rule was set up, move the start date back and use Run now.
+            <strong style={{ color: 'var(--text-body)' }}>Only reached when no address rule matched the bill.</strong> A rule acts on bills <strong style={{ color: 'var(--text-body)' }}>marked paid in Bills Hub after the rule was written</strong> — a bill settled directly in Xero does not set a recharge going, and a new rule never reaches back over what is already paid.
           </p>
 
           {data.textRuleCards.length === 0
@@ -1836,10 +1861,8 @@
     }
 
     function TextRuleDialog({ open, rule, entities, fields, operators, onClose, onSaved, onToast }) {
-      const today = () => new Date().toISOString().slice(0, 10);
       const [form, setForm] = useState(null);
       const [busy, setBusy] = useState(false);
-      const [runNow, setRunNow] = useState(true);
       const [preview, setPreview] = useState(null);
 
       useEffect(() => {
@@ -1851,10 +1874,8 @@
             ? rule.conditions.map(c => ({ field: c.field, operator: c.operator, value: c.value }))
             : [{ field: 'supplier', operator: 'contains', value: '' }],
           payerTenantId: rule.payerTenantId || '',
-          ownerTenantId: rule.ownerTenantId || (entities[0] && entities[0].tenantId) || '',
-          startDate: rule.startDate || today()
+          ownerTenantId: rule.ownerTenantId || (entities[0] && entities[0].tenantId) || ''
         });
-        setRunNow(!rule.id);
       }, [rule, entities]);
 
       // How many paid bills this rule would act on, asked as it is typed.
@@ -1866,8 +1887,7 @@
         const t = setTimeout(() => {
           api.post('/api/recharge/text-rules/preview', {
             conditions: form.conditions, matchMode: form.matchMode,
-            payerTenantId: form.payerTenantId || null, ownerTenantId: form.ownerTenantId,
-            startDate: form.startDate
+            payerTenantId: form.payerTenantId || null, ownerTenantId: form.ownerTenantId
           })
             .then(p => { if (!cancelled) setPreview(p); })
             .catch(() => { if (!cancelled) setPreview(null); });
@@ -1879,7 +1899,7 @@
 
       const set = (patch) => setForm(f => ({ ...f, ...patch }));
       const setCond = (i, patch) => set({ conditions: form.conditions.map((c, j) => j === i ? { ...c, ...patch } : c) });
-      const ready = form.name.trim() && form.ownerTenantId && form.startDate
+      const ready = form.name.trim() && form.ownerTenantId
         && form.conditions.length && form.conditions.every(c => String(c.value || '').trim());
       const owner = entities.find(e => e.tenantId === form.ownerTenantId);
 
@@ -1890,30 +1910,20 @@
             name: form.name.trim(), matchMode: form.matchMode,
             conditions: form.conditions,
             payerTenantId: form.payerTenantId || null,
-            ownerTenantId: form.ownerTenantId,
-            startDate: form.startDate,
-            runNow: runNow && Boolean(preview && preview.count)
+            ownerTenantId: form.ownerTenantId
           };
           const r = rule && rule.id
             ? await request('/api/recharge/text-rules/' + rule.id, { method: 'PATCH', body })
             : await api.post('/api/recharge/text-rules', body);
-          const drafted = r && r.ran ? r.ran.drafted : 0;
           onToast({
             title: rule && rule.id ? 'Recharge rule updated' : 'Recharge rule created',
-            message: drafted
-              ? `${drafted} recharge${drafted === 1 ? '' : 's'} drafted. Check them on Recharge runs, then post each one.`
-              : 'It will apply to bills as they are marked paid.'
+            message: 'It applies to bills from here on, as they are marked paid in Bills Hub.'
           });
           onSaved();
         } catch (e) {
           onToast({ title: 'Could not save the rule', message: e.message, tone: 'error' });
         } finally { setBusy(false); }
       }
-
-      const startFmt = (() => {
-        try { return new Date(form.startDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); }
-        catch { return form.startDate; }
-      })();
 
       return <Dialog open={open} onClose={onClose} title={rule && rule.id ? 'Edit recharge rule' : 'New recharge rule'}
         description="When a paid bill meets these conditions, its full amount is recharged to the chosen entity." size="md">
@@ -1964,39 +1974,31 @@
           <Select label="Recharge to *" value={form.ownerTenantId} onChange={v => set({ ownerTenantId: v })}
             options={entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId }))} />
 
-          <div style={{ gridColumn: '1 / -1' }}>
-            <Input label="Apply to bills paid on or after *" type="date" value={form.startDate}
-              onChange={v => set({ startDate: v })}
-              hint="Defaults to the day the rule is created. Move it back to reach older bills." />
-          </div>
-
           <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-            {!ready
-              ? 'Fill in the conditions and the entity to see which paid bills this would act on.'
-              : preview === null
-                ? 'Checking which paid bills match…'
-                : preview.count === 0
-                  ? `No paid bills since ${startFmt} match yet. The rule will apply as bills are marked paid.`
-                  : <React.Fragment>
-                      <div><strong>{preview.count} paid bill{preview.count === 1 ? '' : 's'}</strong> since {startFmt} match{preview.count === 1 ? 'es' : ''} and {preview.count === 1 ? 'has' : 'have'} not been recharged.</div>
-                      <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                        {preview.bills.map(b => `${b.supplier} ${b.reference || ''}`.trim()).join(' · ')}
-                        {preview.count > preview.bills.length ? ` · and ${preview.count - preview.bills.length} more` : ''}
-                      </div>
-                    </React.Fragment>}
-            {ready && preview && preview.count > 0 && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 10, cursor: 'pointer' }}>
-                <input type="checkbox" checked={runNow} onChange={e => setRunNow(e.target.checked)}
-                  style={{ width: 17, height: 17, accentColor: 'var(--color-primary)', cursor: 'pointer' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-heading)' }}>
-                  Draft {preview.count === 1 ? 'this recharge' : `these ${preview.count} recharges`} after saving
-                </span>
-              </label>
-            )}
-            {ready && preview && preview.count > 0 && runNow && (
-              <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                Drafts only — nothing reaches Xero until each one is posted{owner ? `, and each raises an invoice in the payer and a draft bill in ${owner.code}` : ''}.
-              </div>
+            <div>
+              <strong>This applies from now on.</strong> It acts on bills marked paid in Bills Hub
+              after it is saved{owner ? `, recharging each to ${owner.code}` : ''} — a bill settled
+              directly in Xero does not set a recharge going, and nothing already paid is touched.
+            </div>
+            {/* The conditions still have to be checked against something, and
+                the bills already paid are the only evidence available. They
+                are outside the rule, which is said plainly rather than left
+                to be inferred from a count that never becomes a draft. */}
+            {ready && preview && !preview.incomplete && (
+              preview.count === 0
+                ? <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    Nothing already paid matches these conditions, so there is nothing to check them against.
+                    Worth re-reading them before saving.
+                  </div>
+                : <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    <strong style={{ color: 'var(--text-body)' }}>{preview.count} bill{preview.count === 1 ? '' : 's'} already paid</strong> match
+                    {preview.count === 1 ? 'es' : ''} these conditions — {preview.count === 1 ? 'it is' : 'they are'} outside the rule
+                    and will not be touched, but {preview.count === 1 ? 'it shows' : 'they show'} the conditions pick out what you mean:
+                    <div style={{ marginTop: 4 }}>
+                      {preview.bills.map(b => `${b.supplier} ${b.reference || ''}`.trim()).join(' · ')}
+                      {preview.count > preview.bills.length ? ` · and ${preview.count - preview.bills.length} more` : ''}
+                    </div>
+                  </div>
             )}
           </div>
 
