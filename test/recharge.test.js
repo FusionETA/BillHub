@@ -392,20 +392,57 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // Matching forgives punctuation but not a missing word, so retyping an
   // address across forty contacts is a silent miss waiting to happen. The
   // dialog offers Xero's exact wording to copy.
-  const look = await req('GET', '/api/recharge/contact-address?supplier='
-    + encodeURIComponent('Tenaga Nasional Berhad - Lot 9'), { cookie });
+  const look = await req('POST', '/api/recharge/contact-addresses', {
+    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9'] }
+  });
+  const got = look.body.suppliers[0];
   check('the address Xero holds on a supplier can be looked up',
-    look.status === 200 && /Jalan Perusahaan Empat/.test(look.body.address || ''), look.body);
+    look.status === 200 && /Jalan Perusahaan Empat/.test(got.address || ''), look.body);
   check('and it is offered one way round, not both',
-    !(look.body.address || '').includes(' | '), look.body.address);
+    !(got.address || '').includes(' | '), got.address);
   check('a rule written from it matches the bills it covers',
     Boolean(require('../lib/premises').match(
       require('../billhub/recharge').addressText({ Addresses: contactAddresses['c-Tenaga Nasional Berhad - Lot 9'] }),
-      look.body.address)));
+      got.address)));
 
-  const none = await req('GET', '/api/recharge/contact-address?supplier=Nobody%20At%20All', { cookie });
+  // A rule can name several suppliers — electricity, water and rent at one
+  // building is one rule, not three — so the lookup takes them all. Their
+  // contacts disagreeing is the thing worth knowing before saving.
+  // The water board at the same building. Its own contact, its own address
+  // field, the same premises — which is the case one rule is meant to cover.
+  const WATER = 'Air Selangor - Lot 9';
+  contactAddresses[`c-${WATER}`] = [
+    { AddressType: 'POBOX', AddressLine1: 'Lot 9, Jalan Perusahaan Empat', City: 'Batu Caves', PostalCode: '68100' }
+  ];
+  await makeBill(abm.tenantId, { ref: 'AS-LOT9-0826', supplier: WATER, total: 310.00 });
+
+  const several = await req('POST', '/api/recharge/contact-addresses', {
+    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9', WATER] }
+  });
+  check('several suppliers are looked up at once', several.body.suppliers.length === 2, several.body);
+  check('and two contacts at one premises agree, so one rule covers both',
+    new Set(several.body.suppliers.map((x) => x.address)).size === 1,
+    several.body.suppliers.map((x) => x.address));
+
+  // Two contacts at different premises cannot share a rule, and the dialog
+  // has to say so rather than quietly offering the first address.
+  const OTHER = 'Air Selangor - Lot 77';
+  contactAddresses[`c-${OTHER}`] = [
+    { AddressType: 'POBOX', AddressLine1: 'Lot 77, Jalan Lain Sekali', City: 'Shah Alam', PostalCode: '40000' }
+  ];
+  await makeBill(abm.tenantId, { ref: 'AS-LOT77-0826', supplier: OTHER, total: 290.00 });
+  const mixed = await req('POST', '/api/recharge/contact-addresses', {
+    cookie, body: { suppliers: [WATER, OTHER] }
+  });
+  check('two different premises come back as two different addresses',
+    new Set(mixed.body.suppliers.map((x) => x.address)).size === 2,
+    mixed.body.suppliers.map((x) => x.address));
+
+  const none = await req('POST', '/api/recharge/contact-addresses', {
+    cookie, body: { suppliers: ['Nobody At All'] }
+  });
   check('a supplier with no bills says so rather than erroring',
-    none.status === 200 && none.body.address === null, none.body);
+    none.status === 200 && none.body.suppliers[0].address === null, none.body);
 
   console.log('\nAsking what a bill would do before it is paid');
   const ahead = await req('POST', '/api/recharge/decide', {

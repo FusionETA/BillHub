@@ -137,11 +137,15 @@ function addressText(contact) {
   return out.join(' | ');
 }
 
-async function contactAddress(accountId, bill, { fetch = true } = {}) {
+// `refresh` skips the cache and replaces it. The rule dialog passes it:
+// somebody filling an address into Xero and switching straight back here
+// should not be shown a half-hour-old answer and conclude the field did not
+// save. Matching keeps the cache, where staleness costs nothing.
+async function contactAddress(accountId, bill, { fetch = true, refresh = false } = {}) {
   if (!bill.contact_id) return '';
   const key = `${bill.xero_tenant_id}|${bill.contact_id}`;
   const hit = _contactCache2.get(key);
-  if (hit && Date.now() - hit.at < CONTACT_TTL_MS) return hit.text;
+  if (!refresh && hit && Date.now() - hit.at < CONTACT_TTL_MS) return hit.text;
   if (!fetch) return '';
 
   let text = '';

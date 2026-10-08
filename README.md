@@ -576,6 +576,23 @@ silent miss waiting to happen — so when Xero already holds the address, the
 rule dialog shows it and offers **"Use this address"**, and says plainly once
 the two agree. Nothing has to be typed twice.
 
+A rule can still name **several** suppliers: electricity, water and rent at
+one building is one rule, not three. The dialog looks all of them up, and
+what it shows depends on what it finds:
+
+| What Xero holds | What the dialog does |
+| --- | --- |
+| One address, or several that agree | Offers it — one rule covers them all |
+| Addresses that differ | Shows each and says one rule cannot cover them |
+| An address on only some | Says how many have none |
+| A typed address matching only some | Says which, in red, before it is saved |
+
+The dialog normalises exactly as `lib/premises.js` does, so it cannot claim
+a match the engine would not make. And the lookup always re-reads Xero
+rather than using the half-hour cache: somebody who has just typed an
+address into Xero and come straight back should not be shown a stale answer
+and conclude the field did not save.
+
 The contact's own address is the one tempting exception. For a single
 contact billing many buildings it is the supplier's head office: the same on
 every bill, and useless for deciding which building. But a contact created
@@ -963,7 +980,7 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/recharge` | The Recharge view model |
 | `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
 | `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
-| `GET` | `/api/recharge/contact-address` | The address Xero holds on a supplier's contact |
+| `POST` | `/api/recharge/contact-addresses` | The addresses Xero holds on a rule's suppliers |
 | `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
 | `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, due days |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Address rules |

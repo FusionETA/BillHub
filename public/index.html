@@ -1775,20 +1775,24 @@
     function RuleDialog({ open, rule, entities, suppliers, onClose, onSaved, onToast }) {
       const [form, setForm] = useState({ suppliers: [], premisesAddress: '', referenceContains: '', ownerTenantId: '' });
       const [busy, setBusy] = useState(false);
-      const [onContact, setOnContact] = useState(null);   // what Xero holds on the supplier
+      const [contactAddrs, setContactAddrs] = useState(null);  // [{ supplier, address }]
 
       // Matching forgives punctuation and case but not a missing word or an
       // abbreviation — "Jln" does not match "Jalan". Retyping an address
       // across forty contacts is a silent miss waiting to happen, so when
       // Xero already holds one, offer its exact wording.
+      //
+      // Asked for every supplier on the rule, not just a single one: one
+      // address has to match all of them, so if their contacts disagree
+      // that is the thing worth knowing before saving.
       useEffect(() => {
-        setOnContact(null);
-        if (!open || form.suppliers.length !== 1) return;
+        setContactAddrs(null);
+        if (!open || !form.suppliers.length) return;
         let cancelled = false;
         const t = setTimeout(() => {
-          api.get('/api/recharge/contact-address?supplier=' + encodeURIComponent(form.suppliers[0]))
-            .then(d => { if (!cancelled) setOnContact(d.address || null); })
-            .catch(() => { if (!cancelled) setOnContact(null); });
+          api.post('/api/recharge/contact-addresses', { suppliers: form.suppliers })
+            .then(d => { if (!cancelled) setContactAddrs(d.suppliers || []); })
+            .catch(() => { if (!cancelled) setContactAddrs(null); });
         }, 250);
         return () => { cancelled = true; clearTimeout(t); };
       }, [open, form.suppliers.join('|')]);
@@ -1859,21 +1863,51 @@
                 ? 'Too short to identify a premises — include the street and postcode as the bill prints them.'
                 : 'Matched ignoring spaces, commas and letter case — but not abbreviations. "Jln" will not match "Jalan".'}
             </div>
-            {onContact && premisesKey(onContact) !== premisesKey(form.premisesAddress) && (
-              <div style={{ marginTop: 8, background: 'var(--neutral-50)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
-                <div style={{ color: 'var(--text-muted)' }}>Xero holds this address on that contact:</div>
-                <div style={{ marginTop: 2 }}>{onContact}</div>
-                <button onClick={() => set({ premisesAddress: onContact })}
-                  style={{ border: 'none', background: 'none', padding: '4px 0 0', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
-                  Use this address
-                </button>
-              </div>
-            )}
-            {onContact && premisesKey(onContact) === premisesKey(form.premisesAddress) && (
-              <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--green-500)', fontWeight: 600 }}>
-                Matches the address on that contact in Xero.
-              </div>
-            )}
+            {(() => {
+              if (!contactAddrs || !contactAddrs.length) return null;
+              const held = contactAddrs.filter(c => c.address);
+              if (!held.length) return null;
+              const distinct = [...new Set(held.map(c => premisesKey(c.address)))];
+              const typed = premisesKey(form.premisesAddress);
+              // The rule's one address has to sit inside every contact's,
+              // or it covers only some of the suppliers it names.
+              const covers = typed ? held.filter(c => premisesKey(c.address).includes(typed)) : [];
+
+              if (typed && covers.length === held.length) {
+                return <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--green-500)', fontWeight: 600 }}>
+                  Matches the address Xero holds on {held.length === 1 ? 'that contact' : `all ${held.length} contacts`}.
+                </div>;
+              }
+              return <div style={{ marginTop: 8, background: 'var(--neutral-50)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
+                {typed && covers.length > 0 && <div style={{ color: 'var(--color-danger)', marginBottom: 6 }}>
+                  Matches {covers.length} of {held.length} — the others would not be covered.
+                </div>}
+                <div style={{ color: 'var(--text-muted)' }}>
+                  {held.length === 1 ? 'Xero holds this address on that contact:' : `Xero holds ${distinct.length === 1 ? 'the same address' : 'these addresses'} on ${held.length} of the contacts:`}
+                </div>
+                {held.slice(0, 6).map((c, i) => (
+                  <div key={i} style={{ marginTop: 3 }}>
+                    {held.length > 1 && <span style={{ color: 'var(--text-subtle)' }}>{c.supplier} · </span>}
+                    {c.address}
+                  </div>
+                ))}
+                {held.length > 6 && <div style={{ color: 'var(--text-subtle)', marginTop: 2 }}>… and {held.length - 6} more</div>}
+                {distinct.length === 1
+                  ? <button onClick={() => set({ premisesAddress: held[0].address })}
+                      style={{ border: 'none', background: 'none', padding: '6px 0 0', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
+                      Use this address
+                    </button>
+                  : <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
+                      These are different premises, so one rule cannot cover them. Write one rule each,
+                      or use the part they share if there is one.
+                    </div>}
+                {held.length < contactAddrs.length && (
+                  <div style={{ marginTop: 6, color: 'var(--text-subtle)' }}>
+                    {contactAddrs.length - held.length} of the chosen suppliers have no address in Xero.
+                  </div>
+                )}
+              </div>;
+            })()}
           </div>
 
           <div style={{ gridColumn: '1 / -1' }}>
