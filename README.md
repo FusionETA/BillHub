@@ -573,8 +573,8 @@ Lot 9, Jalan Perusahaan 4, …                         a different spelling
 Guessing at abbreviations is how a cost lands on the wrong company, so the
 matcher will not do it. Across forty contacts that leaves retyping as a
 silent miss waiting to happen — so when Xero already holds the address, the
-rule dialog shows it and offers **"Use it, word for word"**, and says plainly
-once the two agree. Nothing has to be typed twice.
+rule dialog shows it and offers **"Use this address"**, and says plainly once
+the two agree. Nothing has to be typed twice.
 
 The contact's own address is the one tempting exception. For a single
 contact billing many buildings it is the supplier's head office: the same on
