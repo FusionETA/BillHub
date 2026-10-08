@@ -308,57 +308,56 @@
     // Pick several from a long list. Used for an address rule's suppliers,
     // where the list is every Xero contact and the honest default is none —
     // meaning every supplier, not "nothing chosen yet".
-    function MultiSelect({ label, options = [], value = [], onChange, placeholder = 'Select…', emptyLabel = null }) {
+    // Pick one supplier out of nine hundred.
+    //
+    // A searchable list rather than a native select: typing is the only way
+    // to find "Pengurusan Air Selangor Sdn Bhd - Lot 9" among thirty-six
+    // that begin the same way.
+    //
+    // And the rows WRAP. Ellipsis truncation cut all thirty-six at the same
+    // character, leaving a column of identical lines and no way to tell
+    // which was which — the distinguishing part of these names is at the
+    // end, which is exactly what a truncation removes.
+    function SupplierPicker({ label, options = [], value = '', onChange, hint }) {
       const [open, setOpen] = useState(false);
       const [q, setQ] = useState('');
-      const chosen = new Set(value);
-      const shown = options.filter(o => o.toLowerCase().includes(q.toLowerCase()));
+      const shown = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
 
-      function toggle(name) {
-        onChange(chosen.has(name) ? value.filter(v => v !== name) : value.concat([name]));
+      function choose(name) {
+        onChange(name);
+        setOpen(false);
+        setQ('');
       }
 
-      const summary = value.length === 0
-        ? (emptyLabel || placeholder)
-        : value.length === 1 ? value[0] : `${value.length} selected`;
-
-      return <Field label={label}>
+      return <Field label={label} hint={hint}>
         <div style={{ position: 'relative' }}>
-          <button type="button" onClick={() => setOpen(o => !o)}
-            style={{ width: '100%', height: 46, textAlign: 'left', border: '1.5px solid ' + (open ? 'var(--color-primary)' : 'var(--border-default)'), borderRadius: 10, padding: '0 34px 0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: value.length ? 'var(--text-body)' : 'var(--text-subtle)', background: 'var(--surface-card)', cursor: 'pointer', outline: 'none', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-            {summary}
+          <button type="button" onClick={() => setOpen(o => !o)} title={value || ''}
+            style={{ width: '100%', minHeight: 46, textAlign: 'left', border: '1.5px solid ' + (open ? 'var(--color-primary)' : 'var(--border-default)'), borderRadius: 10, padding: '11px 34px 11px 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, lineHeight: 1.45, color: value ? 'var(--text-body)' : 'var(--text-subtle)', background: 'var(--surface-card)', cursor: 'pointer', outline: 'none', wordBreak: 'break-word' }}>
+            {value || 'Any supplier'}
           </button>
           <span style={{ position: 'absolute', right: 14, top: 19, pointerEvents: 'none', fontSize: 10, color: 'var(--text-muted)' }}>▾</span>
 
-          {open && <div style={{ position: 'absolute', zIndex: 30, top: 52, left: 0, right: 0, background: 'var(--surface-card)', border: '1.5px solid var(--border-default)', borderRadius: 12, boxShadow: '0 12px 32px rgba(16,24,40,.16)', padding: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                {value.length} of {options.length} selected
-                {q && shown.length !== options.length ? ` · ${shown.length} match "${q}"` : ''}
-              </span>
-              <span style={{ flex: 1 }} />
-              {value.length > 0 && <button type="button" onClick={() => onChange([])}
-                style={{ border: 'none', background: 'none', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer', padding: 0 }}>Clear</button>}
+          {open && <div style={{ position: 'absolute', zIndex: 30, top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--surface-card)', border: '1.5px solid var(--border-default)', borderRadius: 12, boxShadow: '0 12px 32px rgba(16,24,40,.16)', padding: 12 }}>
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers"
+              style={{ width: '100%', boxSizing: 'border-box', height: 40, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 12px', fontFamily: 'var(--font-body)', fontSize: 13.5, color: 'var(--text-body)', background: 'var(--surface-card)', outline: 'none' }} />
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 2px' }}>
+              {q ? `${shown.length} of ${options.length} match "${q}"` : `${options.length} suppliers`}
             </div>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers"
-              style={{ width: '100%', boxSizing: 'border-box', height: 40, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 12px', fontFamily: 'var(--font-body)', fontSize: 13.5, color: 'var(--text-body)', background: 'var(--surface-card)', outline: 'none', marginBottom: 8 }} />
-            {/* Every match, not a page of them. A cap here was silently
-                cutting an 887-supplier list off at D, and a list that
-                quietly omits what you are looking for is worse than a slow
-                one — the checkboxes are cheap, and the search narrows it
-                long before the length is a problem. */}
-            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+              <button type="button" onClick={() => choose('')}
+                style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: !value ? 'var(--neutral-50)' : 'none', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                Any supplier
+              </button>
               {shown.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>No supplier matches "{q}".</div>}
               {shown.map(name => (
-                <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 2px', fontSize: 13.5, color: 'var(--text-body)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={chosen.has(name)} onChange={() => toggle(name)}
-                    style={{ width: 17, height: 17, accentColor: 'var(--color-primary)', cursor: 'pointer' }} />
-                  <span style={Ellip}>{name}</span>
-                </label>
+                <button type="button" key={name} onClick={() => choose(name)}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: name === value ? 'var(--neutral-50)' : 'none', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, lineHeight: 1.45, color: 'var(--text-body)', cursor: 'pointer', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                  {name}
+                </button>
               ))}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-              <Button variant="secondary" size="sm" onClick={() => { setOpen(false); setQ(''); }}>Done</Button>
+              <Button variant="outline" size="sm" onClick={() => { setOpen(false); setQ(''); }}>Close</Button>
             </div>
           </div>}
         </div>
@@ -1840,16 +1839,11 @@
       return <Dialog open={open} onClose={onClose} title={rule && rule.id ? 'Edit address rule' : 'New address rule'}
         description="The premises address on the bill decides which entity the cost belongs to." size="md">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <MultiSelect label="Supplier" options={suppliers || []} value={form.suppliers}
-            onChange={v => set({ suppliers: v })}
-            placeholder="Select suppliers" emptyLabel="Select suppliers" />
+          <SupplierPicker label="Supplier" options={suppliers || []} value={form.suppliers[0] || ''}
+            onChange={v => set({ suppliers: v ? [v] : [] })}
+            hint="Leave as Any supplier for a building one company occupies outright." />
           <Input label="Reference" placeholder="Optional, e.g. TNB-" value={form.referenceContains}
             onChange={v => set({ referenceContains: v })} />
-          <div style={{ gridColumn: '1 / -1', marginTop: -8, fontSize: 12, color: 'var(--text-muted)' }}>
-            {form.suppliers.length === 0
-              ? 'No supplier chosen means any supplier — right for a building one company occupies outright.'
-              : `${form.suppliers.length} supplier${form.suppliers.length === 1 ? '' : 's'}: ${form.suppliers.join(', ')}`}
-          </div>
 
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>
@@ -1864,48 +1858,26 @@
                 : 'Matched ignoring spaces, commas and letter case — but not abbreviations. "Jln" will not match "Jalan".'}
             </div>
             {(() => {
-              if (!contactAddrs || !contactAddrs.length) return null;
-              const held = contactAddrs.filter(c => c.address);
-              if (!held.length) return null;
-              const distinct = [...new Set(held.map(c => premisesKey(c.address)))];
+              const held = (contactAddrs || []).find(c => c.address);
+              if (!held) return null;
               const typed = premisesKey(form.premisesAddress);
-              // The rule's one address has to sit inside every contact's,
-              // or it covers only some of the suppliers it names.
-              const covers = typed ? held.filter(c => premisesKey(c.address).includes(typed)) : [];
-
-              if (typed && covers.length === held.length) {
+              // The engine matches by containment on this same key, so the
+              // dialog cannot claim agreement the engine would not reach.
+              if (typed && premisesKey(held.address).includes(typed)) {
                 return <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--green-500)', fontWeight: 600 }}>
-                  Matches the address Xero holds on {held.length === 1 ? 'that contact' : `all ${held.length} contacts`}.
+                  Matches the address Xero holds on that contact.
                 </div>;
               }
               return <div style={{ marginTop: 8, background: 'var(--neutral-50)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
-                {typed && covers.length > 0 && <div style={{ color: 'var(--color-danger)', marginBottom: 6 }}>
-                  Matches {covers.length} of {held.length} — the others would not be covered.
+                {typed && <div style={{ color: 'var(--color-danger)', marginBottom: 6 }}>
+                  What you have typed does not appear in the address Xero holds.
                 </div>}
-                <div style={{ color: 'var(--text-muted)' }}>
-                  {held.length === 1 ? 'Xero holds this address on that contact:' : `Xero holds ${distinct.length === 1 ? 'the same address' : 'these addresses'} on ${held.length} of the contacts:`}
-                </div>
-                {held.slice(0, 6).map((c, i) => (
-                  <div key={i} style={{ marginTop: 3 }}>
-                    {held.length > 1 && <span style={{ color: 'var(--text-subtle)' }}>{c.supplier} · </span>}
-                    {c.address}
-                  </div>
-                ))}
-                {held.length > 6 && <div style={{ color: 'var(--text-subtle)', marginTop: 2 }}>… and {held.length - 6} more</div>}
-                {distinct.length === 1
-                  ? <button onClick={() => set({ premisesAddress: held[0].address })}
-                      style={{ border: 'none', background: 'none', padding: '6px 0 0', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
-                      Use this address
-                    </button>
-                  : <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-                      These are different premises, so one rule cannot cover them. Write one rule each,
-                      or use the part they share if there is one.
-                    </div>}
-                {held.length < contactAddrs.length && (
-                  <div style={{ marginTop: 6, color: 'var(--text-subtle)' }}>
-                    {contactAddrs.length - held.length} of the chosen suppliers have no address in Xero.
-                  </div>
-                )}
+                <div style={{ color: 'var(--text-muted)' }}>Xero holds this address on that contact:</div>
+                <div style={{ marginTop: 2 }}>{held.address}</div>
+                <button onClick={() => set({ premisesAddress: held.address })}
+                  style={{ border: 'none', background: 'none', padding: '6px 0 0', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
+                  Use this address
+                </button>
               </div>;
             })()}
           </div>

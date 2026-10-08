@@ -576,22 +576,26 @@ silent miss waiting to happen — so when Xero already holds the address, the
 rule dialog shows it and offers **"Use this address"**, and says plainly once
 the two agree. Nothing has to be typed twice.
 
-A rule can still name **several** suppliers: electricity, water and rent at
-one building is one rule, not three. The dialog looks all of them up, and
-what it shows depends on what it finds:
-
-| What Xero holds | What the dialog does |
-| --- | --- |
-| One address, or several that agree | Offers it — one rule covers them all |
-| Addresses that differ | Shows each and says one rule cannot cover them |
-| An address on only some | Says how many have none |
-| A typed address matching only some | Says which, in red, before it is saved |
-
 The dialog normalises exactly as `lib/premises.js` does, so it cannot claim
 a match the engine would not make. And the lookup always re-reads Xero
 rather than using the half-hour cache: somebody who has just typed an
 address into Xero and come straight back should not be shown a stale answer
 and conclude the field did not save.
+
+#### Choosing the supplier
+
+One supplier per rule, or none — none meaning any supplier, which is right
+for a building one company occupies outright. The table and the schema
+still hold a set, so a rule covering several is possible later without a
+migration, but the dialog offers one because that is how these rules are
+actually written.
+
+The picker searches, because nine hundred contacts cannot be scrolled. And
+its rows **wrap** rather than truncate: thirty-six contacts named
+`Pengurusan Air Selangor Sdn Bhd - …` all cut at the same character leave a
+column of identical lines and no way to tell which is which. What
+distinguishes these names is the premises on the end, which is precisely
+what an ellipsis removes.
 
 The contact's own address is the one tempting exception. For a single
 contact billing many buildings it is the supplier's head office: the same on
