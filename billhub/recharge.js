@@ -672,8 +672,13 @@ async function candidateBills(accountId, { limit = 200, billIds = null, supplier
     where.push('b.xero_tenant_id = ?');
     params.push(tenantId);
   }
+  // The entity code comes along for the ride: a caller reporting on these
+  // needs to say which company paid, and a tenant GUID tells nobody that.
   return db.query(
-    `SELECT b.* FROM bills b WHERE ${where.join(' AND ')}
+    `SELECT b.*, e.code AS entity_code, e.short_name AS entity_short
+       FROM bills b
+       LEFT JOIN entities e ON e.account_id = b.account_id AND e.xero_tenant_id = b.xero_tenant_id
+      WHERE ${where.join(' AND ')}
       ORDER BY b.fully_paid_on DESC, b.bill_date DESC LIMIT ?`,
     [...params, Number(limit)]
   );

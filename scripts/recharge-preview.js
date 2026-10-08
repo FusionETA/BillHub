@@ -3,6 +3,7 @@
 //   npm run recharge-preview
 //   npm run recharge-preview -- --supplier "Tenaga Nasional"
 //   npm run recharge-preview -- --entity ABM --limit 60
+//   npm run recharge-preview -- --suppliers --supplier "Tenaga Nasional"
 //   npm run recharge-preview -- --text --supplier "Tenaga Nasional"
 //
 // Read-only, all the way down. It creates no runs, writes nothing to Bills
@@ -24,7 +25,6 @@ const db = require('../db');
 const recharge = require('../billhub/recharge');
 const model = require('../models/recharge');
 const premises = require('../lib/premises');
-const entityRef = require('../lib/entityRef');
 
 const ACCOUNT_ID = Number(process.env.DEMO_ACCOUNT_ID || process.env.BILLHUB_ACCOUNT_ID || 1);
 
@@ -52,6 +52,19 @@ const clip = (s, n) => {
   const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
+
+// Among a set of premises codes, the first pair where one is a prefix of
+// another — "TD 11-1" inside "TD 11-10". A `contains` rule written for the
+// shorter one claims the longer one's bills too, and pays the wrong company.
+// Naming the real pair beats warning in the abstract.
+function shortestAmbiguous(members) {
+  const codes = members.map((m) => m.premises);
+  for (const a of codes) {
+    const b = codes.find((c) => c !== a && c.startsWith(a));
+    if (b) return `"${a}" is also inside "${b}"`;
+  }
+  return null;
+}
 
 (async () => {
   const limit = Number(arg('limit', 60));
@@ -87,7 +100,89 @@ const clip = (s, n) => {
   }
 
   // ── What is actually readable on a bill ──────────────────────────────────
+  // Who the suppliers are, and who has been paying them. Entirely local —
+  // contact names are synced, so this costs no Xero call and covers every
+  // matching bill rather than the handful --text can afford to read.
+  //
+  // On Ayu Borneo's TNB this is the whole answer: one contact per meter, so
+  // the premises is already in the supplier name and the only question left
+  // is which entity occupies each one.
+  function supplierTable(rows) {
+    const byName = new Map();
+    for (const b of rows) {
+      const name = b.contact_name || '(no supplier)';
+      if (!byName.has(name)) byName.set(name, { bills: 0, payers: new Map() });
+      const e = byName.get(name);
+      e.bills += 1;
+      e.payers.set(b.entity_code || b.xero_tenant_id, (e.payers.get(b.entity_code || b.xero_tenant_id) || 0) + 1);
+    }
+    return [...byName.entries()]
+      .map(([name, e]) => ({ name, bills: e.bills, payers: [...e.payers.keys()] }))
+      .sort((a, b) => b.bills - a.bills || a.name.localeCompare(b.name));
+  }
+
+  // "Tenaga Nasional Berhad - TD 11-1" — one Xero contact per meter, with the
+  // premises after a dash. Worth naming, because it means the premises is
+  // already in the supplier and there is no address to go looking for.
+  //
+  // Not entityRef.commonPrefix: that refuses a prefix which would empty one
+  // of its inputs, and here the plain "Tenaga Nasional Berhad" sitting
+  // alongside its own suffixed variants is the very thing being detected.
+  function perPremisesGroups(table) {
+    const groups = new Map();
+    for (const t of table) {
+      const m = /^(.+?)\s+-\s+(.+)$/.exec(t.name);
+      if (!m) continue;
+      const base = m[1].trim();
+      if (!groups.has(base)) groups.set(base, []);
+      groups.get(base).push({ ...t, premises: m[2].trim() });
+    }
+    return [...groups.entries()]
+      .filter(([, members]) => members.length >= 2)
+      .sort((a, b) => b[1].length - a[1].length);
+  }
+
+  if (has('suppliers')) {
+    const table = supplierTable(matching);
+    console.log(`\n${table.length} supplier contact(s) across ${matching.length} paid, un-recharged bill(s)`);
+    console.log('─'.repeat(78));
+    console.log(`  ${pad('CONTACT', 46)}${'BILLS'.padStart(6)}   PAID BY`);
+    for (const t of table) {
+      console.log(`  ${pad(clip(t.name, 45), 46)}${String(t.bills).padStart(6)}   ${clip(t.payers.join(' '), 22)}`);
+    }
+
+    const groups = perPremisesGroups(table);
+    for (const [base, members] of groups) {
+      console.log(`\n  ${members.length} of these are "${base} - <premises>".`);
+      console.log('  The premises is already in the supplier name, so there is no address');
+      console.log('  to go looking for. Each needs a recharge rule, and the only thing');
+      console.log('  left to decide is which entity occupies it:');
+      console.log('');
+      console.log(`      Supplier  is exactly  "${members[0].name}"   →  ?`);
+      console.log('');
+      console.log(`  "is exactly", not "contains" — ${shortestAmbiguous(members) || 'a code like TD 11-1'}.`);
+    }
+    if (!groups.length && table.length > 1) {
+      console.log('\n  No "<supplier> - <premises>" pattern here, so the premises is not in');
+      console.log('  the contact name. Run with --text to see what the bills themselves say.');
+    }
+    console.log('');
+    await db.close();
+    return;
+  }
+
   if (has('text')) {
+    // Printed before the slow part. Reading line items costs a Xero call per
+    // bill, and on Ayu Borneo's TNB the supplier list answers the question
+    // on its own — there is no sense making anyone wait for forty reads to
+    // find that out.
+    const groups = perPremisesGroups(supplierTable(matching));
+    if (groups.length) {
+      console.log(`\n${groups[0][1].length} supplier contacts here are "${groups[0][0]} - <premises>".`);
+      console.log('That is the answer on its own: run with --suppliers to see them all.');
+      console.log('Reading the bills below only confirms there is no street address too.\n');
+    }
+
     console.log(`\nWhat Bills Hub can see on ${bills.length} paid bill(s)`);
     console.log('─'.repeat(78));
     console.log('A Xero bill carries no premises address field. These are the only places');
@@ -130,14 +225,6 @@ const clip = (s, n) => {
       if (s.lineText) console.log(`      lines    "${clip(s.lineText, 68)}"`);
     }
 
-    // The pattern Ayu Borneo actually uses: one Xero contact per meter,
-    // "Tenaga Nasional Berhad - TD 11-1". The premises is in the supplier
-    // name, so there is nothing to match an address against and nothing
-    // wrong with that — it just means a different kind of rule.
-    const names = [...new Set(matching.map((b) => b.contact_name).filter(Boolean))];
-    const sharedPrefix = entityRef.commonPrefix(names);
-    const perPremises = names.length > 1 && sharedPrefix.length >= 6;
-
     console.log('\n  Reading this:');
     if (tally.read) {
       console.log(`   · ${tally.read} bill(s) carry an address somebody read off the document.`);
@@ -148,20 +235,10 @@ const clip = (s, n) => {
       console.log('     the line items. An address rule works on those if it is written');
       console.log('     exactly as the text above spells it.');
     }
-    if (perPremises) {
-      console.log(`\n   · ${names.length} different Xero contacts here share the name "${sharedPrefix.trim()}":`);
-      for (const n of names.slice(0, 14)) {
-        console.log(`       ${n}   (${matching.filter((b) => b.contact_name === n).length} paid bill(s))`);
-      }
-      if (names.length > 14) console.log(`       … and ${names.length - 14} more`);
-      console.log('\n     That is one contact per premises, so the premises is already in');
-      console.log('     the supplier name. Nothing to match an address against, and');
-      console.log('     nothing wrong with that — use a recharge rule instead:');
-      console.log('');
-      console.log(`         Supplier  is exactly  "${names[0]}"   →  the entity that occupies it`);
-      console.log('');
-      console.log('     "is exactly" rather than "contains": a code like TD 11-1 is also');
-      console.log('     inside TD 11-10, and that mistake pays the wrong company.');
+    if (groups.length) {
+      console.log(`   · ${groups[0][1].length} contacts are "${groups[0][0]} - <premises>", so the premises`);
+      console.log('     is in the supplier name and there is no address to look for.');
+      console.log('     --suppliers lists them with who has been paying each one.');
     } else if (tally.nothing === bills.length) {
       console.log('   · None of them carries anything an address rule could match.');
       console.log('     Use a recharge rule: match the supplier, the reference, the');

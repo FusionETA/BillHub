@@ -682,11 +682,29 @@ reference  001170153115 - TD 11-1
 lines      001170153115 - TD 11-1 TD 11-1 ELECTRIC OCTOBER 2026
 ```
 
-One Xero contact per meter, with the premises in the contact's own name. So
-the report notices that — several contacts sharing a long prefix — and says
-to use a recharge rule on the supplier rather than an address rule, matching
-**is exactly** rather than **contains**, because `TD 11-1` is also inside
-`TD 11-10` and that mistake pays the wrong company.
+One Xero contact per meter, with the premises in the contact's own name.
+
+`--suppliers` is the report that follows from that, and it is free: contact
+names are synced, so it lists every supplier across every matching bill with
+no Xero call at all, and says **who has been paying each one** — which is the
+worklist.
+
+```
+  CONTACT                                   BILLS   PAID BY
+  Tenaga Nasional Berhad - TD 11-1              9   ABM
+  Tenaga Nasional Berhad - TD 11-2              9   ABM
+  …
+  4 of these are "Tenaga Nasional Berhad - <premises>".
+  "is exactly", not "contains" — "TD 11-1" is also inside "TD 11-10".
+```
+
+That last line is derived from the codes actually present, not warned about
+in the abstract: a `contains` rule for the shorter code claims the longer
+one's bills and pays the wrong company.
+
+`--text` reads line items, so it costs a Xero call per bill and can only
+afford a sample. It now prints the supplier pattern first, because where that
+pattern holds the sample only confirms what the free report already said.
 
 **Testing mode** covers the rest of the flow. Rules run against real Xero
 data, suggestions appear as normal, and a recharge can be drafted — but the
