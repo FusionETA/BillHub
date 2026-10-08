@@ -2,7 +2,7 @@
   "name": "wazzocr-billhub",
   "version": "0.1.0",
   "private": true,
-  "description": "Bills Hub — multi-entity Xero bill management, WhatsApp digests, bank payment files and intercompany recharges",
+  "description": "Bills Hub \u2014 multi-entity Xero bill management, WhatsApp digests, bank payment files and intercompany recharges",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -36,7 +36,8 @@
     "demo-payrun": "node scripts/demo-payrun.js",
     "bank-names": "node scripts/bank-names.js",
     "ready-to-pay": "node scripts/ready-to-pay.js",
-    "payee-codes": "node scripts/payee-codes.js"
+    "payee-codes": "node scripts/payee-codes.js",
+    "recharge-preview": "node scripts/recharge-preview.js"
   },
   "engines": {
     "node": ">=18"

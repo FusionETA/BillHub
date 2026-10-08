@@ -109,8 +109,12 @@ async function syncTenant(accountId, tenantId, tenantName, { full = false, inter
         const org = await xero.api(accountId, tenantId, '/Organisation');
         const code = org?.Organisations?.[0]?.BaseCurrency;
         if (code) await entities.setBaseCurrency(accountId, tenantId, code);
+        // Same call, so it is free: Xero's short code, which is what lets a
+        // link open the right organisation rather than the last one visited.
+        const short = org?.Organisations?.[0]?.ShortCode;
+        if (short) await entities.setShortCode(accountId, tenantId, short);
       } catch (e) {
-        console.error(`[sync] could not read the base currency for ${tenantName || tenantId}: ${e.message}`);
+        console.error(`[sync] could not read the organisation details for ${tenantName || tenantId}: ${e.message}`);
       }
     }
     const state = await syncState.get(accountId, tenantId);

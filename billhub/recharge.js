@@ -1,20 +1,42 @@
 // Intercompany recharge.
 //
-// When one entity pays a bill on behalf of another, the cost is pushed across
-// with two documents per subsidiary:
+// One entity pays a bill that belongs to another, and the cost has to end up
+// with whoever it belongs to. Ayu Borneo Management pays a great many of them.
 //
-//   AR invoice (ACCREC) in the payer,     addressed to the subsidiary
-//   draft bill (ACCPAY) in the subsidiary, addressed to the payer
+// Two kinds of rule decide this, and they are tried in order:
 //
-// They are mirror images, so the group nets to zero and each side can reconcile
-// its own ledger. An intercompany transfer later settles the pair, which is
-// recorded here rather than guessed at.
+//   1. Address rules  — the premises printed on the bill. The strongest
+//      evidence there is: an address is a statement about the real world.
+//      Only some bills carry one.
 //
-// Nothing reaches Xero until someone posts a run. Rules only ever *suggest*.
+//   2. Recharge rules — conditions on the text Xero definitely has: the
+//      supplier, the reference, the invoice number, the line descriptions,
+//      the tracking categories. This is what covers rent, a tenancy, a
+//      supplier bill, a central payroll deduction — everything with no
+//      address on it.
+//
+// Address first, because a premises identifies a building and a supplier name
+// identifies a company that bills many buildings. A recharge rule is only
+// consulted once no address rule has claimed the bill.
+//
+// Either way a recharge pushes the cost across with two documents:
+//
+//   AR invoice (ACCREC) in the payer,  addressed to the owner
+//   draft bill (ACCPAY) in the owner,  addressed to the payer
+//
+// They are mirror images, so the group nets to zero and each side can
+// reconcile its own ledger. The intercompany transfer that later clears the
+// pair is reconciled in Xero, where both documents live — Bills Hub does not
+// keep a second record of it to disagree with.
+//
+// Nothing reaches Xero until someone posts a run. Rules only ever suggest.
 const db = require('../db');
 const grantSource = require('../lib/grantSource');
 const xero = require('../lib/xero');
 const model = require('../models/recharge');
+const testMode = require('../lib/testMode');
+const premisesLib = require('../lib/premises');
+const entityRef = require('../lib/entityRef');
 const bills = require('../models/bills');
 const entities = require('../models/entities');
 const accounts = require('../models/accounts');
@@ -52,25 +74,293 @@ async function findOrCreateContact(accountId, tenantId, name) {
   return id;
 }
 
-// ── Planning ────────────────────────────────────────────────────────────────
+// ── What a bill says about itself ───────────────────────────────────────────
 
-// Splits an amount by percentage without losing or inventing cents: the last
-// share absorbs the rounding difference so the parts always sum to the whole.
-function splitAmount(total, shares) {
-  const cents = Math.round(Number(total) * 100);
-  const out = [];
-  let used = 0;
-  shares.forEach((share, i) => {
-    const isLast = i === shares.length - 1;
-    const part = isLast ? cents - used : Math.round(cents * (Number(share) / 100));
-    used += part;
-    out.push(part / 100);
-  });
+// A Xero ACCPAY bill carries no premises address. What it does carry:
+//
+//   Contact.Name                       the supplier
+//   Reference, InvoiceNumber           free text, synced
+//   LineItems[].Description            free text, NOT synced
+//   LineItems[].Tracking               category options, NOT synced
+//   Attachments                        the PDF, which is where a printed
+//                                      premises actually lives
+//
+// The last two are not in the local row because the bill list is fetched
+// summaryOnly, which is what keeps a 41-organisation sync inside Xero's rate
+// limit. They are read one bill at a time, and only when a rule actually
+// asks for them. The printed address can only come from the PDF, so
+// `bills.premises_address` is where WazzOCR puts what it read; until then a
+// premises can still be matched from whatever a bookkeeper typed into the
+// reference or the line descriptions.
+const _textCache = new Map();          // billId -> { description, tracking, at }
+const TEXT_TTL_MS = 5 * 60 * 1000;
+
+// The parts of a bill that cost nothing to look at.
+function localFields(bill) {
+  return {
+    supplier: bill.contact_name || '',
+    reference: bill.reference || '',
+    invoice_number: bill.invoice_number || '',
+    premises: String(bill.premises_address || '').trim()
+  };
+}
+
+// The parts that need the bill read back. Cached either way: an organisation
+// whose token has expired fails every time, and without remembering that it
+// would be asked again on every page load.
+async function remoteFields(accountId, bill, { fetch = true } = {}) {
+  const hit = _textCache.get(bill.id);
+  if (hit && Date.now() - hit.at < TEXT_TTL_MS) return hit;
+  if (!fetch) return { description: '', tracking: '', at: 0 };
+
+  let description = '';
+  let tracking = '';
+  try {
+    const payload = await xero.api(accountId, bill.xero_tenant_id, `/Invoices/${bill.xero_invoice_id}`);
+    const lines = payload?.Invoices?.[0]?.LineItems || [];
+    description = lines.map((l) => l.Description).filter(Boolean).join(' ');
+    tracking = lines.flatMap((l) => (l.Tracking || []).map((t) => `${t.Name} ${t.Option}`)).join(' ');
+  } catch (e) {
+    // Not fatal. Without them the bill simply fails to match, which reads as
+    // "no rule covers this" rather than as a wrong recharge.
+    console.error(`[recharge] could not read line items for bill ${bill.id}: ${e.message}`);
+  }
+  const out = { description, tracking, at: Date.now() };
+  _textCache.set(bill.id, out);
   return out;
 }
 
-// Validates a proposed recharge and works out each subsidiary's share.
-async function planRun(accountId, { billId, targets, ruleId = null }) {
+// Everything an address rule can be matched against: what somebody read off
+// the document, plus the free text where a bookkeeper writes the premises.
+async function premisesText(accountId, bill, { fetch = true } = {}) {
+  const f = localFields(bill);
+  const local = [f.premises, f.reference, f.invoice_number].filter(Boolean).join(' ');
+  // A read address is the whole answer; there is nothing better to go and ask
+  // Xero for.
+  if (f.premises) return { text: local, source: bill.premises_source || 'manual' };
+  const r = await remoteFields(accountId, bill, { fetch });
+  return { text: `${local} ${r.description}`.trim(), source: r.description ? 'xero' : 'reference' };
+}
+
+// ── Conditions ──────────────────────────────────────────────────────────────
+
+// Compared with case and surrounding space ignored, because nobody typing
+// "Petronas" into a rule means to exclude "PETRONAS DAGANGAN BERHAD".
+function testCondition(haystack, operator, value) {
+  const h = String(haystack || '').toLowerCase().trim();
+  const v = String(value || '').toLowerCase().trim();
+  if (!v) return false;
+  switch (operator) {
+    case 'is':           return h === v;
+    case 'starts_with':  return h.startsWith(v);
+    case 'ends_with':    return h.endsWith(v);
+    case 'not_contains': return !h.includes(v);
+    case 'contains':
+    default:             return h.includes(v);
+  }
+}
+
+// Does a bill satisfy a recharge rule's conditions?
+//
+// The remote fields are fetched only if a condition actually names one —
+// a rule testing the supplier and the reference costs no API call at all.
+async function conditionsMatch(accountId, bill, rule, { fetch = true } = {}) {
+  const conds = rule.conditions || [];
+  if (!conds.length) return false;
+
+  const values = localFields(bill);
+  if (conds.some((c) => model.fieldNeedsXero(c.field))) {
+    const r = await remoteFields(accountId, bill, { fetch });
+    values.description = r.description;
+    values.tracking = r.tracking;
+  }
+
+  const results = conds.map((c) => testCondition(values[c.field], c.operator, c.value));
+  return rule.match_mode === 'any' ? results.some(Boolean) : results.every(Boolean);
+}
+
+function asDate(v) {
+  if (!v) return null;
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+}
+
+// A rule acts on bills marked paid on or after its start date. Without this a
+// new rule would reach back through every paid bill in the history the moment
+// it was saved.
+function withinStart(bill, rule) {
+  const paid = asDate(bill.fully_paid_on);
+  const start = asDate(rule.start_date);
+  if (!start) return true;
+  // A bill recorded as paid with no date recorded cannot be placed either
+  // side of the line, and silently including it would be the dangerous
+  // choice of the two.
+  if (!paid) return false;
+  return paid >= start;
+}
+
+// ── Deciding ────────────────────────────────────────────────────────────────
+
+// Every answer this can give, so a caller never has to infer one from a null.
+//
+//   unpaid        the money has not left the group yet
+//   no-rule       no rule of either kind covers this bill
+//   out-of-scope  a recharge rule covers it, but it was paid before that
+//                 rule's start date
+//   own           the owner is the entity that paid — it paid its own bill
+//   recharge      the owner is somebody else
+//   done          already recharged
+const OUTCOMES = ['unpaid', 'no-rule', 'out-of-scope', 'own', 'recharge', 'done'];
+
+function isPaid(bill) {
+  return bill.xero_status === 'PAID' || Number(bill.amount_paid) > 0;
+}
+
+// Load both rule sets once, so a scan over many bills does not re-query.
+async function loadRules(accountId) {
+  const [address, text] = await Promise.all([model.listRules(accountId), model.listTextRules(accountId)]);
+  return {
+    address: address.filter((r) => r.enabled && r.owner_tenant_id && r.premises_address),
+    text: text.filter((r) => r.enabled && r.owner_tenant_id)
+  };
+}
+
+// The address rule that best describes this bill's premises.
+//
+// A rule's suppliers narrow it: none means any supplier. Where several rules
+// match, the most specific wins — a longer address beats a shorter one, then
+// naming suppliers beats not, then a reference beats none. Without that the
+// winner would be whichever row the database returned first, which is not a
+// decision anybody made.
+async function matchAddressRule(accountId, bill, rules, { fetch = true } = {}) {
+  const supplierKey = premisesLib.normalise(bill.contact_name);
+  const reference = `${bill.reference || ''} ${bill.invoice_number || ''}`.toLowerCase();
+
+  const eligible = rules.filter((r) => {
+    if (r.suppliers.length && !r.suppliers.some((x) => x.key === supplierKey)) return false;
+    if (r.reference_contains && !reference.includes(String(r.reference_contains).toLowerCase())) return false;
+    return true;
+  });
+  if (!eligible.length) return null;
+
+  const { text, source } = await premisesText(accountId, bill, { fetch });
+  let best = null;
+  for (const rule of eligible) {
+    const m = premisesLib.match(text, rule.premises_address);
+    if (!m) continue;
+    const score = (m.length * 1000)
+      + (rule.suppliers.length ? 100 : 0)
+      + (rule.reference_contains ? 10 : 0)
+      + (m.exact ? 1 : 0);
+    if (!best || score > best.score) best = { rule, score, source };
+  }
+  return best;
+}
+
+// The first recharge rule whose conditions the bill satisfies. Ordered by
+// position, so putting a specific rule above a general one does what it
+// looks like it does.
+async function matchTextRule(accountId, bill, rules, { fetch = true } = {}) {
+  for (const rule of rules) {
+    if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
+    if (!withinStart(bill, rule)) continue;
+    if (await conditionsMatch(accountId, bill, rule, { fetch })) return rule;
+  }
+  return null;
+}
+
+function verdictFor(rule, bill, { address = null, kind }) {
+  const owner = rule.owner_short || rule.owner_code;
+  if (rule.owner_tenant_id === bill.xero_tenant_id) {
+    return {
+      outcome: 'own', rule, kind, address,
+      reason: kind === 'address'
+        ? `${owner} owns this address and is on the bill header, so it is paying its own bill. Nothing is recharged.`
+        : `"${rule.name}" recharges to ${owner}, which is the entity on the bill header. Nothing is recharged.`
+    };
+  }
+  return {
+    outcome: 'recharge',
+    rule, kind, address,
+    ownerTenantId: rule.owner_tenant_id,
+    ownerCode: rule.owner_code,
+    ownerShort: rule.owner_short,
+    // Two forms of the same sentence. `reason` stands alone; `consequence` is
+    // for a view that has already printed the address and would otherwise
+    // print it twice.
+    reason: kind === 'address'
+      ? `${address} belongs to ${owner}, so the full amount is recharged there.`
+      : `"${rule.name}" matches this bill, so the full amount is recharged to ${owner}.`,
+    consequence: kind === 'address'
+      ? `Belongs to ${owner} — the full amount is recharged there.`
+      : `Matches "${rule.name}" — the full amount is recharged to ${owner}.`
+  };
+}
+
+// Runs one bill through both rule sets, address first. Never writes
+// anything — the Pay dialog uses it to explain what will happen, and
+// suggestions() uses it to decide what to offer.
+//
+// `assumePaid` skips the paid check. The Pay dialog needs it: it is asking
+// what will happen to a bill it is about to mark paid, and "not paid yet" is
+// a true but useless answer to that question.
+async function decide(accountId, bill, { rules = null, fetch = true, assumePaid = false } = {}) {
+  const all = rules || (await loadRules(accountId));
+
+  if (!assumePaid && !isPaid(bill)) {
+    return { outcome: 'unpaid', reason: 'Not paid yet. A bill is only recharged once the money has left the group.' };
+  }
+
+  const hit = await matchAddressRule(accountId, bill, all.address, { fetch });
+  if (hit) {
+    return { ...verdictFor(hit.rule, bill, { address: hit.rule.premises_address, kind: 'address' }), source: hit.source };
+  }
+
+  const text = await matchTextRule(accountId, bill, all.text, { fetch });
+  if (text) return verdictFor(text, bill, { kind: 'text' });
+
+  // Separated from "no rule", because the two call for opposite actions. A
+  // rule does cover this bill; it was paid before the rule's start date, and
+  // the fix is to move that date back, not to write another rule.
+  for (const rule of all.text) {
+    if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
+    if (withinStart(bill, rule)) continue;
+    if (!await conditionsMatch(accountId, bill, rule, { fetch })) continue;
+    const paid = asDate(bill.fully_paid_on);
+    return {
+      outcome: 'out-of-scope',
+      rule,
+      kind: 'text',
+      reason: paid
+        ? `"${rule.name}" matches this bill, but it was paid on ${paid} and the rule only acts on bills paid from ${asDate(rule.start_date)}. Move the rule's start date back to include it.`
+        : `"${rule.name}" matches this bill, but no payment date is recorded against it, so it cannot be placed inside the rule's window.`
+    };
+  }
+
+  // Worth separating: an address rule names this supplier and its premises
+  // was not on the bill. That is almost always an address typed one way in
+  // the rule and another way on the bill, and it is invisible unless said
+  // out loud — the rule looks configured and quietly never fires.
+  const supplierKey = premisesLib.normalise(bill.contact_name);
+  const named = all.address.filter((r) => r.suppliers.some((x) => x.key === supplierKey));
+  if (named.length) {
+    return {
+      outcome: 'no-rule',
+      nearMiss: true,
+      candidates: named,
+      reason: named.length === 1
+        ? `One address rule covers ${bill.contact_name}, but its premises does not appear on this bill.`
+        : `${named.length} address rules cover ${bill.contact_name}, but none of their premises appears on this bill.`
+    };
+  }
+
+  return { outcome: 'no-rule', reason: `No rule covers ${bill.contact_name || 'this supplier'}.` };
+}
+
+// ── Planning ────────────────────────────────────────────────────────────────
+
+// Validates a proposed recharge. One address, one owner, the whole amount —
+// there is no split to work out, because a premises belongs to one entity.
+async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null, textRuleId = null }) {
   const settings = await model.getSettings(accountId);
   if (!settings.ar_account_code || !settings.ap_account_code) {
     throw err(
@@ -84,69 +374,89 @@ async function planRun(accountId, { billId, targets, ruleId = null }) {
 
   // Recharging a bill nobody has paid yet would invoice a subsidiary for money
   // that has not left the group.
-  if (bill.xero_status !== 'PAID' && Number(bill.amount_paid) <= 0) {
+  if (!isPaid(bill)) {
     throw err(
       `"${bill.reference || bill.invoice_number}" has not been paid yet, so there is nothing to recharge. Pay it first.`,
       400
     );
   }
 
+  // A run raised in testing mode blocks the bill only while testing mode is
+  // still on. Otherwise a bill tried once during testing would be quietly
+  // unrechargeable for good, held by a run nobody can see.
+  const testing = await testMode.isOn(accountId);
   const existing = await db.getOne(
-    "SELECT id, status FROM recharge_runs WHERE account_id = ? AND bill_id = ? AND status <> 'cancelled'",
+    `SELECT id, status, test_mode FROM recharge_runs
+      WHERE account_id = ? AND bill_id = ? AND status <> 'cancelled'
+        ${testing ? '' : 'AND test_mode = 0'}`,
     [accountId, bill.id]
   );
-  if (existing) throw err(`That bill is already recharged (run #${existing.id}, ${existing.status}).`, 409);
+  if (existing) {
+    throw err(
+      `That bill is already recharged (run #${existing.id}, ${existing.status}`
+      + `${existing.test_mode ? ', testing mode' : ''}).`, 409);
+  }
 
   const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
   const known = await entities.listByAccount(accountId, wazzocrAccountId);
   const byTenant = new Map(known.map((e) => [e.xero_tenant_id, e]));
 
-  if (!Array.isArray(targets) || !targets.length) throw err('Choose at least one entity to recharge to.');
+  // Either the caller names the owner, or the rules work it out. Asking the
+  // rules is the normal path; naming an owner is how a person overrides them
+  // for one bill.
+  let owner = ownerTenantId;
+  let kind = null;
+  let rule = null;
+  let address = null;
 
-  for (const t of targets) {
-    if (!byTenant.has(t.tenantId)) throw err(`"${t.tenantId}" is not a connected Xero organisation.`);
-    if (t.tenantId === bill.xero_tenant_id) {
-      throw err(`${byTenant.get(t.tenantId).short_name} paid this bill — an entity cannot recharge itself.`);
-    }
+  if (!owner) {
+    const verdict = await decide(accountId, bill);
+    if (verdict.outcome !== 'recharge') throw err(verdict.reason, 400);
+    owner = verdict.ownerTenantId;
+    rule = verdict.rule;
+    kind = verdict.kind;
+    address = verdict.address;
+  } else if (ruleId) {
+    rule = await model.getRule(accountId, ruleId);
+    kind = rule ? 'address' : null;
+    address = rule ? rule.premises_address : null;
+  } else if (textRuleId) {
+    rule = await model.getTextRule(accountId, textRuleId);
+    kind = rule ? 'text' : null;
   }
 
-  // Either explicit amounts, or percentage shares of the bill total.
-  const usingPercent = targets.every((t) => t.amount == null);
-  let amounts;
-  if (usingPercent) {
-    model.validateTargets(targets);
-    amounts = splitAmount(bill.total, targets.map((t) => t.sharePercent ?? 100));
-  } else {
-    amounts = targets.map((t) => Number(t.amount));
-    if (amounts.some((a) => !Number.isFinite(a) || a <= 0)) throw err('Every amount must be a positive number.');
-    const sum = amounts.reduce((n, a) => n + a, 0);
-    if (sum - Number(bill.total) > 0.01) {
-      throw err(`The shares add up to ${sum.toFixed(2)}, more than the bill's ${Number(bill.total).toFixed(2)}.`);
-    }
+  if (!byTenant.has(owner)) throw err(`"${owner}" is not a connected Xero organisation.`);
+  if (owner === bill.xero_tenant_id) {
+    throw err(`${byTenant.get(owner).short_name} is on the bill header, so it is paying its own bill — there is nothing to recharge.`);
   }
 
+  const e = byTenant.get(owner);
   const prefix = settings.reference_prefix || 'IC-';
   const base = (bill.reference || bill.invoice_number || `BILL${bill.id}`).replace(/\s+/g, '-');
+  // The group prefix every code shares adds nothing inside a reference that
+  // is already this group's — see lib/entityRef.js. The badge on screen
+  // still shows the whole code.
+  const suffix = entityRef.short(e, known.map((x) => x.code));
 
-  const lines = targets.map((t, i) => {
-    const e = byTenant.get(t.tenantId);
-    return {
-      tenantId: t.tenantId,
-      code: e.code,
-      shortName: e.short_name,
-      sharePercent: usingPercent ? Number(t.sharePercent ?? 100) : null,
-      amount: amounts[i],
-      reference: `${prefix}${base}-${e.code}`.slice(0, 255)
-    };
-  });
+  const lines = [{
+    tenantId: owner,
+    code: e.code,
+    shortName: e.short_name,
+    sharePercent: 100,
+    amount: Number(bill.total),
+    reference: `${prefix}${base}-${suffix}`.slice(0, 255)
+  }];
 
   return {
     bill,
     payer: byTenant.get(bill.xero_tenant_id) || null,
     settings,
     lines,
-    total: lines.reduce((n, l) => n + l.amount, 0),
-    ruleId
+    address,
+    total: Number(bill.total),
+    // Which kind of rule raised it, kept apart so a run can say so later.
+    ruleId: kind === 'address' && rule ? rule.id : null,
+    textRuleId: kind === 'text' && rule ? rule.id : null
   };
 }
 
@@ -154,11 +464,13 @@ async function createRun(accountId, input) {
   const plan = await planRun(accountId, input);
   const created = await model.createRun(accountId, {
     ruleId: plan.ruleId,
+    textRuleId: plan.textRuleId,
     bill: plan.bill,
     targets: plan.lines,
-    referencePrefix: plan.settings.reference_prefix
+    premisesAddress: plan.address,
+    testMode: await testMode.isOn(accountId)
   });
-  return { ...created, lines: plan.lines, payer: plan.payer };
+  return { ...created, lines: plan.lines, payer: plan.payer, address: plan.address };
 }
 
 // ── Posting ─────────────────────────────────────────────────────────────────
@@ -172,6 +484,14 @@ async function postRun(accountId, runId) {
   const run = await model.getRun(accountId, runId);
   if (!run) throw err('Recharge not found.', 404);
   if (run.status === 'cancelled') throw err('That recharge was cancelled.', 409);
+  // Refused on the run's own flag, not on whether testing mode happens to be
+  // on now. Somebody told this run it was a test; turning the switch off
+  // later must not quietly turn it into a real one.
+  if (run.test_mode) {
+    throw err(
+      'That recharge was worked out in testing mode, so it can never be posted. '
+      + 'Turn testing mode off and draft it again.', 409);
+  }
 
   const settings = await model.getSettings(accountId);
   if (!settings.ar_account_code || !settings.ap_account_code) {
@@ -197,8 +517,12 @@ async function postRun(accountId, runId) {
       continue;
     }
 
+    // The premises is the reason this document exists, so it goes on the face
+    // of it. Whoever opens the invoice in six months should not have to come
+    // back here to find out which building it was for.
     const description = `Recharge: ${run.supplier_name || 'supplier bill'}`
-      + `${run.bill_reference ? ` (${run.bill_reference})` : ''} paid by ${payer.short_name}`;
+      + `${run.bill_reference ? ` (${run.bill_reference})` : ''} paid by ${payer.short_name}`
+      + `${run.premises_address ? ` — ${run.premises_address}` : ''}`;
 
     try {
       let arId = line.ar_invoice_id;
@@ -285,56 +609,169 @@ async function postRun(accountId, runId) {
   return { status, posted: results.filter((r) => r.ok).length, failed: failed.length, results };
 }
 
-// ── Rule matching ───────────────────────────────────────────────────────────
+// ── Suggestions ─────────────────────────────────────────────────────────────
 
-function ruleMatches(rule, bill) {
-  if (bill.xero_tenant_id !== rule.payer_tenant_id) return false;
-  if ((bill.contact_name || '').trim().toLowerCase() !== rule.supplier_name.trim().toLowerCase()) return false;
-  if (rule.match_type === 'reference_contains') {
-    const haystack = `${bill.reference || ''} ${bill.invoice_number || ''}`.toLowerCase();
-    return haystack.includes(String(rule.match_value || '').toLowerCase());
+// Paid bills Bills Hub can actually act on: in a connected organisation, not
+// already recharged. Bills in an organisation that is no longer connected
+// cannot be recharged — planRun refuses them — so there is no sense reading
+// them, and a dead tenant's orphaned bills would otherwise cost a failing
+// Xero call each.
+async function candidateBills(accountId, { limit = 200, billIds = null } = {}) {
+  const wazzocrAccountId = await grantSource.connectionsAccountId(accountId);
+  const live = (await entities.listByAccount(accountId, wazzocrAccountId)).map((e) => e.xero_tenant_id);
+  if (!live.length) return [];
+
+  // A run raised in testing mode holds its bill only while testing mode is
+  // still on — otherwise a bill tried once during testing would drop out of
+  // the suggestions for good, held by a run nobody can see.
+  const heldByTest = await testMode.isOn(accountId) ? '' : 'AND r.test_mode = 0';
+
+  const where = [
+    'b.account_id = ?',
+    `b.xero_tenant_id IN (${live.map(() => '?').join(',')})`,
+    "(b.xero_status = 'PAID' OR b.amount_paid > 0)",
+    `NOT EXISTS (SELECT 1 FROM recharge_runs r
+                  WHERE r.account_id = b.account_id AND r.bill_id = b.id
+                    AND r.status <> 'cancelled' ${heldByTest})`
+  ];
+  const params = [accountId, ...live];
+  if (billIds && billIds.length) {
+    where.push(`b.id IN (${billIds.map(() => '?').join(',')})`);
+    params.push(...billIds.map(Number));
   }
-  return true;
+  return db.query(
+    `SELECT b.* FROM bills b WHERE ${where.join(' AND ')}
+      ORDER BY b.fully_paid_on DESC, b.bill_date DESC LIMIT ?`,
+    [...params, Number(limit)]
+  );
 }
 
-// Paid bills that a rule covers and which have not been recharged yet. This is
-// the whole point of rules: surfacing what is owed between companies before
-// someone has to remember it.
+// Paid bills a rule says belong somewhere else, which have not been
+// recharged yet. This is the whole point of rules: surfacing what is owed
+// between companies before somebody has to remember it.
 async function suggestions(accountId, { limit = 50 } = {}) {
-  const rules = (await model.listRules(accountId)).filter((r) => r.enabled);
-  if (!rules.length) return [];
+  const rules = await loadRules(accountId);
+  if (!rules.address.length && !rules.text.length) {
+    const empty = [];
+    empty.unmatched = [];
+    return empty;
+  }
 
-  const payers = [...new Set(rules.map((r) => r.payer_tenant_id))];
-  const candidates = await db.query(
-    `SELECT b.* FROM bills b
-      WHERE b.account_id = ?
-        AND b.xero_tenant_id IN (${payers.map(() => '?').join(',')})
-        AND (b.xero_status = 'PAID' OR b.amount_paid > 0)
-        AND NOT EXISTS (
-          SELECT 1 FROM recharge_runs r
-           WHERE r.account_id = b.account_id AND r.bill_id = b.id AND r.status <> 'cancelled')
-      ORDER BY b.bill_date DESC
-      LIMIT ?`,
-    [accountId, ...payers, Number(limit)]
-  );
-
+  const candidates = await candidateBills(accountId, { limit: Math.max(limit * 4, 200) });
   const out = [];
+  const unmatched = [];
+
   for (const bill of candidates) {
-    // First matching rule wins, so ordering a specific reference rule above a
-    // catch-all does what it looks like it does.
-    const rule = rules.find((r) => ruleMatches(r, bill));
-    if (!rule) continue;
-    const amounts = splitAmount(bill.total, rule.targets.map((t) => t.sharePercent));
+    if (out.length >= limit) break;
+    const verdict = await decide(accountId, bill, { rules });
+    if (verdict.outcome === 'no-rule' && verdict.nearMiss) {
+      unmatched.push({ bill, reason: verdict.reason });
+      continue;
+    }
+    if (verdict.outcome !== 'recharge') continue;
     out.push({
       bill,
-      rule,
-      lines: rule.targets.map((t, i) => ({ ...t, amount: amounts[i] }))
+      kind: verdict.kind,
+      rule: verdict.rule,
+      address: verdict.address || null,
+      reason: verdict.reason,
+      ruleName: verdict.kind === 'text' ? verdict.rule.name : null,
+      lines: [{
+        tenantId: verdict.ownerTenantId,
+        code: verdict.ownerCode,
+        shortName: verdict.ownerShort,
+        sharePercent: 100,
+        amount: Number(bill.total)
+      }]
     });
+  }
+  out.unmatched = unmatched;
+  return out;
+}
+
+// ── Recharge rules: waiting and Run now ─────────────────────────────────────
+
+// Paid bills this one rule would act on: in scope by date and payer, no
+// address rule has claimed them, and its conditions hold. The card's "N paid
+// bills waiting" badge and Run now are the same question asked twice.
+async function waitingFor(accountId, rule, { rules = null, limit = 200 } = {}) {
+  const all = rules || (await loadRules(accountId));
+
+  // Rules are tried in order and the first match wins, so a bill an earlier
+  // rule already claims is not this one's — even if its conditions hold. A
+  // rule still being typed in the dialog has no id yet and is treated as
+  // last, which is where saving would put it.
+  const rank = (r) => [Number(r.position) || 0, Number(r.id) || Number.MAX_SAFE_INTEGER];
+  const mine = rank(rule);
+  const earlier = all.text.filter((r) => {
+    if (Number(r.id) === Number(rule.id)) return false;
+    const other = rank(r);
+    return other[0] < mine[0] || (other[0] === mine[0] && other[1] < mine[1]);
+  });
+
+  const candidates = await candidateBills(accountId, { limit });
+  const out = [];
+  for (const bill of candidates) {
+    if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
+    if (!withinStart(bill, rule)) continue;
+    // Recharging an entity to itself does nothing.
+    if (rule.owner_tenant_id === bill.xero_tenant_id) continue;
+    // An address rule outranks every recharge rule.
+    if (await matchAddressRule(accountId, bill, all.address)) continue;
+    if (!await conditionsMatch(accountId, bill, rule)) continue;
+    if (earlier.length && await matchTextRule(accountId, bill, earlier)) continue;
+    out.push(bill);
   }
   return out;
 }
 
+// How many bills each recharge rule is sitting on, for the badges. One pass
+// over the candidates rather than one per rule.
+async function waitingCounts(accountId, { rules = null } = {}) {
+  const all = rules || (await loadRules(accountId));
+  const counts = new Map(all.text.map((r) => [r.id, 0]));
+  if (!all.text.length) return counts;
+
+  for (const bill of await candidateBills(accountId, { limit: 400 })) {
+    if (await matchAddressRule(accountId, bill, all.address)) continue;
+    const hit = await matchTextRule(accountId, bill, all.text);
+    if (hit && hit.owner_tenant_id !== bill.xero_tenant_id) {
+      counts.set(hit.id, (counts.get(hit.id) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+// Draft a recharge for every bill a rule is waiting on.
+//
+// Drafts only. Nothing reaches Xero here — the same rule as everywhere else
+// in this module, and the reason Run now is safe to press.
+async function runTextRule(accountId, ruleId) {
+  const rule = await model.getTextRule(accountId, ruleId);
+  if (!rule) throw err('Rule not found.', 404);
+  if (!rule.owner_tenant_id) throw err('That rule has no entity to recharge to.', 400);
+
+  const waiting = await waitingFor(accountId, rule);
+  const drafted = [];
+  const failed = [];
+  for (const bill of waiting) {
+    try {
+      const out = await createRun(accountId, {
+        billId: bill.id, ownerTenantId: rule.owner_tenant_id, textRuleId: rule.id
+      });
+      drafted.push({ billId: bill.id, runId: out.id, reference: bill.reference || bill.invoice_number });
+    } catch (e) {
+      // One bill that cannot be drafted is not a reason to abandon the rest.
+      failed.push({ billId: bill.id, reference: bill.reference || bill.invoice_number, error: e.message });
+    }
+  }
+  await model.markTextRuleRun(accountId, ruleId);
+  return { drafted: drafted.length, failed: failed.length, runs: drafted, errors: failed };
+}
+
 module.exports = {
-  planRun, createRun, postRun, suggestions, ruleMatches, splitAmount, findOrCreateContact,
-  _contactCache
+  decide, loadRules, premisesText, planRun, createRun, postRun, suggestions,
+  waitingFor, waitingCounts, runTextRule, candidateBills,
+  conditionsMatch, testCondition, withinStart, findOrCreateContact,
+  isPaid, OUTCOMES, _contactCache, _textCache
 };

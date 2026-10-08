@@ -4,6 +4,8 @@
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const { formatPhone } = require('../lib/wazzup');
+const rechargeModel = require('../models/recharge');
+const xeroLinks = require('../lib/xeroLinks');
 
 // 1276.4 -> "1,276.40"
 function money(n) {
@@ -372,81 +374,147 @@ function digestRunRow(r) {
 
 const RUN_STATUS = {
   draft:     { label: 'Not posted yet',  bg: 'var(--neutral-100)', fg: 'var(--neutral-600)' },
-  posted:    { label: 'Awaiting settlement', bg: 'var(--amber-100)', fg: '#8a6300' },
-  settled:   { label: 'Fully settled',   bg: 'var(--green-100)',   fg: '#126b42' },
+  posted:    { label: 'Posted to Xero', bg: 'var(--green-100)', fg: '#126b42' },
   cancelled: { label: 'Cancelled',       bg: 'var(--neutral-100)', fg: 'var(--neutral-600)' }
 };
 
-function rechargeRunCard(r, currency = 'RM') {
+// One line of the Recharge runs table.
+//
+// A run carries exactly one line in this model, so a row is a run: the bill
+// that was paid, the invoice raised in the payer, and the mirror bill in the
+// entity the cost belongs to. All three link into Xero, and the three links
+// are not interchangeable — two of the documents are in one organisation and
+// the third is in another.
+function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
+  const line = (r.lines || [])[0] || {};
+  const payerCode = r.payer_code || '—';
+  const ownerCode = line.code || '—';
+  const payerShort = shortCodes.get(r.payer_tenant_id) || null;
+  const ownerShort = shortCodes.get(line.target_tenant_id) || null;
+
+  // Which rule decided this, as a line somebody can read against the rules
+  // tabs. Snapshotted values first: the rule may since have been edited.
+  const notes = r.text_rule_name
+    ? `Recharge rule · ${r.text_rule_name}`
+    : r.premises_address
+      ? `Address rule · ${r.premises_address}`
+      : r.rule_id
+        ? 'Address rule'
+        : 'Raised by hand';
+
   const status = RUN_STATUS[r.status] || RUN_STATUS.draft;
-  const lines = r.lines || [];
-  const posted = lines.filter((l) => l.ar_invoice_id).length;
   return {
     id: r.id,
-    supplier: r.supplier_name || '—',
-    billRef: r.bill_reference || '—',
-    payerCode: r.payer_code || '—',
-    payerShort: r.payer_short || '—',
-    paidFmt: r.paid_on ? shortDate(r.paid_on) : 'not recorded',
-    totalFmt: money(r.recharge_total),
-    billTotalFmt: money(r.bill_total),
-    // The AR document, when there is only one. With several subsidiaries each
-    // gets its own invoice, so a single number would be a lie.
-    arDoc: lines.length === 1
-      ? (lines[0].ar_invoice_number || '—')
-      : `${posted} of ${lines.length} invoices`,
-    statusLabel: status.label,
-    statusBg: status.bg,
-    statusFg: status.fg,
     status: r.status,
-    canPost: r.status === 'draft' && lines.length > 0,
-    canCancel: r.status === 'draft' && !lines.some((l) => l.ar_invoice_id || l.ap_invoice_id),
-    hasOpen: lines.some((l) => l.ar_invoice_id && !l.settled),
-    postError: r.post_error || null,
+    // Worked out under testing mode: real arithmetic over real bills, but
+    // nothing was sent to Xero and nothing ever will be. It has to read as
+    // that rather than as a draft somebody forgot to post.
+    testMode: Boolean(r.test_mode),
+    statusLabel: r.test_mode ? 'Testing mode' : status.label,
+    statusBg: r.test_mode ? 'var(--amber-100)' : status.bg,
+    statusFg: r.test_mode ? '#8a6300' : status.fg,
+    // The premises that decided it, where one did. The notes line renders it;
+    // kept separate so a caller can use it on its own.
+    address: r.premises_address || null,
+    // The organisation the paid bill sits in.
+    entityCode: payerCode,
+    entityShort: r.payer_short || '—',
+
+    billRef: r.bill_reference || '—',
+    billSupplier: r.supplier_name || '—',
+    billTotalFmt: money(r.bill_total),
+    paidFmt: r.paid_on ? shortDate(r.paid_on) : 'not recorded',
+    billUrl: xeroLinks.billUrl(r.xero_invoice_id, payerShort),
+
+    // Who raises the AR invoice. The payer, by construction — shown as its
+    // own column because that is the question being answered.
+    invoicingCode: payerCode,
+    invoicingShort: r.payer_short || '—',
+
+    invoiceNo: line.ar_invoice_number || null,
+    invoiceUrl: xeroLinks.salesInvoiceUrl(line.ar_invoice_id, payerShort),
+
+    rechargeCode: ownerCode,
+    rechargeShort: line.short_name || '—',
+
+    // The reference we wrote on both sides, which is what reads back as the
+    // intercompany bill. Xero's own number is the fallback.
+    billNo: line.reference || line.ap_invoice_number || null,
+    billNoUrl: xeroLinks.billUrl(line.ap_invoice_id, ownerShort),
+    rechargeFmt: money(line.amount),
+
+    notes,
     currency,
-    lines: lines.map((l) => ({
-      id: l.id,
-      code: l.code || '—',
-      short: l.short_name || '—',
-      amountFmt: money(l.amount),
-      sharePercent: l.share_percent == null ? null : Number(l.share_percent),
-      doc: l.ap_invoice_number || l.reference || '—',
-      arDoc: l.ar_invoice_number || null,
-      posted: Boolean(l.ar_invoice_id && l.ap_invoice_id),
-      partial: Boolean(l.ar_invoice_id) !== Boolean(l.ap_invoice_id),
-      error: l.line_error || null,
-      settled: Boolean(l.settled),
-      canSettle: Boolean(l.ar_invoice_id) && !l.settled,
-      settledNote: l.settled
-        ? [l.settled_reference, l.settled_on ? shortDate(l.settled_on) : null].filter(Boolean).join(' · ')
-        : null
-    }))
+
+    // A run that has not reached Xero has no documents to link to, so the
+    // row has to offer the thing that would create them.
+    posted: Boolean(line.ar_invoice_id && line.ap_invoice_id),
+    partial: Boolean(line.ar_invoice_id) !== Boolean(line.ap_invoice_id),
+    // A test run can never be posted: the Xero guard would refuse it, and
+    // offering a button that always fails is worse than not offering one.
+    canPost: r.status === 'draft' && !r.test_mode,
+    canCancel: r.status === 'draft' && !line.ar_invoice_id && !line.ap_invoice_id,
+    error: line.line_error || r.post_error || null,
+
+    lineId: line.id || null
   };
 }
 
 function rechargeRuleCard(r) {
   if (!r) return null;
-  const targets = r.targets || [];
+  const code = r.owner_code || '—';
+  const suppliers = (r.suppliers || []).map((x) => x.name);
   return {
     id: r.id,
-    supplier: r.supplier_name,
-    payerTenantId: r.payer_tenant_id,
-    payerCode: r.payer_code || '—',
-    payerShort: r.payer_short || '—',
+    ownerTenantId: r.owner_tenant_id,
+    ownerCode: code,
+    ownerShort: r.owner_short || '—',
+    suppliers,
+    // No suppliers means every supplier, which is a real rule and has to read
+    // as one rather than as a blank cell.
+    supplierLabel: suppliers.length === 0 ? 'Any supplier'
+      : suppliers.length === 1 ? suppliers[0]
+      : `${suppliers[0]} + ${suppliers.length - 1} more`,
+    address: r.premises_address || null,
+    referenceContains: r.reference_contains || null,
     on: Boolean(r.enabled),
-    matchType: r.match_type,
-    matchValue: r.match_value || null,
-    splitLabel: r.match_type === 'reference_contains'
-      ? `Reference contains "${r.match_value}"`
-      : 'Any bill from this supplier',
-    targets: targets.map((t) => ({
-      tenantId: t.tenantId, code: t.code || '—', shortName: t.shortName || '—',
-      sharePercent: t.sharePercent
-    })),
-    // The single-target case reads as one chip, which is the common shape.
-    targetCode: targets.length === 1 ? (targets[0].code || '—') : null,
-    targetShort: targets.length === 1 ? (targets[0].shortName || '—') : null,
-    splitCount: targets.length
+    effect: `Header ${code}: no recharge · Any other header: 100% recharged to ${code}`,
+    // A rule with no address decides nothing. That can only come from an
+    // older database, and saying so beats a row that looks configured.
+    incomplete: !r.premises_address || !r.owner_tenant_id
+  };
+}
+
+// A recharge rule. `waiting` is how many paid bills it is sitting on.
+function rechargeTextRuleCard(r, waiting = 0) {
+  if (!r) return null;
+  const conditions = (r.conditions || []).map((c) => ({
+    field: c.field,
+    fieldLabel: rechargeModel.fieldLabel(c.field),
+    operator: c.operator,
+    operatorLabel: rechargeModel.operatorLabel(c.operator),
+    value: c.value
+  }));
+  const start = r.start_date ? shortDate(r.start_date) : null;
+  return {
+    id: r.id,
+    name: r.name,
+    matchMode: r.match_mode,
+    joiner: r.match_mode === 'any' ? 'OR' : 'AND',
+    conditions,
+    payerTenantId: r.payer_tenant_id || null,
+    payerLabel: r.payer_tenant_id ? `${r.payer_code || '—'} · ${r.payer_short || '—'}` : 'Any entity',
+    ownerTenantId: r.owner_tenant_id,
+    ownerCode: r.owner_code || '—',
+    ownerShort: r.owner_short || '—',
+    startDate: r.start_date ? String(r.start_date instanceof Date
+      ? r.start_date.toISOString().slice(0, 10)
+      : r.start_date).slice(0, 10) : null,
+    on: Boolean(r.enabled),
+    waiting: Number(waiting) || 0,
+    waitingLabel: waiting ? `${waiting} paid bill${waiting === 1 ? '' : 's'} waiting` : null,
+    meta: `Bills paid on or after ${start || '—'} · `
+        + (r.last_run_at ? `last run ${shortDate(r.last_run_at)}` : 'Not run yet')
   };
 }
 
@@ -463,18 +531,24 @@ function rechargeSettings(s) {
 }
 
 function rechargeSuggestion(p, currency = 'RM') {
+  const owner = p.lines[0] || {};
   return {
     billId: p.bill.id,
     supplier: p.bill.contact_name,
     reference: p.bill.reference || p.bill.invoice_number,
     totalFmt: money(p.bill.total),
     paidFmt: p.bill.fully_paid_on ? shortDate(p.bill.fully_paid_on) : shortDate(p.bill.bill_date),
-    ruleId: p.rule.id,
-    currency,
-    lines: p.lines.map((l) => ({
-      tenantId: l.tenantId, code: l.code || '—', shortName: l.shortName || '—',
-      sharePercent: l.sharePercent, amountFmt: money(l.amount)
-    }))
+    ruleId: p.kind === 'address' ? p.rule.id : null,
+    textRuleId: p.kind === 'text' ? p.rule.id : null,
+    kind: p.kind,
+    ruleName: p.ruleName || null,
+    address: p.address || null,
+    reason: p.reason || null,
+    ownerTenantId: owner.tenantId || null,
+    ownerCode: owner.code || '—',
+    ownerShort: owner.shortName || '—',
+    amountFmt: money(owner.amount != null ? owner.amount : p.bill.total),
+    currency
   };
 }
 
@@ -483,25 +557,27 @@ function rechargeStatCards(stats, currency = 'RM') {
     {
       label: 'Recharged to date',
       amount: `${currency} ${money(stats.recharged)}`,
-      sub: `${stats.runs} run${stats.runs === 1 ? '' : 's'}`,
+      sub: `${stats.runs} bill${stats.runs === 1 ? '' : 's'} recharged`,
       color: 'var(--blue-500)'
     },
     {
-      label: 'Awaiting settlement',
-      amount: `${currency} ${money(stats.openAmount)}`,
-      sub: `${stats.openLines} intercompany bill${stats.openLines === 1 ? '' : 's'}`,
-      color: 'var(--amber-500)'
+      label: 'Xero invoices',
+      amount: String(stats.arInvoices),
+      sub: 'Raised by the invoicing entity',
+      color: 'var(--color-primary)'
     },
     {
-      label: 'Settled',
-      amount: `${currency} ${money(stats.settledAmount)}`,
-      sub: `${stats.settledLines} transfer${stats.settledLines === 1 ? '' : 's'} recorded`,
+      label: 'Xero bills',
+      amount: String(stats.apBills),
+      sub: `Across ${stats.apEntities} recharge ${stats.apEntities === 1 ? 'entity' : 'entities'}`,
       color: 'var(--green-500)'
     },
     {
       label: 'Active rules',
       amount: String(stats.rulesActive),
-      sub: `of ${stats.rulesTotal} configured`,
+      // Split by kind, because "10 rules" says nothing about whether the
+      // premises side or the text side is doing the work.
+      sub: `${stats.addressRules} address · ${stats.textRules} recharge rule${stats.textRules === 1 ? '' : 's'}`,
       color: 'var(--neutral-400)'
     }
   ];
@@ -511,5 +587,6 @@ module.exports = {
   billRow, statCards, statusTabs, metaText, banner, money, shortDate,
   batchCard, bankStatCards, bankAccountRow, bankFormatRow, payeeRow,
   digestSettings, nextRunLabel, recipientRow, digestRunRow,
-  rechargeRunCard, rechargeRuleCard, rechargeSettings, rechargeSuggestion, rechargeStatCards
+  rechargeRunRow, rechargeRuleCard, rechargeTextRuleCard, rechargeSettings,
+  rechargeSuggestion, rechargeStatCards
 };

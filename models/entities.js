@@ -115,6 +115,28 @@ async function setBaseCurrency(accountId, tenantId, currency) {
   return res.affectedRows;
 }
 
+// Xero's short code for the organisation, read from the same /Organisation
+// call as the currency. A link into Xero needs it to say which organisation
+// it means — without one the link opens whichever org the person was last
+// in, which on a recharge is a coin toss between two.
+async function setShortCode(accountId, tenantId, shortCode) {
+  if (!shortCode) return 0;
+  const res = await db.execute(
+    'UPDATE entities SET short_code = ? WHERE account_id = ? AND xero_tenant_id = ?',
+    [String(shortCode).slice(0, 16), accountId, tenantId]
+  );
+  return res.affectedRows;
+}
+
+// tenantId -> short code, for building links.
+async function shortCodes(accountId) {
+  const rows = await db.query(
+    'SELECT xero_tenant_id, short_code FROM entities WHERE account_id = ? AND short_code IS NOT NULL',
+    [accountId]
+  );
+  return new Map(rows.map((r) => [r.xero_tenant_id, r.short_code]));
+}
+
 // What to label figures with.
 //
 // Each organisation has its own base currency, so a group spanning two of them
@@ -164,5 +186,5 @@ async function map(accountId) {
 
 module.exports = {
   listByAccount, listSyncable, ensure, update, map, codeFrom, shortNameFrom,
-  setBaseCurrency, currencyFor, SYMBOLS
+  setBaseCurrency, setShortCode, shortCodes, currencyFor, SYMBOLS
 };

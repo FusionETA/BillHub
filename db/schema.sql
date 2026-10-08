@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS entities (
   -- The organisation's own base currency, read from Xero. What the UI labels
   -- figures with; NULL until the first sync has asked.
   base_currency  VARCHAR(8) NULL,
+  -- Xero's own short code for the organisation, e.g. "!a1B2c". A link into
+  -- Xero has to say which organisation it means, or it opens whichever one
+  -- the person happens to be in — and a recharge spans two. Read from
+  -- /Organisation alongside the currency, so it costs no extra call.
+  short_code     VARCHAR(16) NULL,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_ent_tenant (account_id, xero_tenant_id),
@@ -151,6 +156,15 @@ CREATE TABLE IF NOT EXISTS bills (
   attachment_count INT DEFAULT 0,
   -- Contact resolves to another connected org -> shown as "Intercompany".
   is_interco       TINYINT(1) DEFAULT 0,
+  -- The premises the bill is FOR, as printed on it. On a utility bill this is
+  -- the real owner of the cost, which is often not the entity on the header —
+  -- see the recharge module. NULL until something has read it off the bill.
+  premises_address VARCHAR(512) NULL,
+  -- Where that address came from: 'ocr' (WazzOCR read the document),
+  -- 'xero' (taken from the bill's own line descriptions or reference),
+  -- 'manual' (typed in Bills Hub). Worth knowing, because one of these is a
+  -- transcription and the other two are guesses at where someone wrote it.
+  premises_source  VARCHAR(16) NULL,
   updated_date_utc DATETIME NULL,          -- Xero's UpdatedDateUTC
   synced_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_bill (account_id, xero_tenant_id, xero_invoice_id),
@@ -454,62 +468,164 @@ CREATE TABLE IF NOT EXISTS recharge_settings (
   CONSTRAINT fk_rcs_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- "Bills from this supplier, paid by this entity, belong to those entities."
--- Rules only ever suggest a recharge; nothing is posted without a person.
+-- ── Address rules ───────────────────────────────────────────────────────────
+--
+-- "A bill for this premises belongs to that entity."
+--
+-- The rule names a place, not a payer. Whoever Xero has on the bill header
+-- pays the supplier; the address says whose cost it actually is. When the two
+-- are the same entity nothing happens, and when they differ the whole amount
+-- is recharged to the address owner.
+--
+-- Checked before the text rules below, because an address is a statement
+-- about the real world and a supplier name is a guess from a string.
 CREATE TABLE IF NOT EXISTS recharge_rules (
   id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   account_id        BIGINT UNSIGNED NOT NULL,
-  payer_tenant_id   VARCHAR(64) NOT NULL,
-  supplier_name     VARCHAR(255) NOT NULL,
-  -- 'any'                every bill from this supplier in the payer
-  -- 'reference_contains' only when the reference contains match_value
-  match_type        ENUM('any','reference_contains') NOT NULL DEFAULT 'any',
-  match_value       VARCHAR(255),
+  -- As printed on the supplier bill. Kept verbatim so the rule can be read
+  -- against a paper bill; matching uses the key below.
+  premises_address  VARCHAR(512) NULL,
+  -- premises_address with every separator stripped — see lib/premises.js.
+  -- Matching on this is what makes spaces, commas and letter case irrelevant.
+  address_key       VARCHAR(512) NULL,
+  -- Optional. Narrows the rule to bills whose reference carries this text,
+  -- for a landlord who bills several premises under one contact.
+  reference_contains VARCHAR(255) NULL,
+  -- The entity that premises belongs to, and so the entity the cost is
+  -- recharged to.
+  owner_tenant_id   VARCHAR(64) NULL,
+  -- sha256 of the address key, the reference and every supplier named. Two
+  -- rules with the same key describe exactly the same bills, and the second
+  -- says nothing the first does not.
+  rule_key          CHAR(64) NULL,
   enabled           TINYINT(1) NOT NULL DEFAULT 1,
   position          INT DEFAULT 0,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_rule_lookup (account_id, payer_tenant_id, enabled),
+  UNIQUE KEY uq_rule_premises (account_id, rule_key),
+  INDEX idx_rule_lookup (account_id, enabled),
   CONSTRAINT fk_rule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Who a rule recharges to, and in what proportion. One row at 100% is the
--- common case; several rows split a shared cost.
-CREATE TABLE IF NOT EXISTS recharge_rule_targets (
-  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  rule_id          BIGINT UNSIGNED NOT NULL,
-  target_tenant_id VARCHAR(64) NOT NULL,
-  share_percent    DECIMAL(9,4) NOT NULL DEFAULT 100.0000,
-  UNIQUE KEY uq_rule_target (rule_id, target_tenant_id),
-  CONSTRAINT fk_rt_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE CASCADE
+-- Which suppliers an address rule covers. No rows at all means every
+-- supplier: "whatever arrives for this building belongs to that entity",
+-- which is the right rule for a premises one company occupies outright.
+CREATE TABLE IF NOT EXISTS recharge_rule_suppliers (
+  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rule_id       BIGINT UNSIGNED NOT NULL,
+  supplier_name VARCHAR(255) NOT NULL,
+  -- Normalised, so a supplier re-typed with different punctuation still
+  -- matches the Xero contact.
+  supplier_key  VARCHAR(255) NOT NULL,
+  UNIQUE KEY uq_rule_supplier (rule_id, supplier_key),
+  INDEX idx_supplier_key (supplier_key),
+  CONSTRAINT fk_rs_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Recharge rules ──────────────────────────────────────────────────────────
+--
+-- For everything with no premises on it: rent, a tenancy, a supplier bill,
+-- a central payroll deduction. A Xero bill carries no address field — only a
+-- supplier, a reference, an invoice number, line descriptions and tracking —
+-- so these rules match on that text instead.
+--
+-- Only consulted when no address rule matched. A rule acts on bills marked
+-- paid on or after its start date, so creating one cannot quietly reach back
+-- through years of history; reaching back is a deliberate act (Run now, or
+-- moving the date).
+CREATE TABLE IF NOT EXISTS recharge_text_rules (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id      BIGINT UNSIGNED NOT NULL,
+  name            VARCHAR(255) NOT NULL,
+  -- all = every condition must hold; any = one is enough.
+  match_mode      ENUM('all','any') NOT NULL DEFAULT 'all',
+  -- NULL = any entity on the bill header. Set to narrow the rule to bills
+  -- one particular company paid.
+  payer_tenant_id VARCHAR(64) NULL,
+  owner_tenant_id VARCHAR(64) NOT NULL,
+  -- Bills marked paid before this are out of scope. Defaults to the day the
+  -- rule was written.
+  start_date      DATE NOT NULL,
+  enabled         TINYINT(1) NOT NULL DEFAULT 1,
+  last_run_at     DATETIME NULL,
+  position        INT DEFAULT 0,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_text_rule_lookup (account_id, enabled, start_date),
+  CONSTRAINT fk_trule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One test against one field of a bill. Everything a Xero bill actually
+-- carries that could identify who a cost belongs to:
+--
+--   supplier        Contact.Name
+--   reference       Reference
+--   invoice_number  InvoiceNumber
+--   description     LineItems[].Description, joined
+--   tracking        LineItems[].Tracking option names, joined
+--
+-- The last two need the bill read back from Xero one at a time, since the
+-- list sync is summaryOnly — so they cost an API call and the first three
+-- do not.
+CREATE TABLE IF NOT EXISTS recharge_text_conditions (
+  id        BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rule_id   BIGINT UNSIGNED NOT NULL,
+  field     ENUM('supplier','reference','invoice_number','description','tracking') NOT NULL,
+  operator  ENUM('contains','is','starts_with','ends_with','not_contains') NOT NULL DEFAULT 'contains',
+  value     VARCHAR(255) NOT NULL,
+  position  INT DEFAULT 0,
+  CONSTRAINT fk_tc_rule FOREIGN KEY (rule_id) REFERENCES recharge_text_rules(id) ON DELETE CASCADE,
+  INDEX idx_tc_rule (rule_id, position)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- One recharge of one paid bill out to one or more subsidiaries.
 CREATE TABLE IF NOT EXISTS recharge_runs (
   id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   account_id      BIGINT UNSIGNED NOT NULL,
-  rule_id         BIGINT UNSIGNED NULL,      -- NULL = raised by hand
+  rule_id         BIGINT UNSIGNED NULL,      -- an address rule, or NULL
+  text_rule_id    BIGINT UNSIGNED NULL,      -- a recharge rule, or NULL
+                                             -- both NULL = raised by hand
   bill_id         BIGINT UNSIGNED NOT NULL,
   payer_tenant_id VARCHAR(64) NOT NULL,
   xero_invoice_id CHAR(36) NOT NULL,         -- the original supplier bill
   supplier_name   VARCHAR(255),
   bill_reference  VARCHAR(255),
+  -- The premises address that decided this recharge, as it read at the time.
+  -- Snapshotted rather than joined: a rule can be edited or deleted later, and
+  -- the reason a cost moved between two companies has to stay readable.
+  premises_address VARCHAR(512) NULL,
   bill_total      DECIMAL(16,2) NOT NULL,
   recharge_total  DECIMAL(16,2) NOT NULL,
   currency_code   VARCHAR(8),
   paid_on         DATE NULL,
   -- draft     → worked out locally, nothing in Xero yet
-  -- posted    → AR invoices and subsidiary bills exist in Xero
-  -- settled   → every line settled by intercompany transfer
+  -- posted    → the AR invoice and the mirror bill exist in Xero
   -- cancelled → abandoned before reaching Xero
-  status          ENUM('draft','posted','settled','cancelled') NOT NULL DEFAULT 'draft',
+  --
+  -- There is no "settled" state. Whether the intercompany transfer has
+  -- happened is a question about two Xero ledgers, and the answer lives
+  -- there — recording it a second time here would only create something to
+  -- disagree with.
+  status          ENUM('draft','posted','cancelled') NOT NULL DEFAULT 'draft',
+  -- Raised while testing mode was on: worked out from real Xero data, but
+  -- nothing was ever sent to Xero and nothing ever will be. Hidden when
+  -- testing mode is off, the same as a test payment batch — a run that can
+  -- never be posted sitting among real ones is only confusing.
+  test_mode       TINYINT(1) NOT NULL DEFAULT 0,
   post_error      VARCHAR(512),
   posted_at       DATETIME NULL,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  -- A bill is recharged once. A cancelled run releases it.
-  UNIQUE KEY uq_run_bill (account_id, bill_id),
+  -- A bill is recharged once — but a cancelled run releases it, and a run
+  -- worked out in testing mode must not hold it against the real one. A
+  -- plain UNIQUE (account_id, bill_id) says none of that: it counts
+  -- cancelled rows and test rows alike. MySQL has no partial index, so the
+  -- condition goes into a generated column instead, and NULL drops a row
+  -- out of the index.
+  live_bill_id    BIGINT UNSIGNED GENERATED ALWAYS AS
+                    (IF(status = 'cancelled', NULL, bill_id)) VIRTUAL,
+  UNIQUE KEY uq_run_bill (account_id, live_bill_id, test_mode),
   INDEX idx_run_list (account_id, status, created_at),
   CONSTRAINT fk_run_account2 FOREIGN KEY (account_id) REFERENCES accounts(id),
-  CONSTRAINT fk_run_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE SET NULL
+  CONSTRAINT fk_run_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE SET NULL,
+  CONSTRAINT fk_run_trule FOREIGN KEY (text_rule_id) REFERENCES recharge_text_rules(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- One subsidiary's share. Each line becomes two documents in Xero: an AR
@@ -527,9 +643,6 @@ CREATE TABLE IF NOT EXISTS recharge_run_lines (
   ap_invoice_id     CHAR(36) NULL,           -- ACCPAY in the subsidiary
   ap_invoice_number VARCHAR(255),
   line_error        VARCHAR(512),
-  settled           TINYINT(1) NOT NULL DEFAULT 0,
-  settled_reference VARCHAR(255),
-  settled_on        DATE NULL,
   UNIQUE KEY uq_run_target (run_id, target_tenant_id),
   CONSTRAINT fk_rl_run FOREIGN KEY (run_id) REFERENCES recharge_runs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -39,7 +39,242 @@ const hasColumn = (table, column) => `
   SELECT COUNT(*) AS n FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`;
 
+const hasIndex = (table, index) => `
+  SELECT COUNT(*) AS n FROM information_schema.STATISTICS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND INDEX_NAME = '${index}'`;
+
+const isNullable = (table, column) => `
+  SELECT IS_NULLABLE AS yn FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}'`;
+
+// Retiring columns, guarded by a count that mentions them.
+//
+// A plain `WHERE settled = 1` cannot be the check: MySQL parses the whole
+// statement before any guard can skip it, so on a database where the column
+// is already gone the check itself errors. The guard therefore has to run
+// inside the database, against SQL built only once the column is known to
+// exist.
+const dropIfUnused = (table, columns, usedWhere) => `
+  SET @present := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${columns[0]}');
+  SET @used := 0;
+  SET @count_sql := IF(@present = 1,
+    'SELECT COUNT(*) INTO @used FROM ${table} WHERE ${usedWhere}', 'DO 0');
+  PREPARE s FROM @count_sql; EXECUTE s; DEALLOCATE PREPARE s;
+  SET @alter_sql := IF(@present = 1 AND @used = 0,
+    'ALTER TABLE ${table} ${columns.map((c) => `DROP COLUMN ${c}`).join(', ')}', 'DO 0');
+  PREPARE s FROM @alter_sql; EXECUTE s; DEALLOCATE PREPARE s`;
+
+// A column that is being retired, on a table nobody has written to yet. Both
+// halves matter: the column is dropped only where there is no row that could
+// be carrying something in it.
+const deadColumn = (table, column) => `
+  SELECT
+    (SELECT COUNT(*) FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${table}' AND COLUMN_NAME = '${column}') AS present,
+    (SELECT COUNT(*) FROM ${table}) AS rows_held`;
+
 const ADJUSTMENTS = [
+  {
+    // The old key counted cancelled runs and testing-mode runs against the
+    // real one, which is not what "a bill is recharged once" means. Replaced
+    // with a generated column, because MySQL has no partial index and NULL
+    // drops a row out of a unique index.
+    why: 'recharge_runs.uq_run_bill — one LIVE run per bill, per mode',
+    check: hasColumn('recharge_runs', 'live_bill_id'),
+    needed: (row) => Number(row.n) === 0,
+    sql: `ALTER TABLE recharge_runs
+            DROP INDEX uq_run_bill,
+            ADD COLUMN live_bill_id BIGINT UNSIGNED GENERATED ALWAYS AS
+              (IF(status = 'cancelled', NULL, bill_id)) VIRTUAL,
+            ADD UNIQUE KEY uq_run_bill (account_id, live_bill_id, test_mode)`
+  },
+  {
+    why: 'recharge_runs.test_mode — a run worked out while testing mode was on',
+    check: hasColumn('recharge_runs', 'test_mode'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_runs ADD COLUMN test_mode TINYINT(1) NOT NULL DEFAULT 0'
+  },
+  {
+    // Settlement is a question about two Xero ledgers and the answer lives
+    // there. Dropped only where nothing was ever recorded — a transfer
+    // somebody noted is not ours to delete without them seeing it. That
+    // guard runs inside the database; see dropIfUnused.
+    why: 'recharge_run_lines.settled / settled_reference / settled_on — settlement is tracked in Xero',
+    check: hasColumn('recharge_run_lines', 'settled'),
+    needed: (row) => Number(row.n) === 1,
+    sql: dropIfUnused('recharge_run_lines',
+      ['settled', 'settled_reference', 'settled_on'], 'settled = 1')
+  },
+  {
+    why: "recharge_runs.status — drop the 'settled' state along with it",
+    check: `SELECT
+        (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_runs'
+            AND COLUMN_NAME = 'status' AND COLUMN_TYPE LIKE '%settled%') AS present,
+        (SELECT COUNT(*) FROM recharge_runs WHERE status = 'settled') AS rows_held`,
+    needed: (row) => Number(row.present) === 1 && Number(row.rows_held) === 0,
+    sql: "ALTER TABLE recharge_runs MODIFY status ENUM('draft','posted','cancelled') NOT NULL DEFAULT 'draft'"
+  },
+  {
+    why: "entities.short_code — Xero's own code for the organisation, so a link can say which one it means",
+    check: hasColumn('entities', 'short_code'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE entities ADD COLUMN short_code VARCHAR(16) NULL'
+  },
+  // ── Recharge: two kinds of rule ───────────────────────────────────────────
+  //
+  // An address rule now covers several suppliers (or none, meaning any), and
+  // can be narrowed by a reference. Bill type is gone — it described the rule
+  // rather than deciding anything, and the supplier already says what kind of
+  // bill it is.
+  {
+    why: 'recharge_rules.reference_contains — narrow an address rule by the bill reference',
+    check: hasColumn('recharge_rules', 'reference_contains'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_rules ADD COLUMN reference_contains VARCHAR(255) NULL'
+  },
+  {
+    // supplier_name moves to its own table, so a rule can name several. The
+    // existing single value is carried across rather than dropped.
+    why: 'recharge_rule_suppliers — an address rule covers a set of suppliers',
+    check: `SELECT COUNT(*) AS n FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rule_suppliers'`,
+    needed: (row) => Number(row.n) === 0,
+    sql: `CREATE TABLE recharge_rule_suppliers (
+            id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            rule_id       BIGINT UNSIGNED NOT NULL,
+            supplier_name VARCHAR(255) NOT NULL,
+            supplier_key  VARCHAR(255) NOT NULL,
+            UNIQUE KEY uq_rule_supplier (rule_id, supplier_key),
+            INDEX idx_supplier_key (supplier_key),
+            CONSTRAINT fk_rs_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE CASCADE
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  },
+  {
+    // Carry and drop in one step, because a check that names supplier_name
+    // cannot run on a database where supplier_name is already gone — MySQL
+    // parses the whole statement before any guard can skip it. Carried, not
+    // simply dropped: a rule whose supplier vanished would widen silently
+    // from one supplier to every supplier.
+    why: 'recharge_rules.supplier_name / bill_type — moved into recharge_rule_suppliers',
+    check: hasColumn('recharge_rules', 'supplier_name'),
+    needed: (row) => Number(row.n) === 1,
+    sql: `INSERT IGNORE INTO recharge_rule_suppliers (rule_id, supplier_name, supplier_key)
+          SELECT id, supplier_name, LOWER(REGEXP_REPLACE(supplier_name, '[^a-zA-Z0-9]', ''))
+            FROM recharge_rules
+           WHERE supplier_name IS NOT NULL AND supplier_name <> '';
+          ALTER TABLE recharge_rules DROP COLUMN supplier_name, DROP COLUMN bill_type`
+  },
+  {
+    why: 'recharge_text_rules — rules that match on supplier, reference or other text',
+    check: `SELECT COUNT(*) AS n FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_text_rules'`,
+    needed: (row) => Number(row.n) === 0,
+    sql: `CREATE TABLE recharge_text_rules (
+            id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id      BIGINT UNSIGNED NOT NULL,
+            name            VARCHAR(255) NOT NULL,
+            match_mode      ENUM('all','any') NOT NULL DEFAULT 'all',
+            payer_tenant_id VARCHAR(64) NULL,
+            owner_tenant_id VARCHAR(64) NOT NULL,
+            start_date      DATE NOT NULL,
+            enabled         TINYINT(1) NOT NULL DEFAULT 1,
+            last_run_at     DATETIME NULL,
+            position        INT DEFAULT 0,
+            created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_text_rule_lookup (account_id, enabled, start_date),
+            CONSTRAINT fk_trule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  },
+  {
+    why: 'recharge_text_conditions — one test against one field of a bill',
+    check: `SELECT COUNT(*) AS n FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_text_conditions'`,
+    needed: (row) => Number(row.n) === 0,
+    sql: `CREATE TABLE recharge_text_conditions (
+            id        BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            rule_id   BIGINT UNSIGNED NOT NULL,
+            field     ENUM('supplier','reference','invoice_number','description','tracking') NOT NULL,
+            operator  ENUM('contains','is','starts_with','ends_with','not_contains') NOT NULL DEFAULT 'contains',
+            value     VARCHAR(255) NOT NULL,
+            position  INT DEFAULT 0,
+            CONSTRAINT fk_tc_rule FOREIGN KEY (rule_id) REFERENCES recharge_text_rules(id) ON DELETE CASCADE,
+            INDEX idx_tc_rule (rule_id, position)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  },
+  {
+    why: 'recharge_runs.text_rule_id — which recharge rule raised a run',
+    check: hasColumn('recharge_runs', 'text_rule_id'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_runs ADD COLUMN text_rule_id BIGINT UNSIGNED NULL, '
+       + 'ADD CONSTRAINT fk_run_trule FOREIGN KEY (text_rule_id) REFERENCES recharge_text_rules(id) ON DELETE SET NULL'
+  },
+  // ── Recharge: rules key on a premises address, not on a payer ─────────────
+  //
+  // The rule used to say "bills from this supplier, paid by this entity, split
+  // between those entities". It now says "a bill from this supplier, for this
+  // premises, belongs to that entity" — the payer is whoever Xero has on the
+  // bill header, and the address decides the rest. These add what the new
+  // shape needs; the old columns are retired further down, and only where
+  // nothing is stored in them.
+  {
+    why: 'bills.premises_address / premises_source — the address printed on the bill',
+    check: hasColumn('bills', 'premises_address'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE bills ADD COLUMN premises_address VARCHAR(512) NULL, '
+       + 'ADD COLUMN premises_source VARCHAR(16) NULL'
+  },
+  {
+    why: 'recharge_rules — premises address, its match key, the owning entity and the bill type',
+    check: hasColumn('recharge_rules', 'premises_address'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_rules '
+       + "ADD COLUMN bill_type VARCHAR(24) NOT NULL DEFAULT 'other', "
+       + 'ADD COLUMN premises_address VARCHAR(512) NULL, '
+       + 'ADD COLUMN address_key VARCHAR(512) NULL, '
+       + 'ADD COLUMN owner_tenant_id VARCHAR(64) NULL, '
+       + 'ADD COLUMN rule_key CHAR(64) NULL'
+  },
+  {
+    // The old table demanded a payer on every rule. A rule no longer has one,
+    // so a NOT NULL here would reject every rule the new dialog creates.
+    why: 'recharge_rules.payer_tenant_id — no longer part of a rule, so nullable',
+    check: isNullable('recharge_rules', 'payer_tenant_id'),
+    needed: (row) => row && row.yn === 'NO',
+    sql: 'ALTER TABLE recharge_rules MODIFY payer_tenant_id VARCHAR(64) NULL'
+  },
+  {
+    why: 'recharge_rules — one rule per supplier + premises',
+    check: hasIndex('recharge_rules', 'uq_rule_premises'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_rules ADD UNIQUE KEY uq_rule_premises (account_id, rule_key)'
+  },
+  {
+    why: 'recharge_runs.premises_address — the address that decided the recharge',
+    check: hasColumn('recharge_runs', 'premises_address'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_runs ADD COLUMN premises_address VARCHAR(512) NULL'
+  },
+  {
+    // Percentage splits across several subsidiaries are gone: an address
+    // belongs to one entity and the recharge is the whole amount. Dropped only
+    // on a database where no rule was ever written, because a share somebody
+    // configured is not ours to throw away without them seeing it.
+    why: 'recharge_rule_targets — percentage splits, replaced by a single address owner',
+    check: `SELECT
+        (SELECT COUNT(*) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rule_targets') AS present,
+        (SELECT COUNT(*) FROM recharge_rules) AS rows_held`,
+    needed: (row) => Number(row.present) === 1 && Number(row.rows_held) === 0,
+    sql: 'DROP TABLE IF EXISTS recharge_rule_targets'
+  },
+  {
+    why: 'recharge_rules.match_type / match_value — replaced by the premises address',
+    check: deadColumn('recharge_rules', 'match_type'),
+    needed: (row) => Number(row.present) === 1 && Number(row.rows_held) === 0,
+    sql: 'ALTER TABLE recharge_rules DROP COLUMN match_type, DROP COLUMN match_value'
+  },
   {
     why: "bank_formats.template_sheet — which sheet of the bank's own workbook to fill",
     check: hasColumn('bank_formats', 'template_sheet'),

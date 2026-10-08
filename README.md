@@ -8,7 +8,7 @@ organisations in one Xero account. All four modules are live:
 | **Bills** — sync, list, filter, submit, approve | **Done** |
 | **Bank files** — payment batches, bank-format files, Xero batch payments | **Done** |
 | **Notifications** — the scheduled WhatsApp draft digest | **Done** |
-| **Recharge** — intercompany splits, AR/AP pairs, settlement | **Done** |
+| **Recharge** — address rules, text rules, AR/AP pairs | **Done** |
 
 The stack mirrors [WazzOCR](https://github.com/FusionETA/WazzOCR): Node + Express,
 CommonJS, `mysql2` against a DigitalOcean MySQL, models in `models/`, routers
@@ -38,6 +38,9 @@ lib/
   crypto.js            AES-256-GCM for secrets at rest              (same as WazzOCR)
   tokens.js            Random tokens + SHA-256 hashing              (same as WazzOCR)
   bankFile.js          Renders a batch into a bank's layout (layouts are data)
+  premises.js          Matching the premises address printed on a supplier bill
+  xeroLinks.js         Links into Xero that open the right organisation
+  entityRef.js         The short form of an entity, for writing into a reference
   wazzup.js            Wazzup24 sender + Malaysian phone normalising
   schedule.js          Timezone-aware "is the digest due?" 
   grantSource.js       Which Xero grant this deployment uses, and where it lives
@@ -58,7 +61,7 @@ models/
   payees.js            Supplier bank details
   batches.js           Payment batches and their lines
   digest.js            Digest settings, recipients and the send log
-  recharge.js          Recharge settings, rules, runs and their lines
+  recharge.js          Recharge settings, both rule kinds, runs and their lines
 billhub/
   router.js            /api/bills — list, actions, sync
   xeroRouter.js        /api/xero  — status, verify, and the connect guard
@@ -66,15 +69,15 @@ billhub/
   payments.js          Batch validation, file rendering, Xero batch payments
   digestRouter.js      /api/digest — settings, recipients, preview, send
   digest.js            Builds the message, sends it, and runs the schedule
-  rechargeRouter.js    /api/recharge — rules, runs, settlement
-  recharge.js          Splits a paid bill and posts both sides into Xero
+  rechargeRouter.js    /api/recharge — both rule kinds, runs, posting
+  recharge.js          Matches a bill to a rule, then posts both sides into Xero
   sync.js              Pulls ACCPAY invoices from every connected org
   viewModel.js         Formats rows exactly as the UI renders them
 public/
   index.html           The Bills Hub app (React via Babel standalone, single file)
   login.html
 scripts/               db-migrate, db-test, create-account, sync-bills,
-                       entities, preflight, dev-local.sh
+                       entities, preflight, demo-recharge, dev-local.sh
 test/                  api / sync / grant / openaccess tests, seed.js
 ```
 
@@ -484,51 +487,238 @@ Phone numbers are stored and sent as digits with the country code
 
 ## Recharge
 
-When one entity pays a bill on behalf of another, the cost is pushed across as a
-matched pair of documents per subsidiary:
+One entity pays a bill that belongs to another, and the cost has to end up
+with whoever it belongs to. Ayu Borneo Management pays a great many of them.
+
+### Where the evidence comes from
+
+A Xero `ACCPAY` bill has **no premises address field**. Read back in full, one
+carries exactly this:
+
+| Field | Synced? | What it is |
+| --- | --- | --- |
+| `Contact.Name` | yes | the supplier |
+| `Contact.Addresses` | — | the *supplier's* address, not the premises |
+| `Reference`, `InvoiceNumber` | yes | free text |
+| `LineItems[].Description` | **no** | free text, often where a bookkeeper writes the premises |
+| `LineItems[].Tracking` | **no** | tracking category options, e.g. `Region: Tawau` |
+| `Attachments` | — | the PDF, the only place a printed address actually exists |
+
+The two unsynced ones are absent because the bill list is fetched
+`summaryOnly`, which is what keeps a 41-organisation sync inside Xero's rate
+limit. They are read one bill at a time, and only when a rule asks for them.
+
+So a premises address can only reach Bills Hub from the PDF — which is
+WazzOCR's job, and lands in `bills.premises_address` — or from text somebody
+typed. **Most bills will never have one**, and that is why there are two kinds
+of rule rather than one.
+
+### Two kinds of rule, tried in order
+
+**1. Address rules.** The premises printed on the bill. The strongest evidence
+there is: an address is a statement about the real world, where a supplier
+name is a guess from a string. A rule records the address, the entity that
+owns it, optionally a set of suppliers (none means any) and optionally a
+reference fragment. Right for utilities.
+
+**2. Recharge rules.** Conditions on the text Xero definitely has. A rule is a
+name, a set of conditions over `supplier` / `reference` / `invoice number` /
+`line description` / `tracking category`, joined by **all** or **any**, plus an
+optional payer filter and the entity to recharge to. This is what covers rent,
+tenancies, supplier bills and central payroll deductions — everything with no
+address on it.
+
+Address rules are checked first. A recharge rule is only consulted once no
+address rule has claimed the bill, and among recharge rules the first match in
+order wins.
+
+Every decision ends in one of six outcomes, so a caller never infers one from
+a null: `unpaid`, `no-rule`, `out-of-scope`, `own`, `recharge`, `done`.
+`out-of-scope` is kept apart from `no-rule` because the two call for opposite
+actions — a rule *does* cover that bill, it was paid before the rule's start
+date, and the fix is to move the date rather than write another rule.
+
+### Start dates, waiting and Run now
+
+A recharge rule acts on bills **marked paid on or after its start date**, which
+defaults to the day it was written. Without that, saving a rule would reach
+back through every paid bill in the history the moment it was created.
+Reaching back is then a deliberate act: move the date, and press **Run now**.
+
+Run now drafts a recharge for every bill the rule is waiting on. *Drafts only* —
+nothing reaches Xero until each one is posted, which is what makes the button
+safe to press. The "N paid bills waiting" badge and Run now are the same
+question asked twice.
+
+The rule dialog asks it a third time, before the rule exists, so nobody has to
+save a rule to find out whether it hits anything. A rule still being typed has
+no id and therefore ranks last, so it only counts what no saved rule has
+already claimed — counting more would promise a draft that never arrives.
+
+### Matching an address
+
+The same address is never typed the same way twice, so matching happens on a
+key with every separator removed (`lib/premises.js`): spaces, commas, full
+stops and letter case are irrelevant, digits are kept because a postcode is
+often the only thing separating two premises on one street. Abbreviations are
+**not** treated as equivalent — "Jalan" and "Jln" are different strings, and
+guessing at those is how a cost lands on the wrong company.
+
+Containment rather than equality, because the address arrives inside a longer
+line. Where several rules match, the most specific wins: a longer address
+first, then naming suppliers over not, then a reference over none. An address
+shorter than eight significant characters is refused outright — `Lot 3` sits
+inside half the industrial estates in the country.
+
+One rule per supplier set + premises + reference, enforced on a hash of the
+normalised triple. Two rules describing exactly the same bills is not a
+decision anybody made, and the second says nothing the first does not.
+
+### The runs table
+
+One row per recharge: the bill that was paid, the invoice raised in the payer,
+and the mirror bill in the entity the cost belongs to — with a **Notes** column
+naming the rule that decided it, so a row can be read back against the rules
+tabs.
+
+All three documents link into Xero, and the links are not interchangeable: two
+live in the payer and the third lives in another organisation. A bare
+`go.xero.com` link opens whichever organisation the person was last in, which
+across forty-one of them silently shows the wrong company's ledger. So
+`lib/xeroLinks.js` builds the `organisationlogin` form, which switches
+organisation and then redirects, using Xero's `ShortCode` — read from
+`/Organisation` during sync alongside the base currency, so it costs no extra
+call. Without a short code the bare link is still produced: it is wrong if the
+person is in another organisation, but *visibly* wrong rather than quietly
+showing something else.
+
+The stat cards count what exists in Xero rather than what the run's status
+says, because a part-posted run has one document of the two and the figures
+have to say so.
+
+### What a recharge does
 
 | Where | Document | Status |
 | --- | --- | --- |
-| The payer | AR invoice (`ACCREC`) addressed to the subsidiary | `AUTHORISED` |
-| The subsidiary | Mirror bill (`ACCPAY`) from the payer | `DRAFT` |
+| The payer | AR invoice (`ACCREC`) addressed to the owner | `AUTHORISED` |
+| The owner | Mirror bill (`ACCPAY`) from the payer | `DRAFT` |
 
-They carry the same amount and the same reference, so the group nets to zero and
-each side reconciles its own ledger. The subsidiary's bill is left as a draft on
-purpose — it then goes through the normal Bills approval flow rather than a
-payable appearing already authorised.
+Same amount, same reference, and the premises on the face of both where there
+was one — so the group nets to zero, each side reconciles its own ledger, and
+nobody opening the invoice in six months has to ask which building it was for.
+The owner's bill is left as a draft on purpose: it then goes through the normal
+Bills approval flow rather than a payable appearing already authorised.
+
+The intercompany transfer that later clears the pair is reconciled **in Xero**,
+against the two documents themselves. Bills Hub keeps no second record of it —
+a settled flag here could only ever disagree with the ledger that actually
+holds the answer. A run is `draft`, `posted` or `cancelled`, and nothing else.
+
+### The reference
+
+`IC-` + the supplier bill's own reference + the short form of the entity:
+
+```
+IC-TNB-GRP-0726-KJ
+```
+
+The short form comes from the name somebody gave the organisation — "Ayu
+Borneo (KJ)" says KJ is what distinguishes it — falling back to the prefix
+every code in the account shares, and then to the code itself. Repeating
+"AB" inside a reference that is already this group's says nothing, and the
+characters are not free: Hong Leong's portal refused a Reference 2 field at
+20, and CIMB's description column is read against one statement.
+
+Read from the entity's own name rather than from the set it sits in, so
+connecting an organisation from outside the group cannot silently lengthen
+everyone else's references. The badge on screen still shows the whole code,
+because that is what somebody looking at Xero will see.
 
 ### Rules only suggest
 
-A rule says *"bills from this supplier, paid by this entity, belong to those
-entities"* — matched on the supplier name, optionally narrowed to references
-containing some text. Shares must add up to 100%, checked when the rule is saved
-rather than when a recharge is posted.
+Rules never post anything. They surface **paid bills that belong somewhere
+else and have not been recharged**, with the owner and the amount already
+worked out; a person drafts and posts.
 
-Rules never post anything. They surface **paid bills a rule covers that have not
-been recharged**, with the split already worked out; a person drafts and posts.
+The runs tab also reports bills an address rule *should* have covered and did
+not — a rule names the supplier, its premises was not on the bill. That is
+almost always an address typed one way in the rule and another way on the
+bill, and it is invisible unless said out loud: the rule looks configured and
+quietly never fires.
+
+The Pay dialog asks the same question before anything is paid — `assumePaid`
+skips the paid check — so somebody about to mark a bill paid can see that doing
+so will move RM 17,980 from ABM to ABKJ, and why, rather than discovering it
+afterwards.
+
+### Trying it against real data
+
+Two ways, neither of which writes anything to Xero.
+
+**`npm run recharge-preview`** is read-only all the way down — it creates no
+runs, writes nothing to Bills Hub and sends nothing to Xero, so it is safe to
+point at a live account whatever testing mode is set to. It groups every paid,
+un-recharged bill by what the rules would decide:
+
+```bash
+npm run recharge-preview
+npm run recharge-preview -- --entity ABM --why
+npm run recharge-preview -- --text --supplier "Tenaga Nasional"
+```
+
+`--text` answers the question the address side always raises: a Xero bill has
+no premises field, so what can Bills Hub actually see? It reports, per
+supplier, how many bills carry an address WazzOCR read, how many have one in
+the reference, how many have one in the line items, and how many have nothing
+— then prints the real text so a rule can be written to match it. That turns
+"will address rules work?" from a guess into a worklist.
+
+**Testing mode** covers the rest of the flow. Rules run against real Xero
+data, suggestions appear as normal, and a recharge can be drafted — but the
+run is marked `test_mode`, shown with a *Testing mode* badge, offers no Post
+button, and disappears from the list when testing mode is turned off. Exactly
+how a test payment batch behaves.
+
+A test run is refused at `postRun` on its own flag, not on whether the switch
+is still on: somebody told that run it was a test, and turning testing mode
+off tomorrow must not quietly turn it into a real one. `lib/xero.js` refuses
+the call as well, which is the guard that holds when the code above it is
+wrong.
+
+A bill held by a test run is still free to be recharged for real — otherwise a
+bill tried once during testing would be unrechargeable for good, held by a run
+nobody can see.
 
 ### Nothing reaches Xero until you post
 
-`POST /api/recharge/runs` works the split out locally and stops. `…/post`
-creates the documents. Each id is saved the moment Xero returns it, so a failure
-halfway leaves an exact record: the run stays `draft`, the line records which
-side succeeded and why the other did not, and **a retry creates only what is
+`POST /api/recharge/runs` works it out locally and stops. `…/post` creates the
+documents. Each id is saved the moment Xero returns it, so a failure halfway
+leaves an exact record: the run stays `draft`, the line records which side
+succeeded and why the other did not, and **a retry creates only what is
 missing** — never a duplicate of what already exists. A run that has reached
-Xero cannot be cancelled here; voiding real accounting documents belongs in Xero.
+Xero cannot be cancelled here; voiding real accounting documents belongs in
+Xero.
 
-### The arithmetic
-
-Percentage splits go through `splitAmount`, which works in cents and gives the
-rounding difference to the last share, so the parts always sum to the whole —
-1,276.40 split three ways is 425.47 / 425.47 / 425.46, never 425.46 × 3.
+The address that decided a recharge is snapshotted onto the run, and the run
+records which rule raised it. A rule can be edited or deleted later, and the
+reason a cost moved between two companies has to stay readable.
 
 ### Account codes
 
 A recharge needs a receivable code in the payer and an expense code in the
-subsidiary. Those differ per chart of accounts, so they are configuration and a
+owner. Those differ per chart of accounts, so they are configuration and a
 recharge is refused until they are set — the same reasoning as the bank file
 layouts. Counterparty contacts are found by name in each Xero and created if
 missing.
+
+### Demo data
+
+`npm run recharge-preview` reports what the rules would do without doing any
+of it — see above. `node scripts/demo-recharge.js` seeds six address rules, three recharge rules
+and ten bills covering every branch of the decision — three matched by a
+premises, two by a recharge rule, and five where nothing should happen (the
+owner paid its own bill, unpaid, no premises match, a failed second condition,
+and one paid before its rule's start date). `--reset` removes them.
 
 ## Status mapping
 
@@ -592,13 +782,17 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/digest/runs` | The send log |
 | `GET` | `/api/recharge` | The Recharge view model |
 | `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
+| `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
+| `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
 | `PATCH` | `/api/recharge/settings` | Account codes, tax type, reference prefix |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Rules and their splits |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Address rules |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/text-rules[/:id]` | Recharge rules |
+| `POST` | `/api/recharge/text-rules/preview` | What a rule would act on, before saving it |
+| `POST` | `/api/recharge/text-rules/:id/run` | Draft a recharge for every bill it is waiting on |
 | `POST` | `/api/recharge/plan` | Dry-run a recharge |
 | `POST` | `/api/recharge/runs` | Create one (nothing in Xero yet) |
 | `POST` | `/api/recharge/runs/:id/post` | Create the AR/AP pairs in Xero |
 | `POST` | `/api/recharge/runs/:id/cancel` | Abandon an unposted recharge |
-| `POST` | `/api/recharge/runs/:id/lines/:lineId/settle` | Record the intercompany transfer |
 | `GET` | `/api/health` | Liveness + database check |
 
 `GET /api/bills` accepts `status`, `entities` (comma-separated tenant ids),
@@ -649,10 +843,10 @@ server, no sign-in):
   month-end, the double-send and missed-window guards), phone normalising,
   per-recipient scoping, the message itself, and sending — including that one
   bad number does not stop the rest and the key is never returned.
-- `recharge.test.js` — intercompany: the split arithmetic, every validation
+- `recharge.test.js` — intercompany: address matching, condition rules, precedence, every validation
   refusal, both sides of the posting with their account codes and statuses
   asserted, idempotent re-posting, a half-failed line retrying only what is
-  missing, settlement, rules and suggestions.
+  missing, both rule kinds, precedence and suggestions.
 - `ownmode.test.js` — `XERO_GRANT_SOURCE=own`: the consent round trip, a signed
   state that rejects tampering, the token encrypted at rest in Bills Hub's own
   tables, and WazzOCR's schema left alone.
