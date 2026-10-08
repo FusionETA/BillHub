@@ -1300,6 +1300,10 @@
       </div>;
     }
 
+    // lib/premises.normalise, in the browser. The dialog must not tell
+    // somebody their address matches unless the engine agrees.
+    const premisesKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, '');
+
     // Entity · bill · invoicing entity · invoice no · recharge entity · bill
     // no · notes. Declared once because the header and every row have to
     // agree, and a table whose header drifts from its rows is unreadable.
@@ -1771,6 +1775,23 @@
     function RuleDialog({ open, rule, entities, suppliers, onClose, onSaved, onToast }) {
       const [form, setForm] = useState({ suppliers: [], premisesAddress: '', referenceContains: '', ownerTenantId: '' });
       const [busy, setBusy] = useState(false);
+      const [onContact, setOnContact] = useState(null);   // what Xero holds on the supplier
+
+      // Matching forgives punctuation and case but not a missing word or an
+      // abbreviation — "Jln" does not match "Jalan". Retyping an address
+      // across forty contacts is a silent miss waiting to happen, so when
+      // Xero already holds one, offer its exact wording.
+      useEffect(() => {
+        setOnContact(null);
+        if (!open || form.suppliers.length !== 1) return;
+        let cancelled = false;
+        const t = setTimeout(() => {
+          api.get('/api/recharge/contact-address?supplier=' + encodeURIComponent(form.suppliers[0]))
+            .then(d => { if (!cancelled) setOnContact(d.address || null); })
+            .catch(() => { if (!cancelled) setOnContact(null); });
+        }, 250);
+        return () => { cancelled = true; clearTimeout(t); };
+      }, [open, form.suppliers.join('|')]);
 
       useEffect(() => {
         if (!rule) return;
@@ -1836,8 +1857,23 @@
             <div style={{ fontSize: 12, color: form.premisesAddress && !addressOk ? 'var(--color-danger)' : 'var(--text-muted)', marginTop: 5 }}>
               {form.premisesAddress && !addressOk
                 ? 'Too short to identify a premises — include the street and postcode as the bill prints them.'
-                : 'Matched ignoring spaces, commas and letter case.'}
+                : 'Matched ignoring spaces, commas and letter case — but not abbreviations. "Jln" will not match "Jalan".'}
             </div>
+            {onContact && premisesKey(onContact) !== premisesKey(form.premisesAddress) && (
+              <div style={{ marginTop: 8, background: 'var(--neutral-50)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
+                <div style={{ color: 'var(--text-muted)' }}>Xero holds this address on that contact:</div>
+                <div style={{ marginTop: 2 }}>{onContact}</div>
+                <button onClick={() => set({ premisesAddress: onContact })}
+                  style={{ border: 'none', background: 'none', padding: '4px 0 0', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
+                  Use it, word for word
+                </button>
+              </div>
+            )}
+            {onContact && premisesKey(onContact) === premisesKey(form.premisesAddress) && (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--green-500)', fontWeight: 600 }}>
+                Matches the address on that contact in Xero.
+              </div>
+            )}
           </div>
 
           <div style={{ gridColumn: '1 / -1' }}>

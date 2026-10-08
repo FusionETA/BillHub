@@ -388,6 +388,25 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('a premises read off the document outranks the contact',
     vMoved.ownerCode === 'ABKJ' && vMoved.address === MOVED, vMoved);
 
+  console.log('\nOffering the contact\'s own wording');
+  // Matching forgives punctuation but not a missing word, so retyping an
+  // address across forty contacts is a silent miss waiting to happen. The
+  // dialog offers Xero's exact wording to copy.
+  const look = await req('GET', '/api/recharge/contact-address?supplier='
+    + encodeURIComponent('Tenaga Nasional Berhad - Lot 9'), { cookie });
+  check('the address Xero holds on a supplier can be looked up',
+    look.status === 200 && /Jalan Perusahaan Empat/.test(look.body.address || ''), look.body);
+  check('and it is offered one way round, not both',
+    !(look.body.address || '').includes(' | '), look.body.address);
+  check('a rule written from it matches the bills it covers',
+    Boolean(require('../lib/premises').match(
+      require('../billhub/recharge').addressText({ Addresses: contactAddresses['c-Tenaga Nasional Berhad - Lot 9'] }),
+      look.body.address)));
+
+  const none = await req('GET', '/api/recharge/contact-address?supplier=Nobody%20At%20All', { cookie });
+  check('a supplier with no bills says so rather than erroring',
+    none.status === 200 && none.body.address === null, none.body);
+
   console.log('\nAsking what a bill would do before it is paid');
   const ahead = await req('POST', '/api/recharge/decide', {
     cookie, body: { billIds: [unpaidBill], assumePaid: true }

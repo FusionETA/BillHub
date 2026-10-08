@@ -3,6 +3,7 @@
 //   GET    /api/recharge                    the Recharge view model
 //   GET    /api/recharge/suggestions        paid bills a rule covers, not yet recharged
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
+//   GET    /api/recharge/contact-address     the address Xero holds on a supplier
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
 //   GET/POST/PATCH/DELETE /api/recharge/rules[/:id]
@@ -224,6 +225,40 @@ router.delete('/rules/:id(\\d+)', async (req, res) => {
     if (!n) return res.status(404).json({ error: 'Rule not found.' });
     res.json({ ok: true });
   } catch (err) { fail(res, err); }
+});
+
+// The address Xero holds on a supplier's contact, so a rule can use it
+// rather than have somebody retype it.
+//
+// Matching is containment on a stripped key, which forgives punctuation and
+// case but not a missing word or an abbreviation: "Jln" does not match
+// "Jalan", and adding "Selangor" where the contact has no region does not
+// match either. Across forty-odd contacts that is a silent miss waiting to
+// happen, so the dialog offers the contact's own wording to copy.
+router.get('/contact-address', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  const supplier = String(req.query.supplier || '').trim();
+  if (!supplier) return res.status(400).json({ error: 'supplier is required.' });
+  try {
+    const db = require('../db');
+    // Any bill from this supplier will do; its contact is the same contact.
+    // The most recent, because an older one may predate a rename.
+    const bill = await db.getOne(
+      `SELECT id, xero_tenant_id, contact_id, contact_name
+         FROM bills
+        WHERE account_id = ? AND contact_name = ? AND contact_id IS NOT NULL
+        ORDER BY bill_date DESC, id DESC LIMIT 1`,
+      [accountId, supplier]
+    );
+    if (!bill) return res.json({ address: null, reason: 'no-bills' });
+    const address = await recharge.contactAddress(accountId, bill);
+    // Both orderings are offered to the matcher; only the first is worth
+    // showing somebody, since either will match.
+    res.json({ address: (address || '').split(' | ')[0] || null, supplier: bill.contact_name });
+  } catch (err) {
+    console.error('[recharge] contact address lookup failed:', err.message);
+    fail(res, err);
+  }
 });
 
 // ── Recharge rules ──────────────────────────────────────────────────────────

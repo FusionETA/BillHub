@@ -549,6 +549,33 @@ only hold one address, so this helps exactly where the contact is one per
 premises — `--addresses` says which situation a supplier is in, and
 distinguishes "none has an address" from "none could be read".
 
+#### How exact the address has to be
+
+Not exact, but strict. Both sides are reduced to a key with every separator
+stripped, so these all match an address held as
+`Lot 9, Jalan Perusahaan Empat, Batu Caves, 68100`:
+
+```
+Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves      the other postcode order
+LOT 9 JALAN PERUSAHAAN EMPAT 68100 BATU CAVES        case and punctuation
+Lot 9, Jalan Perusahaan Empat                        a prefix of it
+Jalan Perusahaan Empat, 68100 Batu Caves             any contiguous part
+```
+
+And these do not:
+
+```
+Lot 9, Jln Perusahaan Empat, …                       an abbreviation
+Lot 9, Jalan Perusahaan Empat, …, Selangor           a word the contact lacks
+Lot 9, Jalan Perusahaan 4, …                         a different spelling
+```
+
+Guessing at abbreviations is how a cost lands on the wrong company, so the
+matcher will not do it. Across forty contacts that leaves retyping as a
+silent miss waiting to happen — so when Xero already holds the address, the
+rule dialog shows it and offers **"Use it, word for word"**, and says plainly
+once the two agree. Nothing has to be typed twice.
+
 The contact's own address is the one tempting exception. For a single
 contact billing many buildings it is the supplier's head office: the same on
 every bill, and useless for deciding which building. But a contact created
@@ -936,6 +963,7 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/recharge` | The Recharge view model |
 | `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
 | `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
+| `GET` | `/api/recharge/contact-address` | The address Xero holds on a supplier's contact |
 | `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
 | `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, due days |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Address rules |
