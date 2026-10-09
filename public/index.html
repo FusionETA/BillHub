@@ -416,16 +416,26 @@
     function Dialog({ open, title, description, size = 'md', onClose, children }) {
       if (!open) return null;
       const w = size === 'sm' ? 440 : 640;
+      // The panel is capped at the viewport and its body scrolls. Without
+      // that a dialog simply grew past the bottom of the screen: the Pay
+      // dialog with a recharge panel and a warning per payee ran off the
+      // end, taking Cancel and the submit button with it, and nothing on
+      // the page would scroll to reach them.
       return <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(16,18,53,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={onClose}>
-        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: w, background: 'var(--surface-card)', borderRadius: 16, boxShadow: 'var(--shadow-lg)', padding: 24, animation: 'feta-rise var(--dur-slow) var(--ease-out)' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: w, maxHeight: 'calc(100vh - 48px)', display: 'flex', flexDirection: 'column', background: 'var(--surface-card)', borderRadius: 16, boxShadow: 'var(--shadow-lg)', animation: 'feta-rise var(--dur-slow) var(--ease-out)' }}>
+          {/* The title stays put; only the body moves. */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, padding: '24px 24px 18px', flex: '0 0 auto' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
               {description && <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{description}</div>}
             </div>
             <button onClick={onClose} aria-label="Close" className="feta-hover" style={{ border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 6, borderRadius: '50%', display: 'flex' }}><Icon name="x" size={18} /></button>
           </div>
-          {children}
+          {/* Horizontal overflow stays visible so a dropdown inside the
+              dialog is not clipped by its own scroll container. */}
+          <div style={{ flex: '1 1 auto', overflowY: 'auto', overflowX: 'visible', padding: '0 24px 24px' }}>
+            {children}
+          </div>
         </div>
       </div>;
     }
