@@ -28,6 +28,9 @@ async function updateSettings(accountId, fields = {}) {
   for (const [key, col] of Object.entries(map)) {
     if (key in fields) { sets.push(`${col} = ?`); params.push(fields[key] === '' ? null : fields[key]); }
   }
+  // Not in the map above because it is a flag, not a value: '' has to mean
+  // off rather than NULL.
+  if ('autoPost' in fields) { sets.push('auto_post = ?'); params.push(fields.autoPost ? 1 : 0); }
   if (!sets.length) return 0;
   params.push(accountId);
   const res = await db.execute(`UPDATE recharge_settings SET ${sets.join(', ')} WHERE account_id = ?`, params);

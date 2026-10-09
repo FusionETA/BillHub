@@ -104,6 +104,7 @@ if (require.main === module) {
         })().catch((e) => console.error('[digest] could not seed settings:', e.message));
         sync.startScheduler();
         require('./billhub/digest').startScheduler();
+        require('./billhub/recharge').startScheduler();
       })
       .catch((err) => console.error('[db] NOT connected:', err.message));
   });

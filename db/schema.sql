@@ -470,6 +470,11 @@ CREATE TABLE IF NOT EXISTS recharge_settings (
   reference_prefix VARCHAR(16) NOT NULL DEFAULT 'IC-',
   -- Days until the intercompany bill falls due.
   due_days         INT NOT NULL DEFAULT 30,
+  -- Paying a bill posts its recharge, with no second click. On by default:
+  -- once the rules are right the click is the same answer every time, and
+  -- both documents are drafts, so nothing is authorised without a person.
+  -- Here rather than in an env var so it can be stopped from the UI.
+  auto_post        TINYINT(1) NOT NULL DEFAULT 1,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_rcs_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -538,6 +538,13 @@ async function applyPaidLocally(accountId, batch, lines) {
       [l.amount, l.amount, l.amount, l.amount, batch.payment_date, l.amount, accountId, l.bill_id]
     );
   }
+
+  // Paying a bill is what sets a recharge going, so this is where it starts.
+  // Not awaited: see sweepSoon in billhub/recharge.js — a batch of two
+  // hundred bills would otherwise hold the request open for four hundred
+  // Xero calls, and a recharge failing must never make a payment that
+  // succeeded look like it did not.
+  require('./recharge').sweepSoon(accountId);
 }
 
 async function postToXero(accountId, batchId, { reference = null, status = 'uploaded' } = {}) {

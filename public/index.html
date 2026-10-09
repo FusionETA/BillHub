@@ -1485,6 +1485,18 @@
         } catch (e) { toastError(e, 'Could not update the rule'); }
       }
 
+      async function setAutoPost(on) {
+        try {
+          await request('/api/recharge/settings', { method: 'PATCH', body: { autoPost: on } });
+          onToast(on
+            ? { title: 'Recharges post themselves',
+                message: 'Paying a bill a rule covers now raises both drafts.' }
+            : { title: 'Recharges are posted by hand',
+                message: 'Bills a rule covers will wait here with a button.' });
+          reload();
+        } catch (e) { toastError(e, 'Could not change that'); }
+      }
+
       if (error) {
         return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
           <Placeholder tone="error" title="Could not load recharges" message={error}
@@ -1513,6 +1525,18 @@
           <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
         </div>
 
+        {/* A stop switch, not a setting to configure: on is how the module
+            works, and this is here so a rule that turns out to be wrong can
+            be stopped without a deploy. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '12px 16px', marginBottom: 14 }}>
+          <Switch checked={data.settings.autoPost} onChange={setAutoPost} />
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
+            {data.settings.autoPost
+              ? <span><strong>Paying a bill recharges it.</strong> When a rule covers a bill you pay in Bills Hub, the draft invoice and the draft bill are raised straight away. Nothing is authorised — both sides still need approving in Xero.</span>
+              : <span><strong>Recharges are posted by hand.</strong> Bills a rule covers are listed below with a button. Turn this on and paying a bill will recharge it.</span>}
+          </div>
+        </div>
+
         {data.testMode && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--amber-100)', borderRadius: 10, padding: '12px 18px', marginBottom: 14, fontSize: 13.5, color: '#6b4d00', lineHeight: 1.6 }}>
           <div style={{ flex: 1 }}>
             <strong>Testing mode is on.</strong> The rules run against real Xero data, but nothing is sent to Xero — a recharge drafted now is marked <em>Testing mode</em>, cannot be posted, and disappears from this list when testing mode is turned off.
@@ -1533,8 +1557,13 @@
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
               {data.testMode
-                ? 'Testing mode is on, so these are worked out and recorded here but nothing is sent to Xero.'
-                : 'Each one raises an invoice in the paying entity and a draft bill in the entity it belongs to.'}
+                ? 'Testing mode is on, so nothing is posted automatically. Recharging one here works the split out and records it, and sends nothing to Xero.'
+                : data.settings.autoPost
+                  // With posting automatic these are the leftovers, and
+                  // saying which kind matters: they were paid before the
+                  // rule existed, or the sweep has not come round yet.
+                  ? 'These were paid before a rule covered them, or are waiting for the next sweep. Recharge one here to do it now.'
+                  : 'Each one raises a draft invoice in the paying entity and a draft bill in the entity it belongs to.'}
             </div>
             {data.suggestions.map(s => (
               <div key={s.billId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>

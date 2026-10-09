@@ -73,8 +73,9 @@ the paperwork for the recharge in both companies at once.
    Xero does not start a recharge, which is deliberate: otherwise
    connecting Bills Hub would propose thousands of recharges for history.
 
-2. **Switch to Recharge.** The bill is now a suggestion, saying which
-   company it belongs to and why.
+2. **Switch to Recharge.** The recharge is already there, in the runs
+   table, saying which company it went to and why, with links into both
+   documents in Xero.
 
 3. **The "why" is the interesting part.** There are two ways a bill gets
    matched, and they exist because a Xero bill has *no premises field*:
@@ -91,9 +92,14 @@ the paperwork for the recharge in both companies at once.
    Show one of each. The TNB bills match on the address; the EPF bill has
    no address that means anything, so it matches on the supplier.
 
-4. **Click Recharge.** One click creates both documents:
+4. **Nothing to click.** Marking the bill paid is the whole trigger — the
+   recharge posts itself:
    - a **draft sales invoice** in the company that paid, and
    - a **draft bill** in the company being charged.
+
+   The list on the Recharge tab is now the exceptions: bills paid before a
+   rule covered them, and anything the last sweep has not reached. Those
+   keep a button.
 
    Both are drafts so each side approves its own, and anything raised in
    error is deleted rather than credited. Whatever was attached to the
@@ -170,8 +176,11 @@ on the reference, with recharge rules.
 13. **Does a recharge ever need splitting between companies** — half to one,
     half to another? The engine can do it; no rule uses it yet.
 
-14. **Both documents are now drafts** — somebody has to approve each side.
-    Who, in each company, and should Bills Hub chase it?
+14. **Both documents are now drafts, and they post themselves** when a bill
+    is paid. Somebody has to approve each side in Xero — who, in each
+    company, and should Bills Hub chase it? Is anyone uncomfortable with
+    documents appearing without a person pressing anything? There is a
+    switch on the tab that turns it back into a button.
 
 15. **How do these intercompany balances get settled** — netted off
     periodically, actually paid, or left to sit? We removed settlement from

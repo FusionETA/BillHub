@@ -951,6 +951,126 @@ async function suggestions(accountId, { limit = 50 } = {}) {
   return out;
 }
 
+// ── Posting them without being asked ────────────────────────────────────────
+
+// A recharge is a consequence of paying a bill, not a separate decision
+// somebody makes afterwards. Once the rules are right, the button is a
+// chore: the same answer, clicked. So paying a bill posts its recharge.
+//
+// What makes that safe is that both documents are drafts. Nothing is
+// authorised, nothing becomes a receivable, and a recharge raised from a
+// rule that turns out to be wrong is deleted rather than credited.
+//
+// Not a loop over everything paid, ever: candidateBills already limits
+// itself to bills marked paid in Bills Hub with no run against them, and a
+// bill whose posting failed keeps its draft run, so the next sweep passes
+// over it and leaves it for the Post to Xero button rather than retrying
+// into the same error for ever.
+const sweeping = new Set();
+
+async function sweep(accountId, { limit = 50 } = {}) {
+  const id = Number(accountId);
+  const idle = { posted: 0, failed: 0, skipped: null };
+
+  // The payment that just finished and the timer can arrive together. Both
+  // would read the same suggestions and createRun would refuse the second,
+  // which is correct but reads as an error for something that is not wrong.
+  //
+  // Claimed synchronously, before the first await. Checking the flag and
+  // then awaiting anything before setting it leaves both callers past the
+  // guard, which is the whole failure it is here to prevent.
+  if (sweeping.has(id)) return { ...idle, skipped: 'already running' };
+  sweeping.add(id);
+
+  try {
+    const settings = await model.getSettings(id);
+    // Absent, on a database that has not been migrated yet, reads as off.
+    // The wrong answer in that direction is a recharge nobody posted; in
+    // the other it is documents in two organisations nobody asked for.
+    if (!Number(settings.auto_post)) return { ...idle, skipped: 'switched off' };
+
+    // Testing mode posts nothing, and must not quietly bank the recharges
+    // either: a run worked out under it can never be posted, and it would
+    // still mark its bill as recharged. The bills stay as suggestions and
+    // wait for testing mode to come off.
+    if (await testMode.isOn(id)) return { ...idle, skipped: 'testing mode' };
+
+    const pending = await suggestions(id, { limit });
+    let posted = 0;
+    let failed = 0;
+    for (const p of pending) {
+      try {
+        const run = await createRun(id, {
+          billId: p.bill.id,
+          ruleId: p.kind === 'address' ? p.rule.id : null,
+          textRuleId: p.kind === 'text' ? p.rule.id : null
+        });
+        const out = await postRun(id, run.id);
+        if (out.failed) {
+          failed += 1;
+          console.error(`[recharge] auto ${p.bill.reference || p.bill.id}: ${out.results.find((r) => !r.ok)?.error}`);
+        } else {
+          posted += 1;
+          console.log(`[recharge] auto ${p.bill.reference || p.bill.id} → ${p.lines[0].code}`);
+        }
+      } catch (e) {
+        // One bill that cannot be recharged must not stop the rest. Its run,
+        // if one was made, carries the error and the runs tab offers it.
+        failed += 1;
+        console.error(`[recharge] auto ${p.bill.reference || p.bill.id} failed: ${e.message}`);
+      }
+    }
+    return { posted, failed, skipped: null };
+  } finally {
+    sweeping.delete(id);
+  }
+}
+
+// Called where a bill becomes paid. Deliberately not awaited by the payment:
+// a batch of two hundred bills would hold the request open for four hundred
+// Xero calls, and a recharge failing must never make a payment that
+// succeeded look like it did not. Anything missed here is picked up by the
+// timer below.
+function sweepSoon(accountId) {
+  setTimeout(() => {
+    sweep(accountId).catch((e) => console.error('[recharge] auto sweep failed:', e.message));
+  }, 1500).unref?.();
+}
+
+let timer = null;
+
+// The safety net. sweepSoon fires in the same process that took the payment,
+// so a restart in between loses it; Xero being briefly unreachable loses it
+// too. Neither should mean a recharge never happens, so the same sweep runs
+// on a timer and finds whatever is still waiting.
+function startScheduler({ intervalMinutes = Number(process.env.RECHARGE_INTERVAL_MINUTES || 20) } = {}) {
+  if (!intervalMinutes || timer) return;
+  const db = require('../db');
+  const tick = async () => {
+    try {
+      const accounts = await db.query("SELECT id FROM accounts WHERE status <> 'suspended'");
+      for (const a of accounts) {
+        const r = await sweep(a.id).catch((e) => {
+          console.error(`[recharge] account ${a.id}:`, e.message);
+          return null;
+        });
+        if (r && (r.posted || r.failed)) {
+          console.log(`[recharge] account ${a.id}: ${r.posted} posted, ${r.failed} failed`);
+        }
+      }
+    } catch (err) {
+      console.error('[recharge] scheduler tick failed:', err.message);
+    }
+  };
+  timer = setInterval(tick, intervalMinutes * 60000);
+  if (timer.unref) timer.unref();
+  console.log(`[recharge] posting recharges automatically, sweeping every ${intervalMinutes} min`);
+}
+
+function stopScheduler() {
+  if (timer) { clearInterval(timer); timer = null; }
+}
+
 // ── Recharge rules: waiting and Run now ─────────────────────────────────────
 
 // Paid bills this one rule would act on: in scope by date and payer, no
@@ -1037,6 +1157,7 @@ async function runTextRule(accountId, ruleId) {
 
 module.exports = {
   decide, loadRules, premisesText, planRun, createRun, postRun, suggestions,
+  sweep, sweepSoon, startScheduler, stopScheduler,
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
   isPaid, OUTCOMES, contactAddress, addressText,

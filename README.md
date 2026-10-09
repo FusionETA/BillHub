@@ -682,6 +682,36 @@ Both are drafts on purpose. Each side then goes through its own normal
 approval rather than a document appearing already authorised, and a recharge
 raised in error is deleted rather than credited.
 
+#### Nobody presses anything
+
+Paying a bill in Bills Hub posts its recharge. Once the rules are right the
+button was the same answer every time, and what makes doing it unattended
+safe is that both documents are drafts: nothing is authorised, nothing
+becomes a receivable, and a recharge raised from a rule that turns out to be
+wrong is deleted rather than credited.
+
+`applyPaidLocally` is the only place a bill becomes paid, so that is where it
+starts. The sweep is **not awaited** by the payment: a batch of two hundred
+bills would hold the request open for four hundred Xero calls, and a recharge
+failing must never make a payment that succeeded look like it did not. A
+timer runs the same sweep every `RECHARGE_INTERVAL_MINUTES` (20) as the
+safety net, because the in-process trigger is lost to a restart or a minute
+of Xero being unreachable.
+
+Both can arrive at once, so the sweep claims its account **synchronously**,
+before its first `await`. Checking a flag and then awaiting anything before
+setting it leaves both callers past the guard, which is the whole failure it
+is there to prevent.
+
+It does nothing in testing mode — a run worked out under it can never be
+posted, and banking one would still mark its bill recharged, so the bills
+wait. A bill whose posting fails keeps its draft run, so the next sweep
+passes over it and leaves it for the **Post to Xero** button rather than
+retrying into the same error for ever. `recharge_settings.auto_post` is the
+stop switch, on by default and on the tab; read as **off** where the column
+is missing, because the wrong answer in that direction is a recharge nobody
+posted rather than documents in two organisations nobody asked for.
+
 Copying the attachments needs `accounting.attachments` on the grant. A grant
 consented before that scope was added does not carry it: the recharge still
 posts, and the run reports the files it could not bring rather than leaving

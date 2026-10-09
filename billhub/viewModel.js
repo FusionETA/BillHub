@@ -529,7 +529,8 @@ function rechargeSettings(s) {
     apAccountCode: s.ap_account_code || null,
     taxType: s.tax_type || 'NONE',
     referencePrefix: s.reference_prefix || 'IC-',
-    dueDays: Number(s.due_days || 30)
+    dueDays: Number(s.due_days || 30),
+    autoPost: Boolean(Number(s.auto_post))
   };
 }
 

@@ -115,6 +115,15 @@ const ADJUSTMENTS = [
             ADD INDEX idx_text_rule_lookup (account_id, enabled, created_at)`
   },
   {
+    // Default 1: this is how the module works now, and an existing
+    // deployment upgrading into it should behave the same as a fresh one
+    // rather than silently keeping the old two-click flow.
+    why: 'recharge_settings.auto_post — paying a bill posts its recharge',
+    check: hasColumn('recharge_settings', 'auto_post'),
+    needed: (row) => Number(row.n) === 0,
+    sql: 'ALTER TABLE recharge_settings ADD COLUMN auto_post TINYINT(1) NOT NULL DEFAULT 1'
+  },
+  {
     why: 'bills.marked_paid_at — when Bills Hub itself marked the bill paid',
     check: hasColumn('bills', 'marked_paid_at'),
     needed: (row) => Number(row.n) === 0,

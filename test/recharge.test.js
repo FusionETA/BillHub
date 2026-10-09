@@ -1060,6 +1060,70 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     scopeRun.body.posted.attachments.skipped.some((x) => /accounting\.attachments/.test(x)),
     scopeRun.body.posted.attachments);
 
+  console.log('\nPaying a bill recharges it, with nobody clicking anything');
+  // The button is the same answer every time once the rules are right, so
+  // paying a bill posts its recharge. Both documents are drafts, which is
+  // what makes doing it unattended safe.
+  const recharge = require('../billhub/recharge');
+
+  const autoBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-AUTO-0826', supplier: BOTH_SUPPLIER, total: 412.00
+  });
+  await paidNow(autoBill);
+  const swept = await recharge.sweep(1);
+  check('a sweep posts the bills a rule covers',
+    swept.posted >= 1 && swept.failed === 0, swept);
+  const autoRun = await db.getOne(
+    `SELECT r.status, l.ar_invoice_id, l.ap_invoice_id
+       FROM recharge_runs r JOIN recharge_run_lines l ON l.run_id = r.id
+      WHERE r.bill_id = ?`, [autoBill]);
+  check('and both documents exist, with no run left as a draft',
+    autoRun && autoRun.status === 'posted' && autoRun.ar_invoice_id && autoRun.ap_invoice_id,
+    autoRun);
+
+  const sweptTwice = await recharge.sweep(1);
+  check('a second sweep has nothing to do — it does not recharge anything twice',
+    sweptTwice.posted === 0 && sweptTwice.failed === 0, sweptTwice);
+
+  // Two sweeps at once is the normal case: the payment that just finished
+  // fires one and the timer fires another. The second has to stand down
+  // rather than race the first into a duplicate.
+  const racer = await makeBill(abm.tenantId, {
+    ref: 'TNB-RACE-0826', supplier: BOTH_SUPPLIER, total: 88.00
+  });
+  await paidNow(racer);
+  const [a1, a2] = await Promise.all([recharge.sweep(1), recharge.sweep(1)]);
+  check('two sweeps at once post it once between them',
+    a1.posted + a2.posted === 1 && [a1, a2].some((x) => x.skipped === 'already running'),
+    [a1, a2]);
+
+  // A bill nothing covers must not be touched, or the sweep becomes the
+  // most dangerous thing in the app.
+  const untouched = await makeBill(abm.tenantId, {
+    ref: 'MISC-AUTO-0826', supplier: 'Swanston Security', total: 150.00
+  });
+  await paidNow(untouched);
+  await recharge.sweep(1);
+  check('a bill no rule covers is left alone',
+    Number((await db.getOne(
+      'SELECT COUNT(*) AS n FROM recharge_runs WHERE bill_id = ?', [untouched])).n) === 0);
+
+  // The stop switch.
+  const offBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-OFF-0826', supplier: BOTH_SUPPLIER, total: 55.00
+  });
+  await paidNow(offBill);
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { autoPost: false } });
+  const stopped = await recharge.sweep(1);
+  check('switched off, the sweep posts nothing and says why',
+    stopped.posted === 0 && stopped.skipped === 'switched off', stopped);
+  check('and the bill is still offered with a button',
+    (await req('GET', '/api/recharge/suggestions', { cookie }))
+      .body.suggestions.some((x) => x.reference === 'TNB-OFF-0826'));
+  const back = await req('PATCH', '/api/recharge/settings', { cookie, body: { autoPost: true } });
+  check('the switch is reported to the browser',
+    back.body.settings.autoPost === true, back.body.settings);
+
   console.log('\nTesting mode');
   // Testing mode exists so the whole thing can be exercised against real
   // Xero data without a single document reaching Xero. A recharge worked out
