@@ -439,7 +439,13 @@ async function createRun(accountId, { ruleId = null, textRuleId = null, bill, ta
        bill.contact_name, bill.reference || bill.invoice_number,
        premisesAddress ? String(premisesAddress).slice(0, 512) : null,
        Number(bill.total).toFixed(2), total.toFixed(2),
-       bill.currency_code, bill.fully_paid_on || null, testMode ? 1 : 0]
+       bill.currency_code,
+       // Xero's date when there is one, otherwise the moment Bills Hub
+       // marked it paid — which for a bill paid here is the same day and
+       // beats showing "paid not recorded" for something it paid itself.
+       bill.fully_paid_on || (bill.marked_paid_at
+         ? new Date(bill.marked_paid_at).toISOString().slice(0, 10) : null),
+       testMode ? 1 : 0]
     );
     for (const t of targets) {
       await conn.execute(

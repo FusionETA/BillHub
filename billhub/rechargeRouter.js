@@ -406,10 +406,19 @@ router.post('/runs', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
     const out = await recharge.createRun(accountId, req.body || {});
-    // Posting straight away is opt-in: a recharge creates real documents in two
-    // organisations, so the default is to look at it first.
+
+    // Posting in the same call is what the suggestion list asks for: working
+    // the recharge out and then leaving it for a second click only made
+    // sense while the first click did something a person needed to read.
+    // The suggestion already says the entity, the amount and the reason.
+    //
+    // A run worked out under testing mode can never be posted, so asking to
+    // post one is answered by not trying rather than by an error — the
+    // point of testing mode is that the rest of the flow still runs.
     let posted = null;
-    if ((req.body || {}).post === true) posted = await recharge.postRun(accountId, out.id);
+    if ((req.body || {}).post === true && !(await testMode.isOn(accountId))) {
+      posted = await recharge.postRun(accountId, out.id);
+    }
     res.status(201).json({ ok: true, id: out.id, total: out.total, posted });
   } catch (err) {
     console.error('[recharge] create run failed:', err.message);

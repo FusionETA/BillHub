@@ -241,6 +241,19 @@ async function upsertFromXero(accountId, tenantId, inv, { isInterco = false, att
     return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 19).replace('T', ' ');
   };
 
+  // Xero's summaryOnly response — which the sync uses, because it is what
+  // keeps 41 organisations inside the rate limit — carries neither
+  // FullyPaidOnDate nor a populated Payments array. Writing the missing
+  // value straight through therefore BLANKED the paid date on every sync:
+  // Bills Hub would record the date when it paid a bill, and the next
+  // sync, minutes later, would wipe it. The Bills tab's Paid column and its
+  // paid-date filter were empty across the whole account as a result.
+  //
+  // The upsert below keeps the stored date when this sync cannot see one,
+  // and clears it only when the bill genuinely owes money again — a
+  // reversed payment should not leave a date behind.
+  const paidOn = date(inv.FullyPaidOnDate);
+
   await db.execute(
     `INSERT INTO bills (
        account_id, xero_tenant_id, xero_invoice_id, invoice_number, reference,
@@ -253,7 +266,11 @@ async function upsertFromXero(accountId, tenantId, inv, { isInterco = false, att
        invoice_number = VALUES(invoice_number), reference = VALUES(reference),
        contact_id = VALUES(contact_id), contact_name = VALUES(contact_name),
        xero_status = VALUES(xero_status), bill_date = VALUES(bill_date),
-       due_date = VALUES(due_date), fully_paid_on = VALUES(fully_paid_on),
+       due_date = VALUES(due_date),
+       -- Keep the date we have when this sync could not see one, but let a
+       -- bill that is no longer paid lose it.
+       fully_paid_on = IF(VALUES(amount_due) > 0, NULL,
+                          COALESCE(VALUES(fully_paid_on), fully_paid_on)),
        currency_code = VALUES(currency_code), currency_rate = VALUES(currency_rate),
        sub_total = VALUES(sub_total), total_tax = VALUES(total_tax), total = VALUES(total),
        amount_paid = VALUES(amount_paid), amount_due = VALUES(amount_due),
@@ -267,7 +284,7 @@ async function upsertFromXero(accountId, tenantId, inv, { isInterco = false, att
       fit(inv.InvoiceNumber, 'invoice_number'), fit(inv.Reference, 'reference'),
       inv.Contact?.ContactID || null, fit(inv.Contact?.Name, 'contact_name'),
       fit(inv.Status, 'xero_status') || 'DRAFT',
-      date(inv.Date), date(inv.DueDate), date(inv.FullyPaidOnDate),
+      date(inv.Date), date(inv.DueDate), paidOn,
       fit(inv.CurrencyCode, 'currency_code'), inv.CurrencyRate == null ? null : Number(inv.CurrencyRate),
       num(inv.SubTotal), num(inv.TotalTax), num(inv.Total),
       num(inv.AmountPaid), num(inv.AmountDue), num(inv.AmountCredited),

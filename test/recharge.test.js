@@ -98,6 +98,8 @@ async function paidNow(...ids) {
   }
 }
 
+const testModeLib = require('../lib/testMode');
+
 let pass = 0, fail = 0;
 function check(name, ok, detail) {
   if (ok) { pass += 1; console.log('  ok    ' + name); }
@@ -571,6 +573,40 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     ovInv.map((c) => `${c.body.Invoices[0].Type}:${c.body.Invoices[0].LineItems[0].AccountCode}`));
   await req('PATCH', '/api/recharge/settings', { cookie, body: { arAccountCode: '', apAccountCode: '' } });
 
+  // The suggestion list posts in the same call now: working the recharge
+  // out and then leaving it for a second click only made sense while the
+  // first click produced something a person needed to read.
+  console.log('\nOne click: worked out and posted together');
+  const oneClickBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-ONECLICK-0826', supplier: 'Tenaga Nasional Berhad', total: 640.00, address: KILANG
+  });
+  calls.length = 0;
+  const oneClick = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: oneClickBill, post: true }
+  });
+  check('post: true creates the documents in the same call',
+    oneClick.status === 201 && oneClick.body.posted && oneClick.body.posted.posted === 1,
+    oneClick.body);
+  check('and both documents really were created',
+    calls.filter((c) => c.path === '/Invoices' && c.method === 'POST').length === 2,
+    calls.filter((c) => c.path === '/Invoices').length);
+
+  // A run worked out under testing mode can never be posted, so asking to
+  // post one is answered by not trying rather than by an error.
+  await testModeLib.set(1, true);
+  const tmOneClick = await makeBill(abm.tenantId, {
+    ref: 'TNB-ONECLICK-0926', supplier: 'Tenaga Nasional Berhad', total: 660.00, address: KILANG
+  });
+  calls.length = 0;
+  const tmClick = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: tmOneClick, post: true }
+  });
+  check('in testing mode it is worked out but not posted, and does not error',
+    tmClick.status === 201 && tmClick.body.posted === null, tmClick.body);
+  check('and Xero saw nothing', calls.length === 0, calls.map((c) => c.path));
+  await testModeLib.set(1, false);
+  testModeLib.forget(1);
+
   console.log('\nA failure on one side leaves an exact record');
   const billWisma = await makeBill(abm.tenantId, {
     ref: 'JANS-WL-0826', supplier: 'Jabatan Air Negeri Sabah', total: 1240.50, address: WISMA
@@ -935,7 +971,6 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // Xero data without a single document reaching Xero. A recharge worked out
   // under it is real arithmetic over real bills and must never be mistaken
   // for one that happened.
-  const testModeLib = require('../lib/testMode');
   const tmBill = await makeBill(abm.tenantId, {
     ref: 'TNB-TEST-0826', supplier: 'Tenaga Nasional Berhad', total: 777.00, address: KILANG2
   });

@@ -38,7 +38,8 @@
     "ready-to-pay": "node scripts/ready-to-pay.js",
     "payee-codes": "node scripts/payee-codes.js",
     "recharge-preview": "node scripts/recharge-preview.js",
-    "test:migrate": "node test/migrate.test.js"
+    "test:migrate": "node test/migrate.test.js",
+    "repair-paid-dates": "node scripts/repair-paid-dates.js"
   },
   "engines": {
     "node": ">=18"

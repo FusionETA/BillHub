@@ -1425,12 +1425,24 @@
       async function createFromSuggestion(s) {
         setBusy('sugg-' + s.billId);
         try {
-          await api.post('/api/recharge/runs', {
-            billId: s.billId, ruleId: s.ruleId, textRuleId: s.textRuleId, ownerTenantId: s.ownerTenantId
+          const r = await api.post('/api/recharge/runs', {
+            billId: s.billId, ruleId: s.ruleId, textRuleId: s.textRuleId, ownerTenantId: s.ownerTenantId,
+            post: true
           });
-          onToast({ title: 'Recharge drafted', message: 'Check it, then post it to Xero.' });
+          const failed = r.posted && r.posted.failed;
+          onToast(
+            failed
+              ? { title: 'Xero rejected part of it',
+                  message: `${r.posted.results.filter(x => !x.ok)[0].error} Post it again from the runs list once that is sorted.`,
+                  tone: 'error' }
+              : r.posted
+                ? { title: `Recharged to ${s.ownerCode}`,
+                    message: `The invoice is raised, and a draft bill is waiting in ${s.ownerShort}.` }
+                : { title: 'Recharge drafted · testing mode',
+                    message: 'Nothing was sent to Xero. It disappears when testing mode is turned off.' }
+          );
           reload();
-        } catch (e) { toastError(e, 'Could not draft the recharge'); }
+        } catch (e) { toastError(e, 'Could not recharge it'); }
         finally { setBusy(null); }
       }
 
@@ -1523,7 +1535,11 @@
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 2 }}>
               {data.suggestions.length} paid bill{data.suggestions.length === 1 ? '' : 's'} a rule covers, not recharged yet
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>Drafting one works out the split; nothing reaches Xero until you post it.</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              {data.testMode
+                ? 'Testing mode is on, so these are worked out and recorded here but nothing is sent to Xero.'
+                : 'Each one raises an invoice in the paying entity and a draft bill in the entity it belongs to.'}
+            </div>
             {data.suggestions.map(s => (
               <div key={s.billId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
@@ -1537,7 +1553,9 @@
                   <Code>{s.ownerCode}</Code>{cur ? cur + ' ' : ''}{s.amountFmt}
                 </span>
                 <Button variant="outline" size="sm" onClick={() => createFromSuggestion(s)}
-                  style={busy === 'sugg-' + s.billId ? { opacity: .6, pointerEvents: 'none' } : null}>Draft recharge</Button>
+                  style={busy === 'sugg-' + s.billId ? { opacity: .6, pointerEvents: 'none' } : null}>
+                  {busy === 'sugg-' + s.billId ? 'Recharging…' : (data.testMode ? 'Draft recharge' : 'Recharge')}
+                </Button>
               </div>
             ))}
           </div>}
