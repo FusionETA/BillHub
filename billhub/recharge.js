@@ -282,7 +282,20 @@ function asTime(v) {
 // bills somebody settled months ago; that is a deliberate act, and Run now
 // is where it lives. The rule's own created_at is the line — there is no
 // separate date to set, and so no way for the two to disagree.
-function withinStart(bill, rule) {
+// `assumePaid` means the caller is asking what happens if this bill is paid
+// now — the Pay dialog, about to do exactly that. Every rule that exists was
+// written before now, so every rule is in scope and there is nothing to
+// compare. Without this the dialog told somebody a rule matched but the
+// bill was "out of scope", naming a payment date of null, for a bill they
+// were in the middle of paying.
+//
+// Deliberately NOT Date.now() >= created_at. The driver reads a MySQL
+// DATETIME back as UTC while MySQL wrote it in its own local time, so a
+// timestamp from the database and one from Node's clock are hours apart and
+// cannot be compared. Two values that both came from the database can be,
+// which is the only comparison left here.
+function withinStart(bill, rule, { assumePaid = false } = {}) {
+  if (assumePaid) return true;
   const paid = asTime(bill.marked_paid_at);
   if (!paid) return false;
   const written = asTime(rule.created_at);
@@ -357,10 +370,10 @@ async function matchAddressRule(accountId, bill, rules, { fetch = true } = {}) {
 // The first recharge rule whose conditions the bill satisfies. Ordered by
 // position, so putting a specific rule above a general one does what it
 // looks like it does.
-async function matchTextRule(accountId, bill, rules, { fetch = true } = {}) {
+async function matchTextRule(accountId, bill, rules, { fetch = true, assumePaid = false } = {}) {
   for (const rule of rules) {
     if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
-    if (!withinStart(bill, rule)) continue;
+    if (!withinStart(bill, rule, { assumePaid })) continue;
     if (await conditionsMatch(accountId, bill, rule, { fetch })) return rule;
   }
   return null;
@@ -417,7 +430,7 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
     return { ...verdictFor(hit.rule, bill, { address: hit.rule.premises_address, kind: 'address' }), source: hit.source };
   }
 
-  const text = await matchTextRule(accountId, bill, all.text, { fetch });
+  const text = await matchTextRule(accountId, bill, all.text, { fetch, assumePaid });
   if (text) return verdictFor(text, bill, { kind: 'text' });
 
   // Separated from "no rule", because the two call for opposite actions. A
@@ -425,7 +438,7 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
   // the fix is to move that date back, not to write another rule.
   for (const rule of all.text) {
     if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
-    if (withinStart(bill, rule)) continue;
+    if (withinStart(bill, rule, { assumePaid })) continue;
     if (!await conditionsMatch(accountId, bill, rule, { fetch })) continue;
     return {
       outcome: 'out-of-scope',
@@ -626,6 +639,19 @@ async function postRun(accountId, runId) {
   const due = new Date(Date.now() + Number(settings.due_days || 30) * 86400000).toISOString().slice(0, 10);
   const taxType = settings.tax_type || 'NONE';
 
+  // Both documents carry the ORIGINAL bill's currency.
+  //
+  // Left unset, Xero gives each document the currency of the organisation
+  // it lands in — so a USD 1,000 bill recharged into an MYR company became
+  // a USD 1,000 receivable against an MYR 1,000 payable. Same number,
+  // different money, and the group no longer nets to zero. Nothing says so
+  // on screen; the figures simply stop meaning what they claim.
+  //
+  // Where the receiving organisation does not have that currency enabled,
+  // Xero refuses that line and says so against the run — which is the right
+  // outcome: a recharge it cannot state correctly is one it must not state.
+  const currency = run.currency_code || null;
+
   const results = [];
   for (const line of run.lines) {
     const target = known.get(line.target_tenant_id);
@@ -659,6 +685,7 @@ async function postRun(accountId, runId) {
               Contact: { ContactID: contactId },
               Date: today,
               DueDate: due,
+              ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
               Status: 'AUTHORISED',
               LineAmountTypes: 'Exclusive',
@@ -692,6 +719,7 @@ async function postRun(accountId, runId) {
               Contact: { ContactID: contactId },
               Date: today,
               DueDate: due,
+              ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
               Status: 'DRAFT',
               LineAmountTypes: 'Exclusive',

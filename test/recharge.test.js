@@ -450,6 +450,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
   check('assumePaid answers the question the Pay dialog is actually asking',
     ahead.body.decisions[0].outcome === 'recharge', ahead.body.decisions[0]);
+
   check('with a short form that does not repeat the address',
     !ahead.body.decisions[0].consequence.includes('Kilang'), ahead.body.decisions[0].consequence);
 
@@ -531,6 +532,9 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     ar[0].body.Invoices[0].LineItems[0].AccountCode === '445'
     && ap[0].body.Invoices[0].LineItems[0].AccountCode === '445',
     { ar: ar[0].body.Invoices[0].LineItems[0].AccountCode, ap: ap[0].body.Invoices[0].LineItems[0].AccountCode });
+  check('both sides are stated in the original bill\'s currency',
+    ar[0].body.Invoices[0].CurrencyCode === 'MYR' && ap[0].body.Invoices[0].CurrencyCode === 'MYR',
+    { ar: ar[0].body.Invoices[0].CurrencyCode, ap: ap[0].body.Invoices[0].CurrencyCode });
   check('both sides carry the same amount and reference',
     ar[0].body.Invoices[0].LineItems[0].UnitAmount === ap[0].body.Invoices[0].LineItems[0].UnitAmount
     && ar[0].body.Invoices[0].Reference === ap[0].body.Invoices[0].Reference,
@@ -735,6 +739,19 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     vEpf.outcome === 'recharge' && vEpf.ownerCode === 'ABKJ', vEpf);
   check('and the reason names the rule, since there is no address to name',
     /EPF paid centrally/.test(vEpf.reason), vEpf.reason);
+
+  // A bill nobody has paid has no payment moment, so a recharge rule called
+  // it out of scope and named a payment date that did not exist. Paying it
+  // now is the premise of the question the Pay dialog asks, so now is the
+  // moment to compare against.
+  const neverPaid = await makeBill(abm.tenantId, {
+    ref: 'EPF-FUTURE-0926', supplier: 'KWSP (EPF)', total: 700.00, paid: false
+  });
+  const askedAhead = await req('POST', '/api/recharge/decide', {
+    cookie, body: { billIds: [neverPaid], assumePaid: true }
+  });
+  check('a bill never paid is judged as if it were paid now, not out of scope',
+    askedAhead.body.decisions[0].outcome === 'recharge', askedAhead.body.decisions[0]);
 
   const vJul = await verdict(epfJul);
   check('a bill paid before the start date is out of scope, not unmatched',
