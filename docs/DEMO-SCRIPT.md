@@ -79,9 +79,10 @@ the paperwork for the recharge in both companies at once.
 3. **The "why" is the interesting part.** There are two ways a bill gets
    matched, and they exist because a Xero bill has *no premises field*:
 
-   - **Address rules** — match on the premises address, read from the
-     supplier contact's **Billing address** in Xero. This is the one we
-     want to be the normal case. It needs that field populated.
+   - **Supplier rules** — one supplier contact, one entity. The trick is
+     to name the contact in Xero after the premises it bills for:
+     `Tenaga Nasional Berhad - Signum Tower`. Then the contact itself
+     answers the question, with nothing to read off the PDF.
    - **Recharge rules** — match on the supplier, the reference, the
      amount, and so on. This is the fallback for everything an address
      cannot identify: EPF, insurance, a supplier billing several sites on
@@ -91,21 +92,23 @@ the paperwork for the recharge in both companies at once.
    no address that means anything, so it matches on the supplier.
 
 4. **Click Recharge.** One click creates both documents:
-   - an **authorised sales invoice** in the company that paid, and
+   - a **draft sales invoice** in the company that paid, and
    - a **draft bill** in the company being charged.
 
-   The subsidiary's side is left a draft on purpose, so it comes through
-   their normal approval rather than appearing as an already-approved
-   payable.
+   Both are drafts so each side approves its own, and anything raised in
+   error is deleted rather than credited. Whatever was attached to the
+   original bill is copied onto both, so whoever approves either one can
+   see the actual invoice without going back to the payer's Xero.
 
 5. **The runs table** links straight into both documents in Xero. The
    reference ties them together — `IC-TNB-SIGNUM-1226-SD`.
 
-**Say this plainly:** the matching is only as good as the premises data.
-Right now Ayu Borneo's electricity bills carry the premises in the
-*reference* (`<meter account no.>-TS-17-M`), not in any address field, and 98% of
-2,250 bills sit on four generic contacts. Either the billing addresses get
-populated, or most matching has to be done on the reference.
+**Say this plainly:** the matching is only as good as the contact names.
+Right now 98% of Ayu Borneo's 2,250 electricity bills sit on four generic
+contacts, with the premises buried in the *reference*. Until those contacts
+are split one-per-premises, a supplier rule would send every one of them to
+the same company — so for TNB as it stands today the matching has to be done
+on the reference, with recharge rules.
 
 ---
 
@@ -142,13 +145,15 @@ populated, or most matching has to be done on the reference.
 
 ### Recharge
 
-8. **Who will populate the Billing address on the supplier contacts**, and
-   by when? This is the single thing that decides whether address matching
-   or reference matching is the normal case.
+8. **Can the supplier contacts be split one per premises**, and named after
+   the building — `TNB - Signum Tower` rather than one generic `TNB`? This
+   is the single thing that decides whether the simple rule works or
+   everything has to be matched on the reference. Who would do it, and by
+   when?
 
-9. **Can one supplier contact serve several premises?** Today a rule takes
-   one address and one supplier. If TNB bills six sites on one contact, we
-   match on the reference instead — we need to know which is true.
+9. **Where a contact has to cover several premises**, is the premises
+   always in the reference, and always in the same position? A rule can be
+   narrowed to a reference fragment, but only if the format is reliable.
 
 10. **From what date should recharges start?** There are 2,250 paid
     electricity bills in history, 157 of them paid by the management
@@ -165,9 +170,8 @@ populated, or most matching has to be done on the reference.
 13. **Does a recharge ever need splitting between companies** — half to one,
     half to another? The engine can do it; no rule uses it yet.
 
-14. **Should the sales invoice really be authorised straight away**, or
-    should it wait for someone's approval? The subsidiary's bill is a draft
-    either way.
+14. **Both documents are now drafts** — somebody has to approve each side.
+    Who, in each company, and should Bills Hub chase it?
 
 15. **How do these intercompany balances get settled** — netted off
     periodically, actually paid, or left to sit? We removed settlement from

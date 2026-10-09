@@ -397,9 +397,12 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
   const notes = r.text_rule_name
     ? `Recharge rule · ${r.text_rule_name}`
     : r.premises_address
+      // Runs posted while rules still carried an address keep saying so:
+      // this is the record of what actually decided, not of what would
+      // decide today.
       ? `Address rule · ${r.premises_address}`
       : r.rule_id
-        ? 'Address rule'
+        ? `Supplier rule · ${r.supplier_name || 'supplier'}`
         : 'Raised by hand';
 
   const status = RUN_STATUS[r.status] || RUN_STATUS.draft;
@@ -470,18 +473,19 @@ function rechargeRuleCard(r) {
     ownerCode: code,
     ownerShort: r.owner_short || '—',
     suppliers,
-    // No suppliers means every supplier, which is a real rule and has to read
-    // as one rather than as a blank cell.
-    supplierLabel: suppliers.length === 0 ? 'Any supplier'
+    // A rule is its supplier. None means it matches nothing — it cannot mean
+    // "any supplier", which would claim every paid bill in the account — so
+    // the cell has to say that rather than sit blank.
+    supplierLabel: suppliers.length === 0 ? 'No supplier'
       : suppliers.length === 1 ? suppliers[0]
       : `${suppliers[0]} + ${suppliers.length - 1} more`,
-    address: r.premises_address || null,
     referenceContains: r.reference_contains || null,
     on: Boolean(r.enabled),
     effect: `Header ${code}: no recharge · Any other header: 100% recharged to ${code}`,
-    // A rule with no address decides nothing. That can only come from an
-    // older database, and saying so beats a row that looks configured.
-    incomplete: !r.premises_address || !r.owner_tenant_id
+    // Only reachable from a rule written before the address came out, which
+    // had no supplier because it did not need one. Saying so beats a row
+    // that looks configured and quietly never fires.
+    incomplete: !suppliers.length || !r.owner_tenant_id
   };
 }
 

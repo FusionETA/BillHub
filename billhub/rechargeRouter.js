@@ -3,7 +3,6 @@
 //   GET    /api/recharge                    the Recharge view model
 //   GET    /api/recharge/suggestions        paid bills a rule covers, not yet recharged
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
-//   POST   /api/recharge/contact-addresses   the addresses Xero holds on suppliers
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
 //   GET/POST/PATCH/DELETE /api/recharge/rules[/:id]
@@ -74,7 +73,7 @@ router.get('/', async (req, res) => {
       rechargeStats: vm.rechargeStatCards(stats, currency),
       rechargeTabs: [
         { value: 'runs', label: 'Recharge runs', count: runs.length },
-        { value: 'rules', label: 'Address rules', count: rules.length },
+        { value: 'rules', label: 'Supplier rules', count: rules.length },
         { value: 'text', label: 'Recharge rules', count: textRules.length }
       ],
       runRows: runs.map((r) => vm.rechargeRunRow(r, { currency, shortCodes: codes })),
@@ -225,53 +224,6 @@ router.delete('/rules/:id(\\d+)', async (req, res) => {
     if (!n) return res.status(404).json({ error: 'Rule not found.' });
     res.json({ ok: true });
   } catch (err) { fail(res, err); }
-});
-
-// The address Xero holds on each of a rule's suppliers.
-//
-// Matching is containment on a stripped key, which forgives punctuation and
-// case but not a missing word or an abbreviation: "Jln" does not match
-// "Jalan". Across forty-odd contacts that is a silent miss waiting to
-// happen, so the dialog offers the contact's own wording to copy.
-//
-// Takes several, because a rule can name several — electricity, water and
-// rent at one building is one rule, not three. One address has to match all
-// of them, so when their contacts disagree the dialog has to say so rather
-// than quietly offer the first.
-//
-// POST rather than GET: a supplier name can contain a comma, and squeezing
-// a list of them through a query string is how one ends up split in half.
-router.post('/contact-addresses', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
-  const names = (req.body || {}).suppliers;
-  if (!Array.isArray(names) || !names.length) return res.json({ suppliers: [] });
-  try {
-    const db = require('../db');
-    const out = [];
-    for (const raw of names.slice(0, 20)) {
-      const supplier = String(raw || '').trim();
-      if (!supplier) continue;
-      // Any bill from this supplier will do; its contact is the same
-      // contact. The most recent, because an older one may predate a rename.
-      const bill = await db.getOne(
-        `SELECT id, xero_tenant_id, contact_id, contact_name
-           FROM bills
-          WHERE account_id = ? AND contact_name = ? AND contact_id IS NOT NULL
-          ORDER BY bill_date DESC, id DESC LIMIT 1`,
-        [accountId, supplier]
-      );
-      if (!bill) { out.push({ supplier, address: null }); continue; }
-      // Always current: somebody is setting this up right now, and may
-      // have typed the address into Xero a moment ago.
-      const address = await recharge.contactAddress(accountId, bill, { refresh: true });
-      // Both orderings go to the matcher; only the first is worth showing.
-      out.push({ supplier, address: (address || '').split(' | ')[0] || null });
-    }
-    res.json({ suppliers: out });
-  } catch (err) {
-    console.error('[recharge] contact address lookup failed:', err.message);
-    fail(res, err);
-  }
 });
 
 // ── Recharge rules ──────────────────────────────────────────────────────────

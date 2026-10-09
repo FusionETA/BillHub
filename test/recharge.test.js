@@ -22,6 +22,9 @@ let invoiceSeq = 0;
 let failOn = null;        // { tenantId, type } -> that Invoices POST throws
 let lineItems = {};       // xeroInvoiceId -> [{ Description }]
 let contactAddresses = {};// contactId -> [{ AddressType, AddressLine1, ... }]
+let attachments = {};     // xeroInvoiceId -> [{ FileName, MimeType, ContentLength }]
+let attachmentsFail = null;// an Error thrown by the Attachments endpoints
+const uploaded = [];      // { tenantId, invoiceId, name, contentType, bytes }
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
@@ -39,6 +42,28 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
   if (path === '/Contacts' && opts.method === 'POST') {
     return { Contacts: [{ ContactID: 'contact-' + opts.body.Contacts[0].Name.replace(/\W/g, ''), Name: opts.body.Contacts[0].Name }] };
   }
+  // Attachments. Matched before the single-invoice read below, whose
+  // pattern would otherwise swallow these paths.
+  const attList = path.match(/^\/Invoices\/([^/?]+)\/Attachments$/);
+  if (attList) {
+    if (attachmentsFail) throw attachmentsFail;
+    return { Attachments: attachments[attList[1]] || [] };
+  }
+  const attOne = path.match(/^\/Invoices\/([^/?]+)\/Attachments\/([^?]+)$/);
+  if (attOne) {
+    if (attachmentsFail) throw attachmentsFail;
+    const name = decodeURIComponent(attOne[2]);
+    if (opts.method === 'PUT') {
+      uploaded.push({
+        tenantId, invoiceId: attOne[1], name,
+        contentType: (opts.headers || {})['Content-Type'],
+        bytes: Buffer.isBuffer(opts.body) ? opts.body.length : -1
+      });
+      return { Attachments: [{ FileName: name }] };
+    }
+    return { buffer: Buffer.from(`pretend bytes of ${name}`), contentType: 'application/pdf' };
+  }
+
   // A single bill read, which is how the premises is found when nothing has
   // written it onto the bill yet.
   const one = path.match(/^\/Invoices\/([^?]+)$/);
@@ -233,20 +258,24 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('it names the supplier it covers',
     rule.body.rule.supplierLabel === 'Tenaga Nasional Berhad', rule.body.rule.supplierLabel);
 
-  const noAddress = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['X Supplier'], ownerTenantId: kj.tenantId }
+  // The one input a rule cannot be saved without. A rule with no supplier
+  // would match every paid bill in the account and recharge the lot to one
+  // entity, so it is refused rather than read as "any supplier".
+  const noSupplier = await req('POST', '/api/recharge/rules', {
+    cookie, body: { ownerTenantId: kj.tenantId }
   });
-  check('a rule with no address is refused — it would decide nothing',
-    noAddress.status === 400 && /premises address is required/i.test(noAddress.body.error), noAddress.body.error);
+  check('a rule with no supplier is refused — it would claim every bill',
+    noSupplier.status === 400 && /every bill in the account/i.test(noSupplier.body.error),
+    noSupplier.body.error);
 
-  const tooShort = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['X Supplier'], premisesAddress: 'Lot 3', ownerTenantId: kj.tenantId }
+  const blankSupplier = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: ['   '], ownerTenantId: kj.tenantId }
   });
-  check('an address too short to identify a premises is refused',
-    tooShort.status === 400 && /too short/i.test(tooShort.body.error), tooShort.body.error);
+  check('and so is one whose supplier is only whitespace',
+    blankSupplier.status === 400, blankSupplier.body.error);
 
   const noOwner = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['X Supplier'], premisesAddress: WISMA }
+    cookie, body: { suppliers: ['X Supplier'] }
   });
   check('a rule with no owner is refused',
     noOwner.status === 400 && /entity to recharge to/i.test(noOwner.body.error), noOwner.body.error);
@@ -297,7 +326,8 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const vRecharge = await verdict(billKilang);
   check('step 4: an address owned by another entity is recharged',
     vRecharge.outcome === 'recharge' && vRecharge.ownerCode === 'ABKJ', vRecharge);
-  check('and says why, naming the premises', /Kilang Ayu Borneo/.test(vRecharge.reason), vRecharge.reason);
+  check('and says why, naming the supplier',
+    /Tenaga Nasional Berhad/.test(vRecharge.reason), vRecharge.reason);
 
   // ABKJ owns this address and is on the header: it is paying its own bill.
   const ownBill = await makeBill(kj.tenantId, {
@@ -319,13 +349,38 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('step 2: a supplier no rule names is left alone',
     (await verdict(otherBill)).outcome === 'no-rule');
 
+  // The consequence of matching on the supplier alone, asserted so nobody
+  // has to find it out from a wrong recharge: a bill from a named supplier
+  // goes to that supplier's entity whatever premises it is for. That is
+  // correct only while each contact covers one building — which is why the
+  // contact is named after the building. A contact that covers several needs
+  // a reference on the rule, or a recharge rule instead.
   const elsewhere = await makeBill(abm.tenantId, {
     ref: 'TNB-OTHER-0826', supplier: 'Tenaga Nasional Berhad', total: 700.00,
     address: 'Lot 12, Jalan Bulan Sabit, 98000 Miri'
   });
   const vNoMatch = await verdict(elsewhere);
-  check('step 4: a premises no rule names is reported, not guessed at',
-    vNoMatch.outcome === 'no-rule' && /does not appear on this bill/.test(vNoMatch.reason), vNoMatch);
+  check('step 4: a named supplier is recharged whatever premises the bill carries',
+    vNoMatch.outcome === 'recharge' && vNoMatch.ownerCode === 'ABKJ', vNoMatch);
+
+  // …and the way to stop that is a reference on the rule.
+  const narrowed = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: ['Swanston Security'], referenceContains: 'SEC-KK',
+                    ownerTenantId: kk.tenantId }
+  });
+  check('a rule can be narrowed to a reference', narrowed.status === 201, narrowed.body);
+  const wrongRef = await makeBill(abm.tenantId, {
+    ref: 'SEC-KJ-0826', supplier: 'Swanston Security', total: 310.00
+  });
+  const vWrongRef = await verdict(wrongRef);
+  check('and a bill without that reference is left alone, and says which reference it wanted',
+    vWrongRef.outcome === 'no-rule' && /SEC-KK/.test(vWrongRef.reason), vWrongRef);
+  const rightRef = await makeBill(abm.tenantId, {
+    ref: 'SEC-KK-0826', supplier: 'Swanston Security', total: 290.00
+  });
+  check('while one carrying it is recharged',
+    (await verdict(rightRef)).ownerCode === 'ABKK');
+  await req('DELETE', '/api/recharge/rules/' + narrowed.body.rule.id, { cookie });
 
   console.log('\nFinding the premises when nothing has written it onto the bill');
   // No premises_address — the only place the address appears is the line
@@ -342,109 +397,59 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and not read again — a repeat costs Xero nothing',
     calls.filter((c) => /^\/Invoices\//.test(c.path)).length === 0, calls.map((c) => c.path));
 
-  console.log('\nThe premises on the supplier contact');
-  // Where it goes when somebody fills in Xero's "Billing address" on a
-  // contact that bills one premises. Xero returns that box as POBOX and the
-  // delivery one as STREET, so both are read — checking only STREET would
-  // miss the field people actually fill in.
-  const CONTACT_ADDR = 'Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves';
-  await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9'], premisesAddress: CONTACT_ADDR, ownerTenantId: kk.tenantId }
+  console.log('\nOne supplier, one entity');
+  // The whole of a supplier rule: the contact says which building it is,
+  // because somebody named it after the building in Xero.
+  const LOT9 = 'Tenaga Nasional Berhad - Lot 9';
+  const madeLot9 = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: [LOT9], ownerTenantId: kk.tenantId }
   });
-  contactAddresses['c-Tenaga Nasional Berhad - Lot 9'] = [
-    { AddressType: 'STREET' },
-    { AddressType: 'POBOX', AddressLine1: 'Lot 9, Jalan Perusahaan Empat\n', City: 'Batu Caves', PostalCode: '68100' }
-  ];
-  const onContact = await makeBill(abm.tenantId, {
-    ref: 'TNB-LOT9-0826', supplier: 'Tenaga Nasional Berhad - Lot 9', total: 1850.00
-  });
-  const vContact = await verdict(onContact);
-  check('an address on the contact decides the bill',
-    vContact.outcome === 'recharge' && vContact.ownerCode === 'ABKK', vContact);
-  check('and the bill itself carried nothing to match',
-    (await db.getOne('SELECT premises_address FROM bills WHERE id = ?', [onContact])).premises_address === null);
+  check('a rule is a supplier and an entity, and needs nothing else',
+    madeLot9.status === 201, madeLot9.body);
 
-  // One contact carries 1,681 bills on the live account. Reading it per bill
-  // would be 1,681 calls for one answer.
+  const onContact = await makeBill(abm.tenantId, {
+    ref: 'TNB-LOT9-0826', supplier: LOT9, total: 1850.00
+  });
+  check('a bill from that contact is recharged to that entity',
+    (await verdict(onContact)).ownerCode === 'ABKK');
+
+  // Nothing is read out of Xero to decide this. The supplier is already on
+  // the local row, which is what makes the tab usable over 2,250 bills: the
+  // old address matching cost a call per contact and sometimes per bill.
   calls.length = 0;
   await verdict(onContact);
-  check('the contact is not read again for the same bill',
-    calls.filter((c) => /^\/Contacts\//.test(c.path)).length === 0, calls.map((c) => c.path));
+  check('and deciding it costs Xero nothing at all',
+    calls.length === 0, calls.map((c) => c.path));
+
   const sibling = await makeBill(abm.tenantId, {
-    ref: 'TNB-LOT9-0926', supplier: 'Tenaga Nasional Berhad - Lot 9', total: 1910.00
+    ref: 'TNB-LOT9-0926', supplier: LOT9, total: 1910.00
   });
   calls.length = 0;
-  check('nor for another bill from the same contact',
-    (await verdict(sibling)).outcome === 'recharge'
-    && calls.filter((c) => /^\/Contacts\//.test(c.path)).length === 0, calls.map((c) => c.path));
+  check('nor does another bill from the same contact',
+    (await verdict(sibling)).ownerCode === 'ABKK' && calls.length === 0, calls.map((c) => c.path));
 
-  // The bill's own address still wins: WazzOCR read it off the document,
-  // and the contact is only where somebody put it by hand. Both rules cover
-  // this supplier, so the two sources genuinely compete.
-  const MOVED = 'Lot 44, Jalan Perindustrian Tujuh, 47100 Puchong';
-  await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9'], premisesAddress: MOVED, ownerTenantId: kj.tenantId }
+  // Two rules naming one supplier: the one that also narrows on a reference
+  // is the more specific and has to win, or the answer would be whichever
+  // row the database happened to return first.
+  const narrow = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: [LOT9], referenceContains: 'TNB-LOT9-09', ownerTenantId: kj.tenantId }
   });
-  await db.execute("UPDATE bills SET premises_address = ?, premises_source = 'ocr' WHERE id = ?", [MOVED, sibling]);
-  const vMoved = await verdict(sibling);
-  check('a premises read off the document outranks the contact',
-    vMoved.ownerCode === 'ABKJ' && vMoved.address === MOVED, vMoved);
+  check('a second rule can narrow the same supplier by reference',
+    narrow.status === 201, narrow.body);
+  check('the bill carrying that reference follows the narrower rule',
+    (await verdict(sibling)).ownerCode === 'ABKJ');
+  check('and the one that does not still follows the broader rule',
+    (await verdict(onContact)).ownerCode === 'ABKK');
+  await req('DELETE', '/api/recharge/rules/' + narrow.body.rule.id, { cookie });
 
-  console.log('\nOffering the contact\'s own wording');
-  // Matching forgives punctuation but not a missing word, so retyping an
-  // address across forty contacts is a silent miss waiting to happen. The
-  // dialog offers Xero's exact wording to copy.
-  const look = await req('POST', '/api/recharge/contact-addresses', {
-    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9'] }
+  // Two rules that describe exactly the same bills: the second says nothing
+  // the first does not, and silently shadowing one with the other is how a
+  // recharge ends up somewhere nobody chose.
+  const sameAgain = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: [LOT9], ownerTenantId: kj.tenantId }
   });
-  const got = look.body.suppliers[0];
-  check('the address Xero holds on a supplier can be looked up',
-    look.status === 200 && /Jalan Perusahaan Empat/.test(got.address || ''), look.body);
-  check('and it is offered one way round, not both',
-    !(got.address || '').includes(' | '), got.address);
-  check('a rule written from it matches the bills it covers',
-    Boolean(require('../lib/premises').match(
-      require('../billhub/recharge').addressText({ Addresses: contactAddresses['c-Tenaga Nasional Berhad - Lot 9'] }),
-      got.address)));
-
-  // A rule can name several suppliers — electricity, water and rent at one
-  // building is one rule, not three — so the lookup takes them all. Their
-  // contacts disagreeing is the thing worth knowing before saving.
-  // The water board at the same building. Its own contact, its own address
-  // field, the same premises — which is the case one rule is meant to cover.
-  const WATER = 'Air Selangor - Lot 9';
-  contactAddresses[`c-${WATER}`] = [
-    { AddressType: 'POBOX', AddressLine1: 'Lot 9, Jalan Perusahaan Empat', City: 'Batu Caves', PostalCode: '68100' }
-  ];
-  await makeBill(abm.tenantId, { ref: 'AS-LOT9-0826', supplier: WATER, total: 310.00 });
-
-  const several = await req('POST', '/api/recharge/contact-addresses', {
-    cookie, body: { suppliers: ['Tenaga Nasional Berhad - Lot 9', WATER] }
-  });
-  check('several suppliers are looked up at once', several.body.suppliers.length === 2, several.body);
-  check('and two contacts at one premises agree, so one rule covers both',
-    new Set(several.body.suppliers.map((x) => x.address)).size === 1,
-    several.body.suppliers.map((x) => x.address));
-
-  // Two contacts at different premises cannot share a rule, and the dialog
-  // has to say so rather than quietly offering the first address.
-  const OTHER = 'Air Selangor - Lot 77';
-  contactAddresses[`c-${OTHER}`] = [
-    { AddressType: 'POBOX', AddressLine1: 'Lot 77, Jalan Lain Sekali', City: 'Shah Alam', PostalCode: '40000' }
-  ];
-  await makeBill(abm.tenantId, { ref: 'AS-LOT77-0826', supplier: OTHER, total: 290.00 });
-  const mixed = await req('POST', '/api/recharge/contact-addresses', {
-    cookie, body: { suppliers: [WATER, OTHER] }
-  });
-  check('two different premises come back as two different addresses',
-    new Set(mixed.body.suppliers.map((x) => x.address)).size === 2,
-    mixed.body.suppliers.map((x) => x.address));
-
-  const none = await req('POST', '/api/recharge/contact-addresses', {
-    cookie, body: { suppliers: ['Nobody At All'] }
-  });
-  check('a supplier with no bills says so rather than erroring',
-    none.status === 200 && none.body.suppliers[0].address === null, none.body);
+  check('an identical rule is refused, naming the entity that already claims it',
+    sameAgain.status === 409 && /ABKK/.test(sameAgain.body.error), sameAgain.body.error);
 
   console.log('\nAsking what a bill would do before it is paid');
   const ahead = await req('POST', '/api/recharge/decide', {
@@ -453,8 +458,10 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('assumePaid answers the question the Pay dialog is actually asking',
     ahead.body.decisions[0].outcome === 'recharge', ahead.body.decisions[0]);
 
-  check('with a short form that does not repeat the address',
-    !ahead.body.decisions[0].consequence.includes('Kilang'), ahead.body.decisions[0].consequence);
+  check('with a short form for a row that has already printed the bill',
+    ahead.body.decisions[0].consequence !== ahead.body.decisions[0].reason
+    && /ABKJ|Ayu Borneo \(KJ\)/.test(ahead.body.decisions[0].consequence),
+    ahead.body.decisions[0].consequence);
 
   console.log('\nPlanning');
   const self = await req('POST', '/api/recharge/plan', {
@@ -472,14 +479,13 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
 
   const plan = await req('POST', '/api/recharge/plan', { cookie, body: { billId: billKilang } });
   check('the rules work out the plan on their own', plan.status === 200, plan.body);
-  check('the whole bill goes to the address owner',
+  check('the whole bill goes to the entity the rule names',
     plan.body.lines.length === 1 && plan.body.lines[0].code === 'ABKJ'
     && plan.body.lines[0].amount === '17,980.00', plan.body.lines);
   // "Ayu Borneo (KJ)" says KJ is what distinguishes it; the group's own
   // prefix inside the group's own reference says nothing.
   check('the reference carries the short form of the entity',
     /^IC-TNB-GRP-0726-KJ$/.test(plan.body.lines[0].reference), plan.body.lines[0].reference);
-  check('the plan carries the address that decided it', plan.body.address === KILANG, plan.body.address);
   check('planning writes nothing',
     Number((await db.getOne('SELECT COUNT(*) AS n FROM recharge_runs')).n) === 0);
 
@@ -489,10 +495,12 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('the run is created', run.status === 201 && run.body.id, run.body);
   check('creating it does NOT touch Xero', calls.length === 0, calls.map((c) => c.path));
   const runId = run.body.id;
-  const stored = await db.getOne('SELECT status, premises_address FROM recharge_runs WHERE id = ?', [runId]);
+  const stored = await db.getOne(
+    'SELECT status, supplier_name, bill_reference FROM recharge_runs WHERE id = ?', [runId]);
   check('it starts as a draft', stored.status === 'draft', stored.status);
-  check('the address is snapshotted, so editing the rule later cannot rewrite history',
-    stored.premises_address === KILANG, stored.premises_address);
+  check('the supplier and reference are snapshotted, so editing the rule later cannot rewrite history',
+    stored.supplier_name === 'Tenaga Nasional Berhad' && stored.bill_reference === 'TNB-GRP-0726',
+    stored);
 
   const twice = await req('POST', '/api/recharge/runs', { cookie, body: { billId: billKilang } });
   check('the same bill cannot be recharged twice',
@@ -523,10 +531,13 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const ar = invoices.filter((c) => c.body.Invoices[0].Type === 'ACCREC');
   const ap = invoices.filter((c) => c.body.Invoices[0].Type === 'ACCPAY');
   check('the AR invoice is raised in the payer', ar.every((c) => c.tenantId === abm.tenantId), ar.map((c) => c.tenantId));
-  check('the mirror bill is raised in the address owner',
+  check('the mirror bill is raised in the entity the rule names',
     ap.every((c) => c.tenantId === kj.tenantId), ap.map((c) => c.tenantId));
-  check('the AR invoice is authorised, the subsidiary bill is a draft',
-    ar[0].body.Invoices[0].Status === 'AUTHORISED' && ap[0].body.Invoices[0].Status === 'DRAFT',
+  // Both sides are a draft: a recharge is a proposal until somebody in each
+  // company has looked at it, and an authorised invoice is a receivable that
+  // has to be credited to undo rather than simply deleted.
+  check('both documents are drafts',
+    ar[0].body.Invoices[0].Status === 'DRAFT' && ap[0].body.Invoices[0].Status === 'DRAFT',
     { ar: ar[0].body.Invoices[0].Status, ap: ap[0].body.Invoices[0].Status });
   // The payer's electricity expense nets to zero and the company that used
   // the electricity carries it as electricity. Nobody configured anything.
@@ -541,9 +552,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     ar[0].body.Invoices[0].LineItems[0].UnitAmount === ap[0].body.Invoices[0].LineItems[0].UnitAmount
     && ar[0].body.Invoices[0].Reference === ap[0].body.Invoices[0].Reference,
     { ar: ar[0].body.Invoices[0].Reference, ap: ap[0].body.Invoices[0].Reference });
-  check('the premises is on the face of both documents, which is why they exist',
-    ar[0].body.Invoices[0].LineItems[0].Description.includes(KILANG)
-    && ap[0].body.Invoices[0].LineItems[0].Description.includes(KILANG),
+  check('the supplier and the original reference are on the face of both documents',
+    [ar[0], ap[0]].every((c) => {
+      const d = c.body.Invoices[0].LineItems[0].Description;
+      return d.includes('Tenaga Nasional Berhad') && d.includes('TNB-GRP-0726');
+    }),
     ar[0].body.Invoices[0].LineItems[0].Description);
   check('the counterparty contact is created where it is missing',
     calls.some((c) => c.path === '/Contacts' && c.method === 'POST'), 'no contact created');
@@ -635,8 +648,8 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   console.log('\nThe runs table');
   const view = await req('GET', '/api/recharge', { cookie });
   const row = view.body.runRows.find((c) => c.id === runId);
-  check('the run row shows the address that decided it', row.address === KILANG, row.address);
-  check('and names the rule in its notes', /^Address rule · /.test(row.notes), row.notes);
+  check('the run row names the rule that decided it, and the supplier',
+    /^Supplier rule · Tenaga Nasional Berhad$/.test(row.notes), row.notes);
   check('it links all three documents into Xero',
     Boolean(row.billUrl && row.invoiceUrl && row.billNoUrl),
     { bill: row.billUrl, invoice: row.invoiceUrl, billNo: row.billNoUrl });
@@ -673,22 +686,32 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     refs.includes('TNB-LINE-0826'), refs);
   check('the owner paying its own bill is not', !refs.includes('TNB-KJ-0826'), refs);
   check('an unpaid bill is not', !refs.includes('TNB-GRP-0926'), refs);
-  check('a premises no rule names is not', !refs.includes('TNB-OTHER-0826'), refs);
+  // Suggested, not filtered out: the rule names this supplier, so every bill
+  // from it is recharged wherever the bill was for. See the assertion in
+  // "The four steps" — this is the same consequence seen from the tab.
+  check('every bill from a named supplier is suggested, whatever premises it is for',
+    refs.includes('TNB-OTHER-0826'), refs);
   check('an already-recharged bill is not', !refs.includes('TNB-GRP-0726'), refs);
 
-  // The silent-failure case: a rule names the supplier, the address on the
-  // bill is not the one in the rule, and nothing happens. Said out loud,
-  // because a rule that never fires looks like a rule with nothing to do.
+  // The silent-failure case: a rule names the supplier, its reference rules
+  // the bill out, and nothing happens. Said out loud, because a rule that
+  // never fires looks like a rule with nothing to do.
+  const quiet = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: ['Quiet Supplier'], referenceContains: 'NEVER-',
+                    ownerTenantId: kk.tenantId }
+  });
+  await makeBill(abm.tenantId, { ref: 'QS-0826', supplier: 'Quiet Supplier', total: 120.00 });
   const viewNow = await req('GET', '/api/recharge', { cookie });
   const unmatchedRefs = (viewNow.body.unmatched || []).map((u) => u.reference);
   check('a bill a rule should have covered and did not is reported',
-    unmatchedRefs.includes('TNB-OTHER-0826'), unmatchedRefs);
+    unmatchedRefs.includes('QS-0826'), unmatchedRefs);
   check('and a supplier no rule names is not reported as a miss',
     !unmatchedRefs.includes('MISC-0826'), unmatchedRefs);
+  await req('DELETE', '/api/recharge/rules/' + quiet.body.rule.id, { cookie });
 
   const one = sugg.body.suggestions.find((s) => s.reference === 'TNB-LINE-0826');
-  check('a suggestion carries the address and the owner',
-    one && one.address === KILANG && one.ownerCode === 'ABKJ', one);
+  check('a suggestion carries the supplier and the owner',
+    one && one.supplier === 'Tenaga Nasional Berhad' && one.ownerCode === 'ABKJ', one);
 
   const fromSugg = await req('POST', '/api/recharge/runs', {
     cookie, body: { billId: one.billId, ruleId: one.ruleId, ownerTenantId: one.ownerTenantId }
@@ -705,7 +728,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
   check('the owner can be changed', moved.status === 200 && moved.body.rule.ownerCode === 'ABKK', moved.body.rule);
   const offed = await req('PATCH', '/api/recharge/rules/' + rule.body.rule.id, { cookie, body: { enabled: false } });
-  check('and it can be switched off without re-stating the address',
+  check('and it can be switched off without re-stating the supplier',
     offed.status === 200 && offed.body.rule.on === false, offed.body.rule);
   check('a disabled rule stops deciding',
     (await verdict(fromLines)).outcome !== 'recharge');
@@ -819,20 +842,17 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     (await verdict(fuelCardBill)).outcome === 'recharge');
   await req('PATCH', '/api/recharge/text-rules/' + fuelRule.body.id, { cookie, body: { matchMode: 'all' } });
 
-  console.log('\nAddress rules win over recharge rules');
-  // Both kinds could claim this bill. The address is the stronger evidence,
-  // so it decides — otherwise a supplier-wide rule would quietly override a
-  // statement about a specific building.
-  const BLOCK = 'Blok C, Jalan Satu Dua, 50450 Kuala Lumpur';
-  const KILANG2 = 'Kilang Dua, Jalan Tiga Empat, 43000 Kajang';
-  await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['Tenaga Nasional Berhad'], premisesAddress: KILANG2, ownerTenantId: kj.tenantId }
+  console.log('\nSupplier rules win over recharge rules');
+  // Both kinds could claim this bill. The supplier rule is the narrower
+  // statement — one contact, one entity — so it decides, and a recharge rule
+  // written across a whole supplier family cannot quietly override it.
+  const BOTH_SUPPLIER = 'Tenaga Nasional Berhad - Blok C';
+  const named = await req('POST', '/api/recharge/rules', {
+    cookie, body: { suppliers: [BOTH_SUPPLIER], ownerTenantId: kj.tenantId }
   });
-  await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['Tenaga Nasional Berhad'], premisesAddress: BLOCK, ownerTenantId: kj.tenantId }
-  });
+  check('a rule can name the contact for one building', named.status === 201, named.body);
   const both = await makeBill(abm.tenantId, {
-    ref: 'TNB-BOTH-0826', supplier: 'Tenaga Nasional Berhad', total: 500.00, address: BLOCK
+    ref: 'TNB-BOTH-0826', supplier: BOTH_SUPPLIER, total: 500.00
   });
   const tnbWide = await req('POST', '/api/recharge/text-rules', {
     cookie,
@@ -844,7 +864,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
   await paidNow(both);
   const vBoth = await verdict(both);
-  check('the address rule decides, not the supplier-wide recharge rule',
+  check('the supplier rule decides, not the supplier-wide recharge rule',
     vBoth.outcome === 'recharge' && vBoth.ownerCode === 'ABKJ', vBoth);
   await req('DELETE', '/api/recharge/text-rules/' + tnbWide.body.id, { cookie });
 
@@ -966,13 +986,87 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('switched off, it no longer claims its bill', (await verdict(fuel)).outcome !== 'recharge');
   await req('PATCH', '/api/recharge/text-rules/' + fuelRule.body.id, { cookie, body: { enabled: true } });
 
+  console.log('\nThe bill\'s own paperwork travels with the recharge');
+  // Both documents are drafts somebody has to approve, and approving one
+  // means looking at what was actually billed. Making them go back to the
+  // paying company's Xero to find the PDF is the difference between a
+  // recharge that can be checked and one that gets waved through.
+  const withFiles = await makeBill(abm.tenantId, {
+    ref: 'TNB-ATTACH-0826', supplier: BOTH_SUPPLIER, total: 640.00
+  });
+  const withFilesXeroId = (await db.getOne(
+    'SELECT xero_invoice_id FROM bills WHERE id = ?', [withFiles])).xero_invoice_id;
+  attachments[withFilesXeroId] = [
+    { FileName: 'tnb-august.pdf', MimeType: 'application/pdf', ContentLength: 48000 },
+    { FileName: 'meter reading.jpg', MimeType: 'image/jpeg', ContentLength: 12000 }
+  ];
+  await paidNow(withFiles);
+  uploaded.length = 0;
+  const attRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: withFiles, post: true }
+  });
+  check('the recharge posts', attRun.status === 201 && attRun.body.posted, attRun.body);
+  check('both files reach both documents',
+    uploaded.length === 4, uploaded.map((u) => `${u.name}->${u.invoiceId}`));
+  check('and each lands in a different organisation',
+    new Set(uploaded.map((u) => u.tenantId)).size === 2,
+    uploaded.map((u) => u.tenantId));
+  check('under the name and type the original carried',
+    uploaded.filter((u) => u.name === 'meter reading.jpg' && u.contentType === 'image/jpeg').length === 2,
+    uploaded.map((u) => `${u.name} ${u.contentType}`));
+  check('with the bytes, not an empty file',
+    uploaded.every((u) => u.bytes > 0), uploaded.map((u) => u.bytes));
+  check('and the run says how many it carried',
+    attRun.body.posted.attachments.copied === 4
+    && attRun.body.posted.attachments.available === 2, attRun.body.posted.attachments);
+
+  // Something too big to be worth moving is named rather than silently left.
+  const bigBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-BIG-0826', supplier: BOTH_SUPPLIER, total: 90.00
+  });
+  const bigXeroId = (await db.getOne(
+    'SELECT xero_invoice_id FROM bills WHERE id = ?', [bigBill])).xero_invoice_id;
+  attachments[bigXeroId] = [
+    { FileName: 'whole-cabinet.pdf', MimeType: 'application/pdf', ContentLength: 40 * 1024 * 1024 }
+  ];
+  await paidNow(bigBill);
+  uploaded.length = 0;
+  const bigRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: bigBill, post: true }
+  });
+  check('an oversized attachment is skipped, and said so',
+    bigRun.body.posted.attachments.copied === 0
+    && bigRun.body.posted.attachments.skipped.some((x) => /whole-cabinet\.pdf.*larger/.test(x)),
+    bigRun.body.posted.attachments);
+  check('and the recharge itself still posted',
+    bigRun.body.posted.failed === 0 && uploaded.length === 0, bigRun.body.posted);
+
+  // The grant predates the attachments scope. Xero answers 403 and the
+  // recharge has to carry on: the documents are the point, the PDF is not.
+  const noScope = await makeBill(abm.tenantId, {
+    ref: 'TNB-NOSCOPE-0826', supplier: BOTH_SUPPLIER, total: 70.00
+  });
+  await paidNow(noScope);
+  attachmentsFail = Object.assign(
+    new Error('AuthorizationUnsuccessful: the scope accounting.attachments is missing'),
+    { statusCode: 403 });
+  const scopeRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: noScope, post: true }
+  });
+  attachmentsFail = null;
+  check('a grant without the attachments scope does not fail the recharge',
+    scopeRun.body.posted.failed === 0 && scopeRun.body.posted.posted === 1, scopeRun.body.posted);
+  check('and the missing scope is reported rather than swallowed',
+    scopeRun.body.posted.attachments.skipped.some((x) => /accounting\.attachments/.test(x)),
+    scopeRun.body.posted.attachments);
+
   console.log('\nTesting mode');
   // Testing mode exists so the whole thing can be exercised against real
   // Xero data without a single document reaching Xero. A recharge worked out
   // under it is real arithmetic over real bills and must never be mistaken
   // for one that happened.
   const tmBill = await makeBill(abm.tenantId, {
-    ref: 'TNB-TEST-0826', supplier: 'Tenaga Nasional Berhad', total: 777.00, address: KILANG2
+    ref: 'TNB-TEST-0826', supplier: BOTH_SUPPLIER, total: 777.00
   });
 
   await testModeLib.set(1, true);
@@ -1028,7 +1122,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     && final.body.rechargeStats[2].label === 'Xero bills',
     final.body.rechargeStats.map((c) => c.label));
   check('both rule kinds get their own tab',
-    final.body.rechargeTabs[1].label === 'Address rules'
+    final.body.rechargeTabs[1].label === 'Supplier rules'
     && final.body.rechargeTabs[2].label === 'Recharge rules', final.body.rechargeTabs);
   check('the condition vocabulary is offered to the dialog',
     final.body.conditionFields.some((f) => f.value === 'tracking')

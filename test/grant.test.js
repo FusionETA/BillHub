@@ -202,13 +202,27 @@ async function resetGrant(value = 'start-token') {
   const missing = (s) => xero.missingScopes(s).map(([scope]) => scope);
 
   const full = 'openid profile email offline_access accounting.invoices '
-    + 'accounting.payments accounting.contacts accounting.settings.read';
+    + 'accounting.payments accounting.contacts accounting.settings.read accounting.attachments';
   check('the granular set Bills Hub asks for is complete', missing(full).length === 0, missing(full));
+
+  // accounting.attachments was added after the first release, so every grant
+  // consented before it is short exactly this one. Worth its own check: the
+  // consequence is quiet — recharges still post, without the bill behind
+  // them — and preflight is the only thing that says so.
+  const beforeAttachments = 'openid profile email offline_access accounting.invoices '
+    + 'accounting.payments accounting.contacts accounting.settings.read';
+  check('a grant made before the attachments scope is short exactly that one',
+    missing(beforeAttachments).join() === 'accounting.attachments', missing(beforeAttachments));
+  check('and it is reported with the feature it costs',
+    /attachment/i.test(xero.missingScopes(beforeAttachments)[0][1]),
+    xero.missingScopes(beforeAttachments)[0]);
 
   // WazzOCR's own scope string, verbatim. It never creates a payment, so this
   // is the gap stage 2 has to either close or work around.
   const wazzocr = 'openid profile email offline_access accounting.invoices '
     + 'accounting.contacts accounting.settings accounting.attachments';
+  // It does carry accounting.attachments, which Bills Hub's own app did not
+  // ask for until the recharge needed it.
   check("WazzOCR's grant is short exactly one scope",
     missing(wazzocr).join() === 'accounting.payments', missing(wazzocr));
   check('and the gap is reported with the feature it costs',

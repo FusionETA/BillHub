@@ -305,7 +305,7 @@
       </Field>;
     }
 
-    // Pick several from a long list. Used for an address rule's suppliers,
+    // Pick several from a long list. Used for a supplier rule's suppliers,
     // where the list is every Xero contact and the honest default is none —
     // meaning every supplier, not "nothing chosen yet".
     // Pick one supplier out of nine hundred.
@@ -1309,10 +1309,6 @@
       </div>;
     }
 
-    // lib/premises.normalise, in the browser. The dialog must not tell
-    // somebody their address matches unless the engine agrees.
-    const premisesKey = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, '');
-
     // Entity · bill · invoicing entity · invoice no · recharge entity · bill
     // no · notes. Declared once because the header and every row have to
     // agree, and a table whose header drifts from its rows is unreadable.
@@ -1335,7 +1331,7 @@
     }
 
     // Which rule set decides, and in what order. Shown on both rule tabs
-    // rather than described once in a paragraph, because "address rules are
+    // rather than described once in a paragraph, because "supplier rules are
     // checked first" is the single thing that explains why a recharge rule
     // somebody wrote did not fire.
     function RuleOrder({ active }) {
@@ -1349,7 +1345,7 @@
         </div>
       );
       return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: 18, flexWrap: 'wrap' }}>
-        {step(1, 'Address rules', 'The premises printed on the bill.', active === 'rules')}
+        {step(1, 'Supplier rules', 'The supplier contact on the bill.', active === 'rules')}
         <div style={{ alignSelf: 'center', fontSize: 12.5, fontWeight: 700, color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>
           if none matches →
         </div>
@@ -1373,7 +1369,7 @@
       const [error, setError] = useState(null);
       const [busy, setBusy] = useState(null);
       const [nonce, setNonce] = useState(0);
-      const [ruleFor, setRuleFor] = useState(null);     // address rule being edited, or {} for new
+      const [ruleFor, setRuleFor] = useState(null);     // supplier rule being edited, or {} for new
       const [textRuleFor, setTextRuleFor] = useState(null); // recharge rule, same convention
       const [ruleQuery, setRuleQuery] = useState('');
       const [ruleEntity, setRuleEntity] = useState('');
@@ -1509,11 +1505,11 @@
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Intercompany recharge</span></div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Intercompany recharge</h1>
             <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '72ch' }}>
-              When one entity pays a bill that belongs to another, the full amount is recharged to the right entity. Address rules match the premises address printed on the bill; recharge rules match on supplier, reference or other text.
+              When one entity pays a bill that belongs to another, the full amount is recharged to the right entity. Supplier rules match one supplier contact; recharge rules match on any combination of supplier, reference, invoice number, line description or tracking category.
             </p>
           </div>
           <span style={{ flex: 1 }} />
-          <Button variant="outline" size="sm" onClick={() => setRuleFor({})}>New address rule</Button>
+          <Button variant="outline" size="sm" onClick={() => setRuleFor({})}>New supplier rule</Button>
           <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
         </div>
 
@@ -1582,7 +1578,7 @@
 
           {data.runRows.length === 0
             ? <Placeholder title="No recharges yet"
-                message="Add an address rule or a recharge rule, and paid bills that belong to another entity will be suggested here." />
+                message="Add a supplier rule or a recharge rule, and paid bills that belong to another entity will be suggested here." />
             : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto' }}>
               <div style={{ minWidth: 1180 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: RUN_COLS, gap: 12, padding: '12px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -1670,13 +1666,13 @@
           return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <RuleOrder active="rules" />
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-              The premises address on a bill is the real owner of the cost. If the address belongs to the bill header entity, it pays its own bill. If it belongs to another entity, the header entity pays first and 100% is recharged to the address owner. <strong style={{ color: 'var(--text-body)' }}>When an address rule matches, recharge rules are not consulted for that bill at all.</strong>
+            The supplier contact on a bill says whose cost it is — name the contact in Xero after the premises it bills for, and the contact answers the question. If it belongs to the bill header entity, that entity pays its own bill. If it belongs to another, the header entity pays first and 100% is recharged. <strong style={{ color: 'var(--text-body)' }}>When a supplier rule matches, recharge rules are not consulted for that bill at all.</strong>
             </p>
 
             {data.ruleCards.length === 0
-              ? <Placeholder title="No address rules yet"
+              ? <Placeholder title="No supplier rules yet"
                   message="A rule says which entity a premises belongs to, so a bill paid by one company for another company's building gets recharged automatically."
-                  action={<Button variant="primary" size="md" onClick={() => setRuleFor({})}>New address rule</Button>} />
+                  action={<Button variant="primary" size="md" onClick={() => setRuleFor({})}>New supplier rule</Button>} />
               : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, padding: 18, flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: 240 }}>
@@ -1690,17 +1686,17 @@
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingBottom: 14 }}>
                     {shown.length === data.ruleCards.length
-                      ? `${data.ruleCards.length} address rule${data.ruleCards.length === 1 ? '' : 's'} across ${entityCount} ${entityCount === 1 ? 'entity' : 'entities'}`
+                      ? `${data.ruleCards.length} supplier rule${data.ruleCards.length === 1 ? '' : 's'} across ${entityCount} ${entityCount === 1 ? 'entity' : 'entities'}`
                       : `${shown.length} of ${data.ruleCards.length} shown`}
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr) minmax(0,1.6fr) 80px 70px', gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div>Recharge to</div><div>Supplier</div><div>Premises address</div><div>Active</div><div />
+                  <div>Recharge to</div><div>Supplier</div><div>Narrowed by</div><div>Active</div><div />
                 </div>
 
                 {shown.length === 0 && <div style={{ padding: '18px', fontSize: 13.5, color: 'var(--text-muted)' }}>
-                  No address rule matches that.
+                  No supplier rule matches that.
                 </div>}
 
                 {shown.map(r => (
@@ -1711,10 +1707,15 @@
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 700, color: r.suppliers.length ? 'var(--text-heading)' : 'var(--text-muted)', ...Ellip }}
                         title={r.suppliers.join(', ')}>{r.supplierLabel}</div>
-                      {r.referenceContains && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>reference contains "{r.referenceContains}"</div>}
+                      {!r.suppliers.length && <div style={{ fontSize: 11.5, color: 'var(--color-danger)' }}>open it and choose one</div>}
                     </div>
-                    <div style={{ minWidth: 0, color: 'var(--text-body)', ...Ellip }} title={r.address || ''}>
-                      {r.address || <span style={{ color: 'var(--color-danger)' }}>No address — this rule decides nothing</span>}
+                    <div style={{ minWidth: 0, color: 'var(--text-body)', ...Ellip }}
+                      title={r.referenceContains || ''}>
+                      {!r.suppliers.length
+                        ? <span style={{ color: 'var(--color-danger)' }}>No supplier — this rule matches nothing</span>
+                        : r.referenceContains
+                          ? <span>reference contains "{r.referenceContains}"</span>
+                          : <span style={{ color: 'var(--text-muted)' }}>every bill from this supplier</span>}
                     </div>
                     <div><Switch checked={r.on} onChange={v => toggleRule(r, v)} /></div>
                     <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
@@ -1732,12 +1733,12 @@
         {tab === 'text' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <RuleOrder active="text" />
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-            <strong style={{ color: 'var(--text-body)' }}>Only reached when no address rule matched the bill.</strong> A rule acts on bills <strong style={{ color: 'var(--text-body)' }}>marked paid in Bills Hub after the rule was written</strong> — a bill settled directly in Xero does not set a recharge going, and a new rule never reaches back over what is already paid.
+            <strong style={{ color: 'var(--text-body)' }}>Only reached when no supplier rule matched the bill.</strong> A rule acts on bills <strong style={{ color: 'var(--text-body)' }}>marked paid in Bills Hub after the rule was written</strong> — a bill settled directly in Xero does not set a recharge going, and a new rule never reaches back over what is already paid.
           </p>
 
           {data.textRuleCards.length === 0
             ? <Placeholder title="No recharge rules yet"
-                message="A recharge rule matches on the text a bill actually carries — supplier, reference, invoice number, line description or tracking category. This is what covers rent, tenancies and supplier bills, which have no premises address on them."
+                message="A recharge rule matches on the text a bill actually carries — supplier, reference, invoice number, line description or tracking category. Use it when one supplier contact is not enough on its own: several premises on one contact, or a rule that has to read the line description."
                 action={<Button variant="primary" size="md" onClick={() => setTextRuleFor({})}>New recharge rule</Button>} />
             : data.textRuleCards.map(r => (
             <div key={r.id} style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: 18, opacity: r.on ? 1 : .6 }}>
@@ -1800,35 +1801,13 @@
     }
 
     function RuleDialog({ open, rule, entities, suppliers, onClose, onSaved, onToast }) {
-      const [form, setForm] = useState({ suppliers: [], premisesAddress: '', referenceContains: '', ownerTenantId: '' });
+      const [form, setForm] = useState({ suppliers: [], referenceContains: '', ownerTenantId: '' });
       const [busy, setBusy] = useState(false);
-      const [contactAddrs, setContactAddrs] = useState(null);  // [{ supplier, address }]
-
-      // Matching forgives punctuation and case but not a missing word or an
-      // abbreviation — "Jln" does not match "Jalan". Retyping an address
-      // across forty contacts is a silent miss waiting to happen, so when
-      // Xero already holds one, offer its exact wording.
-      //
-      // Asked for every supplier on the rule, not just a single one: one
-      // address has to match all of them, so if their contacts disagree
-      // that is the thing worth knowing before saving.
-      useEffect(() => {
-        setContactAddrs(null);
-        if (!open || !form.suppliers.length) return;
-        let cancelled = false;
-        const t = setTimeout(() => {
-          api.post('/api/recharge/contact-addresses', { suppliers: form.suppliers })
-            .then(d => { if (!cancelled) setContactAddrs(d.suppliers || []); })
-            .catch(() => { if (!cancelled) setContactAddrs(null); });
-        }, 250);
-        return () => { cancelled = true; clearTimeout(t); };
-      }, [open, form.suppliers.join('|')]);
 
       useEffect(() => {
         if (!rule) return;
         setForm({
           suppliers: rule.suppliers || [],
-          premisesAddress: rule.address || '',
           referenceContains: rule.referenceContains || '',
           ownerTenantId: rule.ownerTenantId || (entities[0] && entities[0].tenantId) || ''
         });
@@ -1837,26 +1816,24 @@
       const set = (patch) => setForm(f => ({ ...f, ...patch }));
       const owner = entities.find(e => e.tenantId === form.ownerTenantId);
       const ownerCode = owner ? owner.code : 'that entity';
-      // Mirrors lib/premises.MIN_KEY: an address this short sits inside half
-      // the addresses in the country, so the server refuses it. Saying so
-      // here means nobody has to submit to find out.
-      const addressOk = form.premisesAddress.toLowerCase().replace(/[^a-z0-9]+/g, '').length >= 8;
-      const ready = addressOk && form.ownerTenantId;
+      const supplier = form.suppliers[0] || '';
+      // The supplier is the rule. Without one there is nothing to match on,
+      // and "any supplier" would claim every paid bill in the account.
+      const ready = Boolean(supplier) && Boolean(form.ownerTenantId);
 
       async function save() {
         setBusy(true);
         try {
           const body = {
             suppliers: form.suppliers,
-            premisesAddress: form.premisesAddress.trim(),
             referenceContains: form.referenceContains.trim() || null,
             ownerTenantId: form.ownerTenantId
           };
           if (rule && rule.id) await request('/api/recharge/rules/' + rule.id, { method: 'PATCH', body });
           else await api.post('/api/recharge/rules', body);
           onToast({
-            title: rule && rule.id ? 'Address rule updated' : 'Address rule created',
-            message: `Bills for that address will be recharged to ${ownerCode}.`
+            title: rule && rule.id ? 'Supplier rule updated' : 'Supplier rule created',
+            message: `Bills from ${supplier} will be recharged to ${ownerCode}.`
           });
           onSaved();
         } catch (e) {
@@ -1864,51 +1841,15 @@
         } finally { setBusy(false); }
       }
 
-      return <Dialog open={open} onClose={onClose} title={rule && rule.id ? 'Edit address rule' : 'New address rule'}
-        description="The premises address on the bill decides which entity the cost belongs to." size="md">
+      return <Dialog open={open} onClose={onClose} title={rule && rule.id ? 'Edit supplier rule' : 'New supplier rule'}
+        description="The supplier on the bill decides which entity the cost belongs to." size="md">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <SupplierPicker label="Supplier" options={suppliers || []} value={form.suppliers[0] || ''}
+          <SupplierPicker label="Supplier *" options={suppliers || []} value={supplier}
             onChange={v => set({ suppliers: v ? [v] : [] })}
-            hint="Leave as Any supplier for a building one company occupies outright." />
+            hint="Name the contact in Xero after the premises — TNB - Signum Tower — and the contact says which building it is." />
           <Input label="Reference" placeholder="Optional, e.g. TNB-" value={form.referenceContains}
-            onChange={v => set({ referenceContains: v })} />
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-heading)', marginBottom: 6 }}>
-              Premises address on the bill <span style={{ color: 'var(--color-danger)' }}>*</span>
-            </label>
-            <textarea value={form.premisesAddress} onChange={e => set({ premisesAddress: e.target.value })}
-              placeholder="As printed on the supplier bill" rows={2}
-              style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.5, color: 'var(--text-body)', background: 'var(--surface-card)', border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '10px 12px' }} />
-            <div style={{ fontSize: 12, color: form.premisesAddress && !addressOk ? 'var(--color-danger)' : 'var(--text-muted)', marginTop: 5 }}>
-              {form.premisesAddress && !addressOk
-                ? 'Too short to identify a premises — include the street and postcode as the bill prints them.'
-                : 'Matched ignoring spaces, commas and letter case — but not abbreviations. "Jln" will not match "Jalan".'}
-            </div>
-            {(() => {
-              const held = (contactAddrs || []).find(c => c.address);
-              if (!held) return null;
-              const typed = premisesKey(form.premisesAddress);
-              // The engine matches by containment on this same key, so the
-              // dialog cannot claim agreement the engine would not reach.
-              if (typed && premisesKey(held.address).includes(typed)) {
-                return <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--green-500)', fontWeight: 600 }}>
-                  Matches the address Xero holds on that contact.
-                </div>;
-              }
-              return <div style={{ marginTop: 8, background: 'var(--neutral-50)', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
-                {typed && <div style={{ color: 'var(--color-danger)', marginBottom: 6 }}>
-                  What you have typed does not appear in the address Xero holds.
-                </div>}
-                <div style={{ color: 'var(--text-muted)' }}>Xero holds this address on that contact:</div>
-                <div style={{ marginTop: 2 }}>{held.address}</div>
-                <button onClick={() => set({ premisesAddress: held.address })}
-                  style={{ border: 'none', background: 'none', padding: '6px 0 0', fontSize: 12.5, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer' }}>
-                  Use this address
-                </button>
-              </div>;
-            })()}
-          </div>
+            onChange={v => set({ referenceContains: v })}
+            hint="Only needed when one contact covers several premises." />
 
           <div style={{ gridColumn: '1 / -1' }}>
             <Select label="Recharge to *" value={form.ownerTenantId} onChange={v => set({ ownerTenantId: v })}
@@ -1916,7 +1857,7 @@
           </div>
 
           <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-            When the bill header is {ownerCode}, it pays its own bill and nothing is recharged. When another entity is on the header, that entity pays first, then 100% is recharged to {ownerCode}: an AR invoice in the payer and a draft bill in {ownerCode}.
+            When the bill header is {ownerCode}, it pays its own bill and nothing is recharged. When another entity is on the header, that entity pays first, then 100% is recharged to {ownerCode}: a draft invoice in the payer and a draft bill in {ownerCode}, both carrying whatever was attached to the original bill.
           </div>
 
           <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>

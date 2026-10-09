@@ -127,7 +127,18 @@ async function seed({ quiet = false } = {}) {
   );
 
   // Point the Bills Hub account at that WazzOCR account.
-  await db.execute('UPDATE accounts SET wazzocr_account_id = ? WHERE id = ?', [WAZZOCR_ACCOUNT, ACCOUNT]);
+  //
+  // Testing mode goes off with it. It is held in the database so it survives
+  // a restart, which also means it survives a test run that died partway
+  // through — and the next run then works every recharge out in testing
+  // mode and fails somewhere a long way from the cause. Seeding is where a
+  // run says what it is starting from.
+  await db.execute(
+    'UPDATE accounts SET wazzocr_account_id = ?, test_mode = 0 WHERE id = ?',
+    [WAZZOCR_ACCOUNT, ACCOUNT]);
+  // The flag is cached for a few seconds, so clearing the row is not enough
+  // inside a single process.
+  require('../lib/testMode').forget(ACCOUNT);
 
   for (const [tenantId, tenantName] of ORGS) {
     await db.execute(

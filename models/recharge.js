@@ -43,10 +43,15 @@ async function updateSettings(accountId, fields = {}) {
 // Identity of a rule: everything it matches on, normalised. Two rules with
 // the same key describe exactly the same bills, so the second adds nothing
 // and the unique index refuses it.
-function ruleKey(premisesAddress, referenceContains, supplierNames = []) {
+// Two rules with the same key describe the same bills. Since a rule is now
+// the supplier it names plus an optional reference, that is what the key is
+// made of. Rules written before the address came out keep the key they were
+// saved with; editing one recomputes it, and the clash check below is what
+// catches a pair that have become duplicates of each other.
+function ruleKey(referenceContains, supplierNames = []) {
   const suppliers = [...new Set(supplierNames.map(premises.normalise).filter(Boolean))].sort();
   return crypto.createHash('sha256')
-    .update([premises.normalise(premisesAddress), premises.normalise(referenceContains), suppliers.join(',')].join('|'))
+    .update([premises.normalise(referenceContains), suppliers.join(',')].join('|'))
     .digest('hex');
 }
 
@@ -56,7 +61,7 @@ async function listRules(accountId) {
        FROM recharge_rules r
        LEFT JOIN entities e ON e.account_id = r.account_id AND e.xero_tenant_id = r.owner_tenant_id
       WHERE r.account_id = ?
-      ORDER BY e.code, r.premises_address`,
+      ORDER BY e.code, r.id`,
     [accountId]
   );
   if (!rules.length) return [];
@@ -84,17 +89,15 @@ function bad(message) {
   return Object.assign(new Error(message), { statusCode: 400 });
 }
 
-function validateRule({ premisesAddress, ownerTenantId }) {
-  if (!premisesAddress || !String(premisesAddress).trim()) {
-    throw bad('The premises address is required — it is what decides which entity the cost belongs to.');
-  }
-  // Short enough to sit inside half the addresses in the country: a rule like
-  // this would recharge far more than whoever wrote it intended.
-  if (premises.tooShort(premisesAddress)) {
-    throw bad(
-      `"${String(premisesAddress).trim()}" is too short to identify a premises. `
-      + 'Write it as the bill prints it, including the street and postcode.'
-    );
+function validateRule({ suppliers, ownerTenantId }) {
+  // The supplier carries the premises now: a contact named "TNB - Signum
+  // Tower" says which building it is, so the rule needs nothing else.
+  //
+  // Required, and not defaultable to "any supplier". A rule with no supplier
+  // would match every paid bill in the account and recharge the lot to one
+  // entity, which is the worst thing this module could be talked into doing.
+  if (!cleanSuppliers(suppliers).length) {
+    throw bad('Choose the supplier. A rule with no supplier would claim every bill in the account.');
   }
   if (!ownerTenantId) throw bad('Choose the entity to recharge to.');
 }
@@ -124,19 +127,18 @@ async function clashingRule(accountId, key, exceptId = null) {
   );
 }
 
-async function createRule(accountId, { suppliers = [], premisesAddress, referenceContains = null, ownerTenantId, enabled = true }) {
-  validateRule({ premisesAddress, ownerTenantId });
-  const address = String(premisesAddress).trim();
+async function createRule(accountId, { suppliers = [], referenceContains = null, ownerTenantId, enabled = true }) {
+  validateRule({ suppliers, ownerTenantId });
   const reference = String(referenceContains || '').trim() || null;
   const list = cleanSuppliers(suppliers);
-  const key = ruleKey(address, reference, list.map((x) => x.name));
+  const key = ruleKey(reference, list.map((x) => x.name));
 
   // Checked here as well as by the unique index, because a duplicate key
   // error says nothing about which rule already claims this.
   const clash = await clashingRule(accountId, key);
   if (clash) {
     throw Object.assign(
-      new Error(`That premises is already recharged to ${clash.code || 'another entity'} by an identical rule. Edit that one instead.`),
+      new Error(`That supplier is already recharged to ${clash.code || 'another entity'} by an identical rule. Edit that one instead.`),
       { statusCode: 409 }
     );
   }
@@ -144,9 +146,9 @@ async function createRule(accountId, { suppliers = [], premisesAddress, referenc
   return db.transaction(async (conn) => {
     const [res] = await conn.execute(
       `INSERT INTO recharge_rules
-         (account_id, premises_address, address_key, reference_contains, owner_tenant_id, rule_key, enabled)
-       VALUES (?,?,?,?,?,?,?)`,
-      [accountId, address, premises.normalise(address), reference, ownerTenantId, key, enabled ? 1 : 0]
+         (account_id, reference_contains, owner_tenant_id, rule_key, enabled)
+       VALUES (?,?,?,?,?)`,
+      [accountId, reference, ownerTenantId, key, enabled ? 1 : 0]
     );
     for (const x of list) {
       await conn.execute(
@@ -165,24 +167,22 @@ async function updateRule(accountId, id, fields = {}) {
   // Only the toggle moves on its own; anything touching what a rule matches
   // is re-validated against the whole merged rule, not the patch alone.
   const merged = {
-    premisesAddress: fields.premisesAddress ?? current.premises_address,
     referenceContains: 'referenceContains' in fields ? fields.referenceContains : current.reference_contains,
     ownerTenantId: fields.ownerTenantId ?? current.owner_tenant_id,
     suppliers: 'suppliers' in fields ? fields.suppliers : current.suppliers.map((x) => x.name)
   };
-  const touches = ['premisesAddress', 'referenceContains', 'ownerTenantId', 'suppliers'].some((k) => k in fields);
+  const touches = ['referenceContains', 'ownerTenantId', 'suppliers'].some((k) => k in fields);
   if (touches) validateRule(merged);
 
-  const address = String(merged.premisesAddress).trim();
   const reference = String(merged.referenceContains || '').trim() || null;
   const list = cleanSuppliers(merged.suppliers);
-  const key = ruleKey(address, reference, list.map((x) => x.name));
+  const key = ruleKey(reference, list.map((x) => x.name));
 
   if (touches && key !== current.rule_key) {
     const clash = await clashingRule(accountId, key, id);
     if (clash) {
       throw Object.assign(
-        new Error(`Another rule already covers "${clash.premises_address}" in exactly the same way.`),
+        new Error(`Another rule already covers ${list.map((x) => `"${x.name}"`).join(', ')} in exactly the same way.`),
         { statusCode: 409 }
       );
     }
@@ -192,8 +192,12 @@ async function updateRule(accountId, id, fields = {}) {
     const sets = [];
     const params = [];
     if (touches) {
-      sets.push('premises_address = ?', 'address_key = ?', 'reference_contains = ?', 'owner_tenant_id = ?', 'rule_key = ?');
-      params.push(address, premises.normalise(address), reference, merged.ownerTenantId, key);
+      // premises_address and address_key go to NULL: a rule that has been
+      // edited since the address came out should not keep one, or it reads
+      // as though it still matters.
+      sets.push('premises_address = NULL', 'address_key = NULL',
+                'reference_contains = ?', 'owner_tenant_id = ?', 'rule_key = ?');
+      params.push(reference, merged.ownerTenantId, key);
     }
     if ('enabled' in fields) { sets.push('enabled = ?'); params.push(fields.enabled ? 1 : 0); }
     if (sets.length) {

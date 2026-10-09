@@ -8,7 +8,7 @@ organisations in one Xero account. All four modules are live:
 | **Bills** — sync, list, filter, submit, approve | **Done** |
 | **Bank files** — payment batches, bank-format files, Xero batch payments | **Done** |
 | **Notifications** — the scheduled WhatsApp draft digest | **Done** |
-| **Recharge** — address rules, text rules, AR/AP pairs | **Done** |
+| **Recharge** — supplier rules, text rules, draft AR/AP pairs | **Done** |
 
 The stack mirrors [WazzOCR](https://github.com/FusionETA/WazzOCR): Node + Express,
 CommonJS, `mysql2` against a DigitalOcean MySQL, models in `models/`, routers
@@ -38,7 +38,8 @@ lib/
   crypto.js            AES-256-GCM for secrets at rest              (same as WazzOCR)
   tokens.js            Random tokens + SHA-256 hashing              (same as WazzOCR)
   bankFile.js          Renders a batch into a bank's layout (layouts are data)
-  premises.js          Matching the premises address printed on a supplier bill
+  premises.js          Normalising a supplier name to a key, and the address
+                       matching the preview script still reports with
   xeroLinks.js         Links into Xero that open the right organisation
   entityRef.js         The short form of an entity, for writing into a reference
   wazzup.js            Wazzup24 sender + Malaysian phone normalising
@@ -510,115 +511,67 @@ limit. They are read one bill at a time, and only when a rule asks for them.
 
 So a premises address can only reach Bills Hub from the PDF — which is
 WazzOCR's job, and lands in `bills.premises_address` — or from somewhere
-somebody put it. **Most bills will never have one**, and that is why there
-are two kinds of rule rather than one.
+somebody put it. **Most bills will never have one.**
 
-An address rule is matched against these, in order, which is also
-cheapest-first:
+Bills Hub no longer tries to match on one. The first version did, and the
+cost of it was: a Xero call per contact and sometimes per bill; two spellings
+of every Malaysian address held at once, so a rule written
+`Batu Caves, 68100` still met a bill printing `68100 Batu Caves`; Xero's
+"Billing address" arriving as `AddressType: POBOX` while "Delivery address"
+is `STREET`; and, after all of that, a miss on `Jln` against `Jalan` — because
+guessing at abbreviations is how a cost lands on the wrong company, so the
+matcher would not do it.
 
-| Source | Cost | What it is |
-| --- | --- | --- |
-| `bills.premises_address` | free | Read off the document, or typed here. Authoritative. |
-| The supplier contact's address | one call **per contact** | Where somebody puts the premises in Xero. |
-| Reference and line descriptions | one call **per bill** | Where a bookkeeper writes it today. |
+The answer that works sits upstream of the lot: **name the Xero contact after
+the premises it bills for** — `Tenaga Nasional Berhad - Signum Tower` — and
+the supplier, which is already on every synced row, says which building it
+is. No Xero call, nothing to spell the same way twice, and the mapping lives
+where the person who knows it already works.
 
-On an account where one contact carries hundreds of bills, the contact is
-read once and the line items would be read hundreds of times — which is why
-the contact is tried first.
-
-#### The supplier contact's address
-
-Two things about it are easy to get wrong, both checked against real
-contacts rather than remembered.
-
-**Xero's UI and its API disagree about the names.** The "Billing address"
-somebody fills in comes back as `AddressType: POBOX`; "Delivery address" is
-`STREET`. Reading only `STREET` — which the first version did — reports an
-empty contact for a field somebody carefully filled in. Both are read.
-
-**Nobody agrees where the postcode goes.** Xero holds `City` and
-`PostalCode` as separate fields with no hint of order, and a Malaysian
-address prints `68100 Batu Caves` while the obvious join gives
-`Batu Caves, 68100`. Matching is containment on a stripped key, so one
-ordering silently fails against an otherwise identical address. The
-contact's address is therefore offered **both ways round**, rather than
-guessing a convention or loosening the matcher for everybody.
-
-Cached for half an hour, per contact. A contact that bills many premises can
-only hold one address, so this helps exactly where the contact is one per
-premises — `--addresses` says which situation a supplier is in, and
-distinguishes "none has an address" from "none could be read".
-
-#### How exact the address has to be
-
-Not exact, but strict. Both sides are reduced to a key with every separator
-stripped, so these all match an address held as
-`Lot 9, Jalan Perusahaan Empat, Batu Caves, 68100`:
-
-```
-Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves      the other postcode order
-LOT 9 JALAN PERUSAHAAN EMPAT 68100 BATU CAVES        case and punctuation
-Lot 9, Jalan Perusahaan Empat                        a prefix of it
-Jalan Perusahaan Empat, 68100 Batu Caves             any contiguous part
-```
-
-And these do not:
-
-```
-Lot 9, Jln Perusahaan Empat, …                       an abbreviation
-Lot 9, Jalan Perusahaan Empat, …, Selangor           a word the contact lacks
-Lot 9, Jalan Perusahaan 4, …                         a different spelling
-```
-
-Guessing at abbreviations is how a cost lands on the wrong company, so the
-matcher will not do it. Across forty contacts that leaves retyping as a
-silent miss waiting to happen — so when Xero already holds the address, the
-rule dialog shows it and offers **"Use this address"**, and says plainly once
-the two agree. Nothing has to be typed twice.
-
-The dialog normalises exactly as `lib/premises.js` does, so it cannot claim
-a match the engine would not make. And the lookup always re-reads Xero
-rather than using the half-hour cache: somebody who has just typed an
-address into Xero and come straight back should not be shown a stale answer
-and conclude the field did not save.
-
-#### Choosing the supplier
-
-One supplier per rule, or none — none meaning any supplier, which is right
-for a building one company occupies outright. The table and the schema
-still hold a set, so a rule covering several is possible later without a
-migration, but the dialog offers one because that is how these rules are
-actually written.
-
-The picker searches, because nine hundred contacts cannot be scrolled. And
-its rows **wrap** rather than truncate: thirty-six contacts named
-`Pengurusan Air Selangor Sdn Bhd - …` all cut at the same character leave a
-column of identical lines and no way to tell which is which. What
-distinguishes these names is the premises on the end, which is precisely
-what an ellipsis removes.
-
-The contact's own address is the one tempting exception. For a single
-contact billing many buildings it is the supplier's head office: the same on
-every bill, and useless for deciding which building. But a contact created
-per meter may well carry the site address, because whoever set it up had
-nowhere else to put it. Which of those is true is a question about real
-data, so:
+What a contact actually holds is still worth knowing before writing rules:
 
 ```bash
 npm run recharge-preview -- --addresses --supplier "Tenaga Nasional"
 ```
 
 reads the contacts (one call per fifty, not per bill) and says whether they
-all share one address — the supplier's — or have one each, which makes
-address rules the right tool for them.
+all share one address — the supplier's head office, which decides nothing —
+or have one each, which is the sign the contacts are already per premises.
+It reads both `POBOX` and `STREET`, and distinguishes "none has an address"
+from "none could be read".
+
+#### Choosing the supplier
+
+One supplier per rule, and it is **required**. The table and the schema still
+hold a set, so a rule covering several is possible later without a migration,
+but the dialog offers one because that is how these rules are written.
+
+It cannot be left as "any supplier". Such a rule would match every paid bill
+in the account and recharge the lot to one entity, which is the worst thing
+this module could be talked into doing — so it is refused on the way in, and
+a rule left in that state by an older version is marked on the tab as
+matching nothing rather than quietly acting.
+
+The picker searches, because nine hundred contacts cannot be scrolled. And
+its rows **wrap** rather than truncate: thirty-six contacts named
+`Pengurusan Air Selangor Sdn Bhd - …` all cut at the same character leave a
+column of identical lines and no way to tell which is which. What
+distinguishes these names is the premises on the end, which is precisely what
+an ellipsis removes — and, now that the name is what decides, precisely what
+has to stay readable.
 
 ### Two kinds of rule, tried in order
 
-**1. Address rules.** The premises printed on the bill. The strongest evidence
-there is: an address is a statement about the real world, where a supplier
-name is a guess from a string. A rule records the address, the entity that
-owns it, optionally a set of suppliers (none means any) and optionally a
-reference fragment. Right for utilities.
+**1. Supplier rules.** One supplier contact, one entity. A rule records the
+supplier, the entity to recharge to, and optionally a reference fragment for
+the case where one contact covers several premises. Two fields, and nothing
+read out of Xero to decide it. Right for utilities, where the contact can be
+named after the building.
+
+Its one real consequence, worth saying plainly: **every** bill from a named
+contact goes to that contact's entity, whatever premises it was for. That is
+correct only while one contact means one building. Where it does not, narrow
+the rule with a reference, or use a recharge rule instead.
 
 **2. Recharge rules.** Conditions on the text Xero definitely has. A rule is a
 name, a set of conditions over `supplier` / `reference` / `invoice number` /
@@ -627,11 +580,14 @@ optional payer filter and the entity to recharge to. This is what covers rent,
 tenancies, supplier bills and central payroll deductions — everything with no
 address on it.
 
-**Address rules are checked first.** When one matches, recharge rules are not
+**Supplier rules are checked first.** When one matches, recharge rules are not
 consulted for that bill at all; among recharge rules, the first match in order
-wins. Both rule tabs carry the order as a two-step strip rather than a
-sentence in a paragraph, because "address rules go first" is the single fact
-that explains why a recharge rule somebody wrote did not fire.
+wins. Where two supplier rules name one contact, the one narrowed by a
+reference is the more specific and wins — otherwise the answer would be
+whichever row the database returned first. Both rule tabs carry the order as a
+two-step strip rather than a sentence in a paragraph, because "supplier rules
+go first" is the single fact that explains why a recharge rule somebody wrote
+did not fire.
 
 Every decision ends in one of six outcomes, so a caller never infers one from
 a null: `unpaid`, `no-rule`, `out-of-scope`, `own`, `recharge`, `done`.
@@ -713,14 +669,24 @@ have to say so.
 
 | Where | Document | Status |
 | --- | --- | --- |
-| The payer | AR invoice (`ACCREC`) addressed to the owner | `AUTHORISED` |
+| The payer | Sales invoice (`ACCREC`) addressed to the owner | `DRAFT` |
 | The owner | Mirror bill (`ACCPAY`) from the payer | `DRAFT` |
 
-Same amount, same reference, and the premises on the face of both where there
-was one — so the group nets to zero, each side reconciles its own ledger, and
-nobody opening the invoice in six months has to ask which building it was for.
-The owner's bill is left as a draft on purpose: it then goes through the normal
-Bills approval flow rather than a payable appearing already authorised.
+Same amount, same reference, the supplier and the original reference on the
+face of both, and **the original bill's own attachments copied onto each** — so
+the group nets to zero, each side reconciles its own ledger, and whoever
+approves either document can see what was actually billed without going back
+to the paying company's Xero to find the PDF.
+
+Both are drafts on purpose. Each side then goes through its own normal
+approval rather than a document appearing already authorised, and a recharge
+raised in error is deleted rather than credited.
+
+Copying the attachments needs `accounting.attachments` on the grant. A grant
+consented before that scope was added does not carry it: the recharge still
+posts, and the run reports the files it could not bring rather than leaving
+somebody to notice. `scripts/preflight.js` names the gap. Anything over 10MB
+is skipped and named.
 
 The intercompany transfer that later clears the pair is reconciled **in Xero**,
 against the two documents themselves. Bills Hub keeps no second record of it —
@@ -753,7 +719,7 @@ Rules never post anything. They surface **paid bills that belong somewhere
 else and have not been recharged**, with the owner and the amount already
 worked out; a person drafts and posts.
 
-The runs tab also reports bills an address rule *should* have covered and did
+The runs tab also reports bills a supplier rule *should* have covered and did
 not — a rule names the supplier, its premises was not on the bill. That is
 almost always an address typed one way in the rule and another way on the
 bill, and it is invisible unless said out loud: the rule looks configured and
@@ -903,7 +869,7 @@ Counterparty contacts are found by name in each Xero and created if missing.
 `node scripts/demo-recharge.js` seeds a local account shaped like the live
 one: 25 bills, mostly on a single generic TNB contact with the premises in
 the reference (`006975997185-TS-17-M`), all paid by the management company.
-Three address rules and six recharge rules cover some of them, and two
+Three supplier rules and six recharge rules cover some of them, and two
 premises are deliberately left unruled so there is something to write.
 
 Every branch of the decision is on screen at once — recharged, the owner
@@ -984,10 +950,9 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/recharge` | The Recharge view model |
 | `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
 | `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
-| `POST` | `/api/recharge/contact-addresses` | The addresses Xero holds on a rule's suppliers |
 | `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
 | `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, due days |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Address rules |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Supplier rules |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/text-rules[/:id]` | Recharge rules |
 | `POST` | `/api/recharge/text-rules/preview` | What a rule would act on, before saving it |
 | `POST` | `/api/recharge/text-rules/:id/run` | Draft a recharge for every bill it is waiting on |

@@ -330,7 +330,7 @@ function isPaid(bill) {
 async function loadRules(accountId) {
   const [address, text] = await Promise.all([model.listRules(accountId), model.listTextRules(accountId)]);
   return {
-    address: address.filter((r) => r.enabled && r.owner_tenant_id && r.premises_address),
+    address: address.filter((r) => r.enabled && r.owner_tenant_id && r.suppliers.length),
     text: text.filter((r) => r.enabled && r.owner_tenant_id)
   };
 }
@@ -342,27 +342,27 @@ async function loadRules(accountId) {
 // naming suppliers beats not, then a reference beats none. Without that the
 // winner would be whichever row the database returned first, which is not a
 // decision anybody made.
-async function matchAddressRule(accountId, bill, rules, { fetch = true } = {}) {
+async function matchAddressRule(accountId, bill, rules) {
   const supplierKey = premisesLib.normalise(bill.contact_name);
   const reference = `${bill.reference || ''} ${bill.invoice_number || ''}`.toLowerCase();
 
-  const eligible = rules.filter((r) => {
-    if (r.suppliers.length && !r.suppliers.some((x) => x.key === supplierKey)) return false;
-    if (r.reference_contains && !reference.includes(String(r.reference_contains).toLowerCase())) return false;
-    return true;
-  });
-  if (!eligible.length) return null;
-
-  const { text, source } = await premisesText(accountId, bill, { fetch });
   let best = null;
-  for (const rule of eligible) {
-    const m = premisesLib.match(text, rule.premises_address);
-    if (!m) continue;
-    const score = (m.length * 1000)
-      + (rule.suppliers.length ? 100 : 0)
-      + (rule.reference_contains ? 10 : 0)
-      + (m.exact ? 1 : 0);
-    if (!best || score > best.score) best = { rule, score, source };
+  for (const rule of rules) {
+    // A rule with no supplier matches nothing. It cannot mean "any supplier":
+    // that would recharge every paid bill in the account to one entity. Rules
+    // written before the address came out can be in this state, and the tab
+    // marks them as needing a supplier rather than quietly acting on them.
+    if (!rule.suppliers.length) continue;
+    if (!rule.suppliers.some((x) => x.key === supplierKey)) continue;
+    if (rule.reference_contains
+        && !reference.includes(String(rule.reference_contains).toLowerCase())) continue;
+
+    // Where two rules name the same supplier, the one that also narrows on a
+    // reference is the more specific and wins. Without this the winner would
+    // be whichever row the database returned first, which is not a decision
+    // anybody made.
+    const score = rule.reference_contains ? String(rule.reference_contains).length + 1 : 0;
+    if (!best || score > best.score) best = { rule, score, source: 'supplier' };
   }
   return best;
 }
@@ -381,11 +381,13 @@ async function matchTextRule(accountId, bill, rules, { fetch = true, assumePaid 
 
 function verdictFor(rule, bill, { address = null, kind }) {
   const owner = rule.owner_short || rule.owner_code;
+  const supplier = kind === 'address'
+    ? (rule.suppliers.map((x) => x.name)[0] || bill.contact_name) : null;
   if (rule.owner_tenant_id === bill.xero_tenant_id) {
     return {
       outcome: 'own', rule, kind, address,
       reason: kind === 'address'
-        ? `${owner} owns this address and is on the bill header, so it is paying its own bill. Nothing is recharged.`
+        ? `${owner} is both the entity ${supplier} is recharged to and the entity on the bill header, so it is paying its own bill. Nothing is recharged.`
         : `"${rule.name}" recharges to ${owner}, which is the entity on the bill header. Nothing is recharged.`
     };
   }
@@ -396,18 +398,18 @@ function verdictFor(rule, bill, { address = null, kind }) {
     ownerCode: rule.owner_code,
     ownerShort: rule.owner_short,
     // Two forms of the same sentence. `reason` stands alone; `consequence` is
-    // for a view that has already printed the address and would otherwise
-    // print it twice.
+    // for a view that has already named the supplier and would otherwise
+    // name it twice.
     reason: kind === 'address'
-      ? `${address} belongs to ${owner}, so the full amount is recharged there.`
+      ? `${supplier} is recharged to ${owner}, so the full amount goes there.`
       : `"${rule.name}" matches this bill, so the full amount is recharged to ${owner}.`,
     consequence: kind === 'address'
-      ? `Belongs to ${owner} — the full amount is recharged there.`
+      ? `${supplier} belongs to ${owner} — the full amount is recharged there.`
       : `Matches "${rule.name}" — the full amount is recharged to ${owner}.`
   };
 }
 
-// Runs one bill through both rule sets, address first. Never writes
+// Runs one bill through both rule sets, supplier rules first. Never writes
 // anything — the Pay dialog uses it to explain what will happen, and
 // suggestions() uses it to decide what to offer.
 //
@@ -425,10 +427,8 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
     };
   }
 
-  const hit = await matchAddressRule(accountId, bill, all.address, { fetch });
-  if (hit) {
-    return { ...verdictFor(hit.rule, bill, { address: hit.rule.premises_address, kind: 'address' }), source: hit.source };
-  }
+  const hit = await matchAddressRule(accountId, bill, all.address);
+  if (hit) return { ...verdictFor(hit.rule, bill, { kind: 'address' }), source: hit.source };
 
   const text = await matchTextRule(accountId, bill, all.text, { fetch, assumePaid });
   if (text) return verdictFor(text, bill, { kind: 'text' });
@@ -451,20 +451,23 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
     };
   }
 
-  // Worth separating: an address rule names this supplier and its premises
-  // was not on the bill. That is almost always an address typed one way in
-  // the rule and another way on the bill, and it is invisible unless said
-  // out loud — the rule looks configured and quietly never fires.
+  // Worth separating: a supplier rule names this supplier and was ruled out
+  // by its reference. The rule looks configured and quietly never fires, and
+  // that is invisible unless it is said out loud.
   const supplierKey = premisesLib.normalise(bill.contact_name);
   const named = all.address.filter((r) => r.suppliers.some((x) => x.key === supplierKey));
   if (named.length) {
+    const refs = named.map((r) => r.reference_contains).filter(Boolean);
     return {
       outcome: 'no-rule',
       nearMiss: true,
       candidates: named,
-      reason: named.length === 1
-        ? `One address rule covers ${bill.contact_name}, but its premises does not appear on this bill.`
-        : `${named.length} address rules cover ${bill.contact_name}, but none of their premises appears on this bill.`
+      reason: refs.length
+        ? `${named.length === 1 ? 'A supplier rule covers' : `${named.length} supplier rules cover`} `
+          + `${bill.contact_name}, but ${named.length === 1 ? 'it is' : 'each is'} narrowed to a reference `
+          + `(${refs.map((r) => `"${r}"`).join(', ')}) that this bill does not carry.`
+        : `A supplier rule covers ${bill.contact_name} but has no supplier saved on it, so it matches nothing. `
+          + 'Open it and choose the supplier.'
     };
   }
 
@@ -473,8 +476,8 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
 
 // ── Planning ────────────────────────────────────────────────────────────────
 
-// Validates a proposed recharge. One address, one owner, the whole amount —
-// there is no split to work out, because a premises belongs to one entity.
+// Validates a proposed recharge. One supplier, one owner, the whole amount —
+// there is no split to work out, because a rule names a single entity.
 async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null, textRuleId = null }) {
   const settings = await model.getSettings(accountId);
   const [bill] = await bills.getManyByIds(accountId, [Number(billId)]);
@@ -529,7 +532,6 @@ async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null,
   } else if (ruleId) {
     rule = await model.getRule(accountId, ruleId);
     kind = rule ? 'address' : null;
-    address = rule ? rule.premises_address : null;
   } else if (textRuleId) {
     rule = await model.getTextRule(accountId, textRuleId);
     kind = rule ? 'text' : null;
@@ -590,6 +592,66 @@ async function createRun(accountId, input) {
 // A line is posted in two steps and each id is saved as soon as Xero returns
 // it, so a failure halfway leaves a precise record: retrying creates only what
 // is missing, and never a duplicate of what already exists.
+// ── Attachments ─────────────────────────────────────────────────────────────
+
+// Xero caps an attachment at 25MB. Nothing here would be useful at that size
+// anyway, and a recharge should not spend a minute moving a scan of a filing
+// cabinet, so the copy stops well short and says which file it skipped.
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+// What the original bill has attached, listed once per run rather than once
+// per document. Returns [] when the bill has nothing, and also when the grant
+// predates the attachments scope — the caller reports that, because a
+// recharge that posted correctly has not failed just because a PDF did not
+// come with it.
+async function sourceAttachments(accountId, { tenantId, invoiceId }) {
+  if (!tenantId || !invoiceId) return { files: [], skipped: null };
+  try {
+    const res = await xero.api(accountId, tenantId, `/Invoices/${invoiceId}/Attachments`);
+    return { files: res?.Attachments || [], skipped: null };
+  } catch (e) {
+    // 403 is the shape a missing scope arrives in. Anything else is worth the
+    // same treatment: report it, do not fail the recharge over it.
+    return { files: [], skipped: e.message };
+  }
+}
+
+// Put the original bill's attachments onto a document a recharge just made,
+// so whoever opens either side sees the same paperwork the payer saw.
+//
+// Every failure here is reported and swallowed. The documents are already in
+// Xero by the time this runs; throwing would mark a line failed that in fact
+// posted, and a retry would then try to create them a second time.
+async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
+  if (!source.files.length) {
+    return { tenantId, copied: 0, skipped: source.skipped ? [source.skipped] : [] };
+  }
+  const skipped = [];
+  let copied = 0;
+  for (const file of source.files) {
+    const name = String(file.FileName || '').trim();
+    if (!name) continue;
+    if (Number(file.ContentLength) > MAX_ATTACHMENT_BYTES) {
+      skipped.push(`${name} is larger than ${MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB`);
+      continue;
+    }
+    try {
+      const got = await xero.api(accountId, source.tenantId,
+        `/Invoices/${source.invoiceId}/Attachments/${encodeURIComponent(name)}`, { raw: true });
+      await xero.api(accountId, tenantId,
+        `/Invoices/${invoiceId}/Attachments/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          body: got.buffer,
+          headers: { 'Content-Type': file.MimeType || got.contentType }
+        });
+      copied += 1;
+    } catch (e) {
+      skipped.push(`${name}: ${e.message}`);
+    }
+  }
+  return { tenantId, copied, skipped };
+}
+
 async function postRun(accountId, runId) {
   const run = await model.getRun(accountId, runId);
   if (!run) throw err('Recharge not found.', 404);
@@ -652,7 +714,19 @@ async function postRun(accountId, runId) {
   // outcome: a recharge it cannot state correctly is one it must not state.
   const currency = run.currency_code || null;
 
+  // Listed once for the whole run: every document it makes gets the same
+  // files, and a run with several targets should not ask Xero the same
+  // question once per target.
+  const source = {
+    tenantId: run.payer_tenant_id,
+    invoiceId: run.xero_invoice_id,
+    ...(await sourceAttachments(accountId, {
+      tenantId: run.payer_tenant_id, invoiceId: run.xero_invoice_id
+    }))
+  };
+
   const results = [];
+  const copied = [];
   for (const line of run.lines) {
     const target = known.get(line.target_tenant_id);
     if (!target) {
@@ -661,9 +735,9 @@ async function postRun(accountId, runId) {
       continue;
     }
 
-    // The premises is the reason this document exists, so it goes on the face
-    // of it. Whoever opens the invoice in six months should not have to come
-    // back here to find out which building it was for.
+    // The supplier and the original reference are the reason this document
+    // exists, so they go on the face of it. Whoever opens the invoice in six
+    // months should not have to come back here to find out what it was for.
     const description = `Recharge: ${run.supplier_name || 'supplier bill'}`
       + `${run.bill_reference ? ` (${run.bill_reference})` : ''} paid by ${payer.short_name}`
       + `${run.premises_address ? ` — ${run.premises_address}` : ''}`;
@@ -674,7 +748,11 @@ async function postRun(accountId, runId) {
       let apId = line.ap_invoice_id;
       let apNumber = line.ap_invoice_number;
 
-      // 1. AR invoice in the payer, billed to the subsidiary.
+      // 1. The sales invoice in the payer, billed to the subsidiary. DRAFT,
+      //    like the bill below: a recharge is a proposal until somebody in
+      //    the paying entity has looked at it, and an authorised invoice is
+      //    a receivable that has to be credited to undo rather than simply
+      //    deleted.
       if (!arId) {
         const contactId = await findOrCreateContact(accountId, run.payer_tenant_id, target.short_name);
         const res = await xero.api(accountId, run.payer_tenant_id, '/Invoices', {
@@ -687,7 +765,7 @@ async function postRun(accountId, runId) {
               DueDate: due,
               ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
-              Status: 'AUTHORISED',
+              Status: 'DRAFT',
               LineAmountTypes: 'Exclusive',
               LineItems: [{
                 Description: description,
@@ -704,10 +782,13 @@ async function postRun(accountId, runId) {
         arId = inv.InvoiceID;
         arNumber = inv.InvoiceNumber || null;
         await model.setLinePosted(line.id, { arInvoiceId: arId, arInvoiceNumber: arNumber });
+        copied.push(await copyAttachments(accountId, source, {
+          tenantId: run.payer_tenant_id, invoiceId: arId
+        }));
       }
 
-      // 2. The mirror bill in the subsidiary, from the payer. Left as DRAFT so
-      //    the subsidiary approves it through the normal Bills flow rather than
+      // 2. The mirror bill in the subsidiary, from the payer. DRAFT so the
+      //    subsidiary approves it through the normal Bills flow rather than
       //    having a payable appear already authorised.
       if (!apId) {
         const contactId = await findOrCreateContact(accountId, line.target_tenant_id, payer.short_name);
@@ -738,6 +819,9 @@ async function postRun(accountId, runId) {
         apId = inv.InvoiceID;
         apNumber = inv.InvoiceNumber || null;
         await model.setLinePosted(line.id, { apInvoiceId: apId, apInvoiceNumber: apNumber });
+        copied.push(await copyAttachments(accountId, source, {
+          tenantId: line.target_tenant_id, invoiceId: apId
+        }));
       }
 
       results.push({ tenantId: line.target_tenant_id, code: target.code, ok: true, arNumber, apNumber });
@@ -752,7 +836,21 @@ async function postRun(accountId, runId) {
   await model.setRunError(accountId, runId, failed.length ? `${failed.length} line(s) failed: ${failed[0].error}` : null);
   const status = await model.refreshRunStatus(accountId, runId);
 
-  return { status, posted: results.filter((r) => r.ok).length, failed: failed.length, results };
+  // Said out loud rather than left to be noticed. A recharge whose documents
+  // went up without the bill behind them is not wrong, but somebody looking
+  // for the PDF needs to know it is not there.
+  const attachments = {
+    available: source.files.length,
+    copied: copied.reduce((n, c) => n + c.copied, 0),
+    skipped: [...new Set(copied.flatMap((c) => c.skipped))]
+  };
+  if (attachments.skipped.length) {
+    console.error(`[recharge] run ${runId} attachments: ${attachments.skipped.join('; ')}`);
+  }
+
+  return {
+    status, posted: results.filter((r) => r.ok).length, failed: failed.length, results, attachments
+  };
 }
 
 // ── Suggestions ─────────────────────────────────────────────────────────────
