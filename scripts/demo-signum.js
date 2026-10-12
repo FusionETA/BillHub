@@ -2,6 +2,8 @@
 // Recharge tab to somebody.
 //
 //   node scripts/demo-signum.js            create them
+//   node scripts/demo-signum.js --tag B    another set, so a run can be
+//                                          repeated without clashing
 //   node scripts/demo-signum.js --list     show what is there already
 //
 // Unlike scripts/demo-recharge.js, which seeds mock organisations straight
@@ -35,6 +37,12 @@ const sync = require('../billhub/sync');
 
 const ACCOUNT_ID = Number(process.env.DEMO_ACCOUNT_ID || 1);
 const PAYER_CODE = process.env.DEMO_PAYER || 'DCGLOBAL2';
+
+// A suffix on every reference, so the same three bills can be made again for
+// a second run-through without the "already there" check skipping them.
+const tagIdx = process.argv.indexOf('--tag');
+const TAG = tagIdx > -1 ? String(process.argv[tagIdx + 1] || '').trim() : '';
+const ref = (base) => (TAG ? `${base}-${TAG}` : base);
 
 // Each bill names the contact it belongs to and the rule it is there to
 // demonstrate, so a run that produces the wrong count is diagnosable.
@@ -110,10 +118,11 @@ async function main() {
   console.log(`\n  posting to ${expense.Code} ${expense.Name}`);
 
   for (const spec of BILLS) {
+    const reference = ref(spec.reference);
     const existing = await db.getOne(
       `SELECT id FROM bills WHERE account_id = ? AND xero_tenant_id = ? AND reference = ?`,
-      [ACCOUNT_ID, tenant, spec.reference]);
-    if (existing) { console.log(`\n  ${spec.reference} — already there, left alone`); continue; }
+      [ACCOUNT_ID, tenant, reference]);
+    if (existing) { console.log(`\n  ${reference} — already there, left alone`); continue; }
 
     const made = await xero.api(ACCOUNT_ID, tenant, '/Invoices', {
       method: 'POST',
@@ -122,7 +131,7 @@ async function main() {
         Contact: { ContactID: byName.get(spec.contact) },
         Date: today(),
         DueDate: plus(14),
-        Reference: spec.reference,
+        Reference: reference,
         Status: 'AUTHORISED',
         CurrencyCode: payer.base_currency,
         LineAmountTypes: 'Exclusive',
@@ -135,7 +144,7 @@ async function main() {
     const inv = made?.Invoices?.[0];
     if (!inv?.InvoiceID) throw new Error(`Xero did not return an id for ${spec.reference}`);
 
-    console.log(`\n  ${spec.reference}  ${payer.base_currency} ${spec.amount.toFixed(2)}  → ${spec.shows}`);
+    console.log(`\n  ${reference}  ${payer.base_currency} ${spec.amount.toFixed(2)}  → ${spec.shows}`);
     console.log(`    ${inv.InvoiceNumber || inv.InvoiceID} awaiting payment in ${payer.code}`);
   }
 
