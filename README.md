@@ -786,6 +786,29 @@ A failed request is marked as one rather than left as a number in a column,
 because that is the row anybody scanning the page is looking for. Rows are
 pruned past `ACTIVITY_RETENTION_DAYS` (400).
 
+**Everybody's actions are recorded; only a super admin can read them.** Those
+are separate questions and it is worth being plain about both: a user who
+cannot open the tab is still logged, which is the point of the tab existing.
+
+`is_super_admin` is the only permission Bills Hub has — `role` is recorded
+and nothing reads it, so everyone who can sign in can do everything else.
+Nothing grants it on the way in: `createOwner` writes `0` and the column
+defaults to `0`, so a deployment starts with the tab readable by nobody.
+That is the right way round for a page showing every action every user has
+taken, and the reason it is a script and not a checkbox somebody could click
+by accident:
+
+```bash
+npm run super-admin                          # who has it
+npm run super-admin -- grant  you@example.com
+npm run super-admin -- revoke them@example.com
+```
+
+Under `AUTH_DISABLED` the guard waves everyone through, like the rest of the
+app, so the tab is visible on a local build regardless. The test loads the
+guard in a second process with sign-in **on**, because that is the only way
+to see what it does on a real deployment.
+
 ### The reference
 
 `IC-` + the supplier bill's own reference + the short form of the entity:

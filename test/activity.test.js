@@ -130,15 +130,40 @@ const settle = () => new Promise((r) => setTimeout(r, 250));
   check('the filters offer the kinds that are actually in the log',
     filters.body.kinds.some((k) => k.value === 'recharge'), filters.body.kinds);
 
-  // AUTH_DISABLED waves the guard through, which is the same bargain the
-  // rest of the app makes; the banner says so. The guard itself is what
-  // matters, so it is checked directly.
-  const { requireSuperAdmin } = require('../auth/middleware');
-  const seen = [];
-  const res = { status: (c) => ({ json: (b) => seen.push([c, b]) }) };
-  requireSuperAdmin({ user: { id: 1, is_super_admin: 0 } }, res, () => seen.push(['next']));
-  check('a signed-in user who is not an admin would be refused',
-    seen.length === 0 || seen[0][0] === 403 || process.env.AUTH_DISABLED === 'true', seen);
+  console.log('\nWho may read it');
+  // This suite runs with AUTH_DISABLED, which waves the guard through — the
+  // same bargain the rest of the app makes, and the banner says so. So the
+  // guard is loaded in a second process with sign-in ON, which is the only
+  // way to see what it does on a real deployment.
+  const { execFileSync } = require('child_process');
+  const guard = (isSuper) => execFileSync(process.execPath, ['-e', `
+    process.env.AUTH_DISABLED = 'false';
+    const { requireSuperAdmin } = require('${require('path').join(__dirname, '..', 'auth', 'middleware').replace(/\\/g, '/')}');
+    let out = 'allowed';
+    const res = { status: (c) => ({ json: () => { out = String(c); } }) };
+    requireSuperAdmin({ user: { id: 1, is_super_admin: ${isSuper} } }, res, () => { out = 'allowed'; });
+    console.log(out);
+  `], { encoding: 'utf8', env: { ...process.env, AUTH_DISABLED: 'false' } }).trim();
+
+  check('with sign-in on, a user who is not an admin is refused', guard(0) === '403', guard(0));
+  check('and one who is gets through', guard(1) === 'allowed', guard(1));
+
+  // Nothing hands it out on the way in. A deployment starts with the
+  // Activity tab readable by nobody, which is the right way round for a page
+  // showing every action every user has taken — so it has to be granted
+  // deliberately, with scripts/super-admin.js.
+  const users = require('../models/users');
+  const account = await db.getOne('SELECT id FROM accounts ORDER BY id LIMIT 1');
+  const email = `guard-check-${process.pid}@example.com`;
+  const newId = await users.createOwner({ accountId: account.id, email, name: 'Guard Check' });
+  const made = await db.getOne('SELECT is_super_admin FROM users WHERE id = ?', [newId]);
+  check('a new owner is not one, so the permission is never granted by accident',
+    Number(made.is_super_admin) === 0, made);
+
+  const invitedId = await users.createInvited({ accountId: account.id, email: `inv-${email}` });
+  const invited = await db.getOne('SELECT is_super_admin FROM users WHERE id = ?', [invitedId]);
+  check('nor is an invited user', Number(invited.is_super_admin) === 0, invited);
+  await db.execute('DELETE FROM users WHERE id IN (?, ?)', [newId, invitedId]);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();

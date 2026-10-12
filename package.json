@@ -40,7 +40,8 @@
     "recharge-preview": "node scripts/recharge-preview.js",
     "test:migrate": "node test/migrate.test.js",
     "repair-paid-dates": "node scripts/repair-paid-dates.js",
-    "convert-supplier-rules": "node scripts/convert-supplier-rules.js"
+    "convert-supplier-rules": "node scripts/convert-supplier-rules.js",
+    "super-admin": "node scripts/super-admin.js"
   },
   "engines": {
     "node": ">=18"
