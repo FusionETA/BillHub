@@ -527,6 +527,40 @@ async function createRun(accountId, input) {
 // A line is posted in two steps and each id is saved as soon as Xero returns
 // it, so a failure halfway leaves a precise record: retrying creates only what
 // is missing, and never a duplicate of what already exists.
+// ── Charts of accounts ──────────────────────────────────────────────────────
+
+// The accounts a recharge can post to, for one organisation.
+//
+// Read from Xero rather than typed, because an account code typed from memory
+// is a recharge that fails at the last step — after both documents have been
+// worked out and one of them may already exist.
+//
+// Cached for half an hour per organisation. A chart of accounts changes about
+// never, and the rule dialog would otherwise ask again on every keystroke
+// that changes an entity.
+const chartCache = new Map();   // tenantId -> { at, accounts }
+const CHART_TTL_MS = 30 * 60 * 1000;
+
+async function chartOfAccounts(accountId, tenantId, { refresh = false } = {}) {
+  if (!tenantId) return [];
+  const hit = chartCache.get(tenantId);
+  if (!refresh && hit && Date.now() - hit.at < CHART_TTL_MS) return hit.accounts;
+
+  const payload = await xero.api(accountId, tenantId, '/Accounts');
+  const accounts = (payload?.Accounts || [])
+    // No code means nothing can post to it, so offering it would be offering
+    // a choice that cannot be made.
+    .filter((a) => a.Code && a.Status === 'ACTIVE')
+    // Archived and system accounts are in the list and are not places a
+    // recharge belongs.
+    .filter((a) => a.Class === 'EXPENSE' || a.Class === 'REVENUE' || a.Type === 'CURRLIAB' || a.Type === 'CURRENT')
+    .map((a) => ({ code: a.Code, name: a.Name, type: a.Type, cls: a.Class }))
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+  chartCache.set(tenantId, { at: Date.now(), accounts });
+  return accounts;
+}
+
 // ── Attachments ─────────────────────────────────────────────────────────────
 
 // Xero caps an attachment at 25MB. Nothing here would be useful at that size
@@ -1084,7 +1118,7 @@ async function runTextRule(accountId, ruleId) {
 
 module.exports = {
   decide, loadRules, premisesText, planRun, createRun, postRun, suggestions,
-  sweep, sweepSoon, startScheduler, stopScheduler,
+  sweep, sweepSoon, startScheduler, stopScheduler, chartOfAccounts,
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
   isPaid, OUTCOMES, contactAddress, addressText,

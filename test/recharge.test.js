@@ -22,6 +22,7 @@ let invoiceSeq = 0;
 let failOn = null;        // { tenantId, type } -> that Invoices POST throws
 let lineItems = {};       // xeroInvoiceId -> [{ Description }]
 let contactAddresses = {};// contactId -> [{ AddressType, AddressLine1, ... }]
+let accountsFail = null;  // an Error thrown by GET /Accounts
 let attachments = {};     // xeroInvoiceId -> [{ FileName, MimeType, ContentLength }]
 let attachmentsFail = null;// an Error thrown by the Attachments endpoints
 const uploaded = [];      // { tenantId, invoiceId, name, contentType, bytes }
@@ -71,6 +72,20 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
     return { Invoices: [{ InvoiceID: one[1], LineItems: lineItems[one[1]] || [] }] };
   }
   if (path === '/TrackingCategories') return { TrackingCategories: [] };
+  if (path === '/Accounts') {
+    if (accountsFail) throw accountsFail;
+    return { Accounts: [
+      { Code: '200', Name: 'Sales', Type: 'REVENUE', Class: 'REVENUE', Status: 'ACTIVE' },
+      { Code: '429', Name: 'General Expenses', Type: 'EXPENSE', Class: 'EXPENSE', Status: 'ACTIVE' },
+      { Code: '445', Name: 'Light, Power, Heating', Type: 'EXPENSE', Class: 'EXPENSE', Status: 'ACTIVE' },
+      // Filtered out: archived, and a bank account nothing can be recharged to.
+      { Code: '300', Name: 'Old Account', Type: 'EXPENSE', Class: 'EXPENSE', Status: 'ARCHIVED' },
+      { Code: '090', Name: 'Business Bank', Type: 'BANK', Class: 'ASSET', Status: 'ACTIVE' },
+      // No code: nothing can post to it, so offering it offers a choice
+      // that cannot be made.
+      { Name: 'Unnumbered', Type: 'EXPENSE', Class: 'EXPENSE', Status: 'ACTIVE' }
+    ] };
+  }
   if (path === '/Invoices' && opts.method === 'POST') {
     const inv = opts.body.Invoices[0];
     if (failOn && failOn.tenantId === tenantId && failOn.type === inv.Type) {
@@ -288,6 +303,38 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // and both are legitimate.
   const water = await supplierRule('Jabatan Air Negeri Sabah', kk.tenantId);
   check('a second rule for another supplier is fine', water.status === 201, water.body);
+
+  console.log('\nThe chart of accounts a rule chooses from');
+  // Typed account codes fail at the last step, after one document may
+  // already be posted. The dialog offers the real chart instead, and asks
+  // for the chart of whichever entity that side of the recharge lands in.
+  const chart = await req('GET', '/api/recharge/accounts/' + kj.tenantId, { cookie });
+  check('an entity\'s chart of accounts can be read', chart.status === 200, chart.body);
+  check('it offers what a recharge can post to',
+    chart.body.accounts.some((a) => a.code === '445') && chart.body.accounts.some((a) => a.code === '200'),
+    chart.body.accounts.map((a) => a.code));
+  check('and leaves out what it cannot — archived, bank, and anything with no code',
+    !chart.body.accounts.some((a) => ['300', '090'].includes(a.code))
+    && chart.body.accounts.every((a) => a.code),
+    chart.body.accounts.map((a) => a.code));
+  check('sorted by code, so the list reads the way a chart of accounts does',
+    chart.body.accounts.map((a) => a.code).join() === '200,429,445',
+    chart.body.accounts.map((a) => a.code));
+
+  // Read once per organisation, not once per keystroke in the dialog.
+  calls.length = 0;
+  await req('GET', '/api/recharge/accounts/' + kj.tenantId, { cookie });
+  check('and cached, so retyping a rule does not re-read it',
+    calls.filter((c) => c.path === '/Accounts').length === 0, calls.map((c) => c.path));
+
+  // A chart that cannot be read must not stop a rule being written: the
+  // dialog falls back to a text box, so the route answers 200 with nothing.
+  accountsFail = Object.assign(new Error('Xero is unavailable'), { statusCode: 503 });
+  const broken = await req('GET', '/api/recharge/accounts/' + kk.tenantId, { cookie });
+  accountsFail = null;
+  check('a chart Xero will not give up is reported, not raised',
+    broken.status === 200 && broken.body.accounts.length === 0 && broken.body.error,
+    broken.body);
 
   console.log('\nAccounts a rule posts to');
   const coded = await supplierRule('Account Coded Supplier', kk.tenantId,

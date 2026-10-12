@@ -334,10 +334,10 @@
       return <Field label={label} hint={hint}>
         <div style={{ position: 'relative' }}>
           <button type="button" onClick={() => setOpen(o => !o)} title={value || ''}
-            style={{ width: '100%', minHeight: 46, textAlign: 'left', border: '1.5px solid ' + (open ? 'var(--color-primary)' : 'var(--border-default)'), borderRadius: 10, padding: '11px 34px 11px 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, lineHeight: 1.45, color: value ? 'var(--text-body)' : 'var(--text-subtle)', background: 'var(--surface-card)', cursor: 'pointer', outline: 'none', wordBreak: 'break-word' }}>
+            style={{ width: '100%', height: 46, textAlign: 'left', border: '1.5px solid ' + (open ? 'var(--color-primary)' : 'var(--border-default)'), borderRadius: 10, padding: '0 34px 0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: value ? 'var(--text-body)' : 'var(--text-subtle)', background: 'var(--surface-card)', cursor: 'pointer', outline: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {value || (allowFreeText ? 'Pick a supplier, or type any text' : 'Any supplier')}
           </button>
-          <span style={{ position: 'absolute', right: 14, top: 19, pointerEvents: 'none', fontSize: 10, color: 'var(--text-muted)' }}>▾</span>
+          <span style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: 10, color: 'var(--text-muted)' }}>▾</span>
 
           {open && <div style={{ position: 'absolute', zIndex: 30, top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--surface-card)', border: '1.5px solid var(--border-default)', borderRadius: 12, boxShadow: '0 12px 32px rgba(16,24,40,.16)', padding: 12 }}>
             <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers"
@@ -373,10 +373,10 @@
     }
 
     // `options` accepts plain strings (prototype style) or { label, value } pairs.
-    function Select({ label, options = [], value, onChange }) {
+    function Select({ label, hint, options = [], value, onChange }) {
       const opts = options.map(o => (typeof o === 'string' ? { label: o, value: o } : o));
       const controlled = typeof onChange === 'function';
-      return <Field label={label}>
+      return <Field label={label} hint={hint}>
         <div style={{ position: 'relative' }}>
           <select {...(controlled ? { value, onChange: e => onChange(e.target.value) } : { defaultValue: value })}
             style={{ width: '100%', height: 46, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 34px 0 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', appearance: 'none', cursor: 'pointer', outline: 'none' }}>
@@ -1673,6 +1673,51 @@
       </div>;
     }
 
+    // One of the two account fields on a rule. It offers the chart of
+    // accounts of whichever entity that side of the recharge lands in, so
+    // nobody types a code from memory that turns out not to exist — which
+    // Xero only tells you at the last step, after one document may already
+    // be posted.
+    //
+    // Falls back to a plain box in the two cases where the chart cannot be
+    // known: no entity chosen yet (Bill paid by is "Any entity", so the
+    // paying chart could be any of forty-one), and a chart Xero would not
+    // give us. It says which, rather than offering an empty list.
+    function AccountField({ label, hint, tenantId, value, onChange }) {
+      const [accounts, setAccounts] = useState(null);   // null = not asked
+      const [failed, setFailed] = useState(false);
+
+      useEffect(() => {
+        setAccounts(null); setFailed(false);
+        if (!tenantId) return;
+        let cancelled = false;
+        request('/api/recharge/accounts/' + encodeURIComponent(tenantId))
+          .then(d => { if (!cancelled) { setAccounts(d.accounts || []); setFailed(Boolean(d.error)); } })
+          .catch(() => { if (!cancelled) setFailed(true); });
+        return () => { cancelled = true; };
+      }, [tenantId]);
+
+      if (!tenantId || failed || (accounts && accounts.length === 0)) {
+        return <Input label={label} placeholder="From the bill" value={value} onChange={onChange}
+          hint={!tenantId ? `${hint} Choose the entity to see its accounts.`
+            : failed ? `${hint} Its chart of accounts could not be read, so type the code.`
+            : hint} />;
+      }
+      if (!accounts) {
+        return <Input label={label} placeholder="Reading the chart of accounts…" value={value}
+          onChange={onChange} hint={hint} />;
+      }
+
+      // A code saved earlier that is no longer in the chart must not vanish
+      // from a select and be silently cleared on the next save. It is kept,
+      // and labelled for what it is.
+      const known = accounts.some(a => a.code === value);
+      return <Select label={label} hint={hint} value={value} onChange={onChange}
+        options={[{ label: 'From the bill', value: '' }]
+          .concat(value && !known ? [{ label: `${value} — not in this chart`, value }] : [])
+          .concat(accounts.map(a => ({ label: `${a.code} · ${a.name}`, value: a.code })))} />;
+    }
+
     function TextRuleDialog({ open, rule, entities, suppliers, fields, operators, onClose, onSaved, onToast }) {
       const [form, setForm] = useState(null);
       const [busy, setBusy] = useState(false);
@@ -1803,12 +1848,14 @@
               company's chart of accounts and the bill in the receiving
               company's, and the same code rarely means the same thing in
               both. Blank is the normal case. */}
-          <Input label="Account on the draft invoice" placeholder="From the bill"
-            value={form.arAccountCode} onChange={v => set({ arAccountCode: v })}
-            hint={`Code in ${payer ? payer.code : 'the paying entity'}'s chart of accounts.`} />
-          <Input label="Account on the draft bill" placeholder="From the bill"
-            value={form.apAccountCode} onChange={v => set({ apAccountCode: v })}
-            hint={`Code in ${owner ? owner.code : 'the receiving entity'}'s chart of accounts.`} />
+          <AccountField label="Account on the draft invoice"
+            hint={`In ${payer ? payer.code : 'the paying entity'}'s chart of accounts.`}
+            tenantId={form.payerTenantId}
+            value={form.arAccountCode} onChange={v => set({ arAccountCode: v })} />
+          <AccountField label="Account on the draft bill"
+            hint={`In ${owner ? owner.code : 'the receiving entity'}'s chart of accounts.`}
+            tenantId={form.ownerTenantId}
+            value={form.apAccountCode} onChange={v => set({ apAccountCode: v })} />
 
           <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: 'var(--text-muted)', marginTop: -6, lineHeight: 1.55 }}>
             Leave both blank and each side posts to whatever the original bill was booked to —

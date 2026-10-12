@@ -727,6 +727,19 @@ different charts: `ar_account_code` is on the sales invoice, in the paying
 company's chart; `ap_account_code` is on the bill, in the receiving
 company's. The same code rarely means the same thing in both.
 
+Each field offers that entity's own chart, read from Xero through
+`GET /api/recharge/accounts/:tenantId` and cached half an hour — a code typed
+from memory fails at the last step, after one document may already be posted.
+Archived accounts, bank accounts and anything without a code are left out:
+nothing can be recharged to them, so offering them offers a choice that
+cannot be made.
+
+Two cases fall back to a plain text box, each saying why rather than showing
+an empty list: a chart Xero will not give up, and **Bill paid by** left as
+*Any entity*, where the paying chart could be any of the forty-one. And a
+code saved earlier that is no longer in the chart is kept and labelled rather
+than silently dropped from a select and cleared on the next save.
+
 Copying the attachments needs `accounting.attachments` on the grant. A grant
 consented before that scope was added does not carry it: the recharge still
 posts, and the run reports the files it could not bring rather than leaving

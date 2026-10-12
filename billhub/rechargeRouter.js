@@ -5,6 +5,7 @@
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
+//   GET    /api/recharge/accounts/:tenantId  one organisation's chart of accounts
 //   POST   /api/recharge/plan               dry-run a recharge
 //   POST   /api/recharge/runs               create one (nothing in Xero yet)
 //   POST   /api/recharge/runs/:id/post      create the documents in Xero
@@ -176,6 +177,22 @@ router.patch('/settings', async (req, res) => {
     await model.updateSettings(accountId, req.body || {});
     res.json({ ok: true, settings: vm.rechargeSettings(await model.getSettings(accountId)) });
   } catch (err) { fail(res, err, 400); }
+});
+
+// The accounts one organisation can post to, for the rule dialog's two
+// account fields. One organisation per call: the two sides of a recharge land
+// in two different charts, and the dialog asks for whichever it needs.
+router.get('/accounts/:tenantId', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    const accounts = await recharge.chartOfAccounts(accountId, req.params.tenantId);
+    res.json({ accounts });
+  } catch (err) {
+    // Not fatal to the dialog: it falls back to a plain text box and says so.
+    // A chart that cannot be read must not stop a rule being written.
+    console.error('[recharge] chart of accounts failed:', err.message);
+    res.status(200).json({ accounts: [], error: err.message });
+  }
 });
 
 // ── Recharge rules ──────────────────────────────────────────────────────────
