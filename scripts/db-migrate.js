@@ -115,6 +115,46 @@ const ADJUSTMENTS = [
             ADD INDEX idx_text_rule_lookup (account_id, enabled, created_at)`
   },
   {
+    // CREATE TABLE IF NOT EXISTS is its own guard, but the runner still has
+    // to be told when there is nothing to do, or it prints a change on every
+    // deployment for ever.
+    why: 'activity_log — who did what, and when',
+    check: `SELECT COUNT(*) AS n FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'activity_log'`,
+    needed: (row) => Number(row.n) === 0,
+    sql: `CREATE TABLE activity_log (
+            id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id  BIGINT UNSIGNED NULL,
+            user_id     BIGINT UNSIGNED NULL,
+            user_email  VARCHAR(255) NULL,
+            user_name   VARCHAR(255) NULL,
+            action      VARCHAR(64) NOT NULL,
+            summary     VARCHAR(512) NULL,
+            method      VARCHAR(8) NULL,
+            path        VARCHAR(255) NULL,
+            status_code SMALLINT NULL,
+            detail      JSON NULL,
+            ip          VARCHAR(64) NULL,
+            user_agent  VARCHAR(255) NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_activity_when (account_id, created_at),
+            INDEX idx_activity_user (user_id, created_at),
+            INDEX idx_activity_action (action, created_at)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  },
+  {
+    // Two, because the two sides land in two different charts of accounts:
+    // the sales invoice in the paying company's, the bill in the receiving
+    // company's. Both NULL keeps today's behaviour — post to whatever the
+    // original bill was booked to.
+    why: 'recharge_text_rules.ar_account_code / ap_account_code — per-rule accounts',
+    check: hasColumn('recharge_text_rules', 'ar_account_code'),
+    needed: (row) => Number(row.n) === 0,
+    sql: `ALTER TABLE recharge_text_rules
+            ADD COLUMN ar_account_code VARCHAR(32) NULL,
+            ADD COLUMN ap_account_code VARCHAR(32) NULL`
+  },
+  {
     // Default 1: this is how the module works now, and an existing
     // deployment upgrading into it should behave the same as a fresh one
     // rather than silently keeping the old two-click flow.

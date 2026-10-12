@@ -8,7 +8,7 @@ organisations in one Xero account. All four modules are live:
 | **Bills** — sync, list, filter, submit, approve | **Done** |
 | **Bank files** — payment batches, bank-format files, Xero batch payments | **Done** |
 | **Notifications** — the scheduled WhatsApp draft digest | **Done** |
-| **Recharge** — supplier rules, text rules, draft AR/AP pairs | **Done** |
+| **Recharge** — rules, automatic draft AR/AP pairs, attachments | **Done** |
 
 The stack mirrors [WazzOCR](https://github.com/FusionETA/WazzOCR): Node + Express,
 CommonJS, `mysql2` against a DigitalOcean MySQL, models in `models/`, routers
@@ -540,54 +540,45 @@ or have one each, which is the sign the contacts are already per premises.
 It reads both `POBOX` and `STREET`, and distinguishes "none has an address"
 from "none could be read".
 
-#### Choosing the supplier
+### One kind of rule
 
-One supplier per rule, and it is **required**. The table and the schema still
-hold a set, so a rule covering several is possible later without a migration,
-but the dialog offers one because that is how these rules are written.
+A rule is a name, a set of conditions over `supplier` / `reference` /
+`invoice number` / `line description` / `tracking category`, joined by **all**
+or **any**, an optional payer filter, and the entity to recharge to.
 
-It cannot be left as "any supplier". Such a rule would match every paid bill
-in the account and recharge the lot to one entity, which is the worst thing
-this module could be talked into doing — so it is refused on the way in, and
-a rule left in that state by an older version is marked on the tab as
-matching nothing rather than quietly acting.
+There were two kinds. The first matched a premises address, and then — once
+the contacts were named after the premises they bill for — one supplier
+contact. Both were strictly weaker than this one: `supplier is "TNB - Signum
+Tower"` says the same thing and keeps saying it when the next rule needs a
+reference as well. Two kinds meant two tabs, two dialogs, two code paths and
+an ordering question between them, for one sentence of expressive power.
 
-The picker searches, because nine hundred contacts cannot be scrolled. And
-its rows **wrap** rather than truncate: thirty-six contacts named
-`Pengurusan Air Selangor Sdn Bhd - …` all cut at the same character leave a
-column of identical lines and no way to tell which is which. What
-distinguishes these names is the premises on the end, which is precisely what
-an ellipsis removes — and, now that the name is what decides, precisely what
-has to stay readable.
+`scripts/convert-supplier-rules.js` moves the old ones across. It is not a
+migration: it has to be run deliberately, and it reports before it writes.
+Two things it handles, because a converted rule that behaved differently
+would be worse than one that failed loudly —
 
-### Two kinds of rule, tried in order
+- **Order.** Supplier rules were consulted before every recharge rule, so a
+  converted one takes the top position. Otherwise a broad rule written
+  earlier starts claiming its bills.
+- **Scope.** A recharge rule only acts on bills marked paid *after it was
+  written*; a supplier rule had no such limit. The converted rule inherits
+  the original's `created_at`, so the set of bills it covers does not move.
 
-**1. Supplier rules.** One supplier contact, one entity. A rule records the
-supplier, the entity to recharge to, and optionally a reference fragment for
-the case where one contact covers several premises. Two fields, and nothing
-read out of Xero to decide it. Right for utilities, where the contact can be
-named after the building.
+**Rules are tried in order and the first match wins.** Two rules naming one
+supplier is legitimate — the narrower one simply has to sit above the broader
+one, which is what the ordering on the tab is for. A rule with no condition
+is refused: it would match every paid bill in the account and recharge the
+lot to one entity.
 
-Its one real consequence, worth saying plainly: **every** bill from a named
-contact goes to that contact's entity, whatever premises it was for. That is
-correct only while one contact means one building. Where it does not, narrow
-the rule with a reference, or use a recharge rule instead.
-
-**2. Recharge rules.** Conditions on the text Xero definitely has. A rule is a
-name, a set of conditions over `supplier` / `reference` / `invoice number` /
-`line description` / `tracking category`, joined by **all** or **any**, plus an
-optional payer filter and the entity to recharge to. This is what covers rent,
-tenancies, supplier bills and central payroll deductions — everything with no
-address on it.
-
-**Supplier rules are checked first.** When one matches, recharge rules are not
-consulted for that bill at all; among recharge rules, the first match in order
-wins. Where two supplier rules name one contact, the one narrowed by a
-reference is the more specific and wins — otherwise the answer would be
-whichever row the database returned first. Both rule tabs carry the order as a
-two-step strip rather than a sentence in a paragraph, because "supplier rules
-go first" is the single fact that explains why a recharge rule somebody wrote
-did not fire.
+The supplier condition offers a picker rather than a text box, and its rows
+**wrap** rather than truncate: thirty-six contacts named `Pengurusan Air
+Selangor Sdn Bhd - …` all cut at the same character leave a column of
+identical lines and no way to tell which is which. What distinguishes them is
+the premises on the end, which is precisely what an ellipsis removes — and
+precisely what now decides where the cost goes. Free text stays reachable,
+because `contains Tenaga` across a family of per-premises contacts is a rule
+somebody will want and no contact is called exactly that.
 
 Every decision ends in one of six outcomes, so a caller never infers one from
 a null: `unpaid`, `no-rule`, `out-of-scope`, `own`, `recharge`, `done`.
@@ -707,10 +698,34 @@ It does nothing in testing mode — a run worked out under it can never be
 posted, and banking one would still mark its bill recharged, so the bills
 wait. A bill whose posting fails keeps its draft run, so the next sweep
 passes over it and leaves it for the **Post to Xero** button rather than
-retrying into the same error for ever. `recharge_settings.auto_post` is the
-stop switch, on by default and on the tab; read as **off** where the column
-is missing, because the wrong answer in that direction is a recharge nobody
-posted rather than documents in two organisations nobody asked for.
+retrying into the same error for ever.
+
+`recharge_settings.auto_post` remains as a stop switch, on by default, with
+no control in the UI — this is simply how the module works now, and a toggle
+on the tab read as a setting somebody had to decide about. It is reachable
+from the database if a rule ever has to be stopped faster than it can be
+fixed. Where the column is missing, on a deployment that has not migrated, it
+reads as **off**: the wrong answer in that direction is a recharge nobody
+posted, and in the other it is documents in two organisations nobody asked
+for.
+
+#### Which account each side posts to
+
+Most specific first: the **rule** that decided the recharge, then the
+account-wide override in `recharge_settings`, then the account the original
+bill was booked to.
+
+The last of those is the normal case and needs no setting at all — a recharge
+moves a cost between companies without changing what the cost is, so the
+payer's expense nets to zero and the company that used it carries it as
+itself. A rule naming its own accounts is for where the two charts of
+accounts do not line up, or where the group keeps a dedicated intercompany
+account.
+
+Two fields on the rule and not one, because the two documents land in two
+different charts: `ar_account_code` is on the sales invoice, in the paying
+company's chart; `ap_account_code` is on the bill, in the receiving
+company's. The same code rarely means the same thing in both.
 
 Copying the attachments needs `accounting.attachments` on the grant. A grant
 consented before that scope was added does not carry it: the recharge still
@@ -722,6 +737,41 @@ The intercompany transfer that later clears the pair is reconciled **in Xero**,
 against the two documents themselves. Bills Hub keeps no second record of it —
 a settled flag here could only ever disagree with the ledger that actually
 holds the answer. A run is `draft`, `posted` or `cancelled`, and nothing else.
+
+### Who did what
+
+Every request that **changed** something, plus every sign-in and every
+attempt that failed, lands in `activity_log` and is readable on an
+**Activity** tab that only a super admin sees. `auth/activity.js` is mounted
+once above every API router, so an endpoint written tomorrow is logged
+tomorrow rather than whenever somebody remembers — the handlers that get
+forgotten are exactly the ones worth having.
+
+What it does **not** record is a button press that changed nothing. A click
+that changes nothing never reaches the server, and one that does arrives as
+the change it made: `Approved 3 bills` is the useful record, `clicked
+Approve` is the same fact with the outcome removed. Reads are not logged
+either — reading is not an action anybody answers for, and page loads would
+bury the things that are. The handful of calls the browser makes on its own,
+like the stale-sync check, are skipped by name.
+
+Three things it has to get right, each with a test:
+
+- **No secrets.** Every request body is scrubbed before it is stored, at any
+  depth, on a key pattern covering passwords, tokens, keys and credentials.
+  A password in an audit log is a password in a backup and on somebody's
+  screen.
+- **It cannot break what it records.** Every write is wrapped and swallowed.
+  The test proves it by renaming the table away and checking the action still
+  succeeds — a log that can fail a payment is worse than no log.
+- **It outlives the user.** No foreign keys, and the email and name are
+  copied in rather than joined. An audit log whose rows vanish with the user
+  answers "who did this?" with silence in exactly the case somebody is
+  asking.
+
+A failed request is marked as one rather than left as a number in a column,
+because that is the row anybody scanning the page is looking for. Rows are
+pruned past `ACTIVITY_RETENTION_DAYS` (400).
 
 ### The reference
 
@@ -749,7 +799,7 @@ Rules never post anything. They surface **paid bills that belong somewhere
 else and have not been recharged**, with the owner and the amount already
 worked out; a person drafts and posts.
 
-The runs tab also reports bills a supplier rule *should* have covered and did
+The runs tab also reports bills a rule *should* have covered and did
 not — a rule names the supplier, its premises was not on the bill. That is
 almost always an address typed one way in the rule and another way on the
 bill, and it is invisible unless said out loud: the rule looks configured and
@@ -899,7 +949,7 @@ Counterparty contacts are found by name in each Xero and created if missing.
 `node scripts/demo-recharge.js` seeds a local account shaped like the live
 one: 25 bills, mostly on a single generic TNB contact with the premises in
 the reference (`006975997185-TS-17-M`), all paid by the management company.
-Three supplier rules and six recharge rules cover some of them, and two
+Nine recharge rules cover some of them, and two
 premises are deliberately left unruled so there is something to write.
 
 Every branch of the decision is on screen at once — recharged, the owner
@@ -982,9 +1032,10 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
 | `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
 | `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, due days |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/rules[/:id]` | Supplier rules |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/text-rules[/:id]` | Recharge rules |
 | `POST` | `/api/recharge/text-rules/preview` | What a rule would act on, before saving it |
+| `GET` | `/api/activity` | Who did what — super admin only |
+| `GET` | `/api/activity/filters` | Who appears in the log, and what kinds of action |
 | `POST` | `/api/recharge/text-rules/:id/run` | Draft a recharge for every bill it is waiting on |
 | `POST` | `/api/recharge/plan` | Dry-run a recharge |
 | `POST` | `/api/recharge/runs` | Create one (nothing in Xero yet) |

@@ -553,6 +553,17 @@ CREATE TABLE IF NOT EXISTS recharge_text_rules (
   -- one particular company paid.
   payer_tenant_id VARCHAR(64) NULL,
   owner_tenant_id VARCHAR(64) NOT NULL,
+  -- Which ledger account each side posts to, for this rule. Left NULL, a
+  -- recharge posts to whatever the original bill was booked to, which is
+  -- right for a cost moving between companies unchanged. Set where a group
+  -- wants a dedicated intercompany account, or where the two charts of
+  -- accounts do not line up.
+  --
+  -- ar_ is on the sales invoice, in the paying company's chart; ap_ is on
+  -- the bill, in the receiving company's. Two different charts, so they are
+  -- two fields and not one.
+  ar_account_code VARCHAR(32) NULL,
+  ap_account_code VARCHAR(32) NULL,
   enabled         TINYINT(1) NOT NULL DEFAULT 1,
   last_run_at     DATETIME NULL,
   position        INT DEFAULT 0,
@@ -653,4 +664,42 @@ CREATE TABLE IF NOT EXISTS recharge_run_lines (
   line_error        VARCHAR(512),
   UNIQUE KEY uq_run_target (run_id, target_tenant_id),
   CONSTRAINT fk_rl_run FOREIGN KEY (run_id) REFERENCES recharge_runs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Activity log ────────────────────────────────────────────────────────────
+--
+-- Who did what, and when. Every request that CHANGED something, plus every
+-- sign-in and every attempt that failed.
+--
+-- Deliberately no foreign keys. An audit log whose rows disappear when the
+-- user or the account is deleted answers the question "who did this?" with
+-- silence in exactly the case somebody is asking it. The email and name are
+-- copied in for the same reason: they are what the row said at the time,
+-- not a join that may no longer resolve.
+--
+-- Reads are restricted to a super admin — see auth/middleware.requireSuperAdmin.
+CREATE TABLE IF NOT EXISTS activity_log (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id  BIGINT UNSIGNED NULL,
+  user_id     BIGINT UNSIGNED NULL,
+  user_email  VARCHAR(255) NULL,
+  user_name   VARCHAR(255) NULL,
+  -- A short stable name for what happened: 'login', 'login.failed',
+  -- 'logout', 'bill.approve', 'recharge.rule.create'. The UI groups on this,
+  -- so it must not carry ids or free text.
+  action      VARCHAR(64) NOT NULL,
+  -- One readable sentence, written when the row is made.
+  summary     VARCHAR(512) NULL,
+  method      VARCHAR(8) NULL,
+  path        VARCHAR(255) NULL,
+  status_code SMALLINT NULL,
+  -- The request fields worth keeping, with anything secret removed. JSON
+  -- rather than columns because what matters differs per action.
+  detail      JSON NULL,
+  ip          VARCHAR(64) NULL,
+  user_agent  VARCHAR(255) NULL,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_activity_when (account_id, created_at),
+  INDEX idx_activity_user (user_id, created_at),
+  INDEX idx_activity_action (action, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

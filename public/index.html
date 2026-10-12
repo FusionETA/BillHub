@@ -236,6 +236,8 @@
         'file-check': <g><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" /><path d="M14 2v5h5" /><path d="m9 15 2 2 4-4" /></g>,
         download: <g><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></g>,
         check: <path d="M20 6 9 17l-5-5" />,
+        'chevron-down': <path d="m6 9 6 6 6-6" />,
+        'chevron-up': <path d="m18 15-6-6-6 6" />,
       }[name];
       return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" style={style}>{P}</svg>;
     }
@@ -318,7 +320,7 @@
     // character, leaving a column of identical lines and no way to tell
     // which was which — the distinguishing part of these names is at the
     // end, which is exactly what a truncation removes.
-    function SupplierPicker({ label, options = [], value = '', onChange, hint }) {
+    function SupplierPicker({ label, options = [], value = '', onChange, hint, allowFreeText = false }) {
       const [open, setOpen] = useState(false);
       const [q, setQ] = useState('');
       const shown = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
@@ -333,7 +335,7 @@
         <div style={{ position: 'relative' }}>
           <button type="button" onClick={() => setOpen(o => !o)} title={value || ''}
             style={{ width: '100%', minHeight: 46, textAlign: 'left', border: '1.5px solid ' + (open ? 'var(--color-primary)' : 'var(--border-default)'), borderRadius: 10, padding: '11px 34px 11px 14px', fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: 600, lineHeight: 1.45, color: value ? 'var(--text-body)' : 'var(--text-subtle)', background: 'var(--surface-card)', cursor: 'pointer', outline: 'none', wordBreak: 'break-word' }}>
-            {value || 'Any supplier'}
+            {value || (allowFreeText ? 'Pick a supplier, or type any text' : 'Any supplier')}
           </button>
           <span style={{ position: 'absolute', right: 14, top: 19, pointerEvents: 'none', fontSize: 10, color: 'var(--text-muted)' }}>▾</span>
 
@@ -343,10 +345,16 @@
             <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 2px' }}>
               {q ? `${shown.length} of ${options.length} match "${q}"` : `${options.length} suppliers`}
             </div>
+            {allowFreeText && q && !options.includes(q) && (
+              <button type="button" onClick={() => choose(q)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', border: '1.5px dashed var(--border-default)', background: 'none', borderRadius: 8, padding: '8px 10px', marginBottom: 6, fontSize: 13.5, fontWeight: 600, color: 'var(--text-link)', cursor: 'pointer', wordBreak: 'break-word' }}>
+                Use "{q}" as typed
+              </button>
+            )}
             <div style={{ maxHeight: 300, overflowY: 'auto' }}>
               <button type="button" onClick={() => choose('')}
                 style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: !value ? 'var(--neutral-50)' : 'none', borderRadius: 8, padding: '8px 10px', fontSize: 13.5, fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                Any supplier
+                {allowFreeText ? 'Clear' : 'Any supplier'}
               </button>
               {shown.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 2px' }}>No supplier matches "{q}".</div>}
               {shown.map(name => (
@@ -1334,25 +1342,6 @@
     // rather than described once in a paragraph, because "supplier rules are
     // checked first" is the single thing that explains why a recharge rule
     // somebody wrote did not fire.
-    function RuleOrder({ active }) {
-      const step = (n, title, sub, on) => (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flex: 1, minWidth: 220, opacity: on ? 1 : .62 }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: '50%', flexShrink: 0, background: on ? 'var(--color-primary)' : 'var(--neutral-200)', color: on ? '#fff' : 'var(--neutral-600)', fontSize: 12, fontWeight: 700 }}>{n}</span>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-heading)' }}>{title}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>{sub}</div>
-          </div>
-        </div>
-      );
-      return <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: 18, flexWrap: 'wrap' }}>
-        {step(1, 'Supplier rules', 'The supplier contact on the bill.', active === 'rules')}
-        <div style={{ alignSelf: 'center', fontSize: 12.5, fontWeight: 700, color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>
-          if none matches →
-        </div>
-        {step(2, 'Recharge rules', 'Supplier, reference or other text on the bill.', active === 'text')}
-      </div>;
-    }
-
     // One line of address, with a pin, used on rule cards and run cards alike.
     function AddressLine({ address, size = 13 }) {
       if (!address) return null;
@@ -1369,10 +1358,7 @@
       const [error, setError] = useState(null);
       const [busy, setBusy] = useState(null);
       const [nonce, setNonce] = useState(0);
-      const [ruleFor, setRuleFor] = useState(null);     // supplier rule being edited, or {} for new
       const [textRuleFor, setTextRuleFor] = useState(null); // recharge rule, same convention
-      const [ruleQuery, setRuleQuery] = useState('');
-      const [ruleEntity, setRuleEntity] = useState('');
       const reload = () => setNonce(n => n + 1);
 
       useEffect(() => {
@@ -1442,14 +1428,6 @@
         finally { setBusy(null); }
       }
 
-      async function deleteRule(rule) {
-        try {
-          await request('/api/recharge/rules/' + rule.id, { method: 'DELETE' });
-          onToast({ title: 'Rule deleted', message: rule.supplier + ' will no longer be suggested.' });
-          reload();
-        } catch (e) { toastError(e, 'Could not delete the rule'); }
-      }
-
       async function deleteTextRule(rule) {
         try {
           await request('/api/recharge/text-rules/' + rule.id, { method: 'DELETE' });
@@ -1478,25 +1456,6 @@
         finally { setBusy(null); }
       }
 
-      async function toggleRule(rule, on) {
-        try {
-          await request('/api/recharge/rules/' + rule.id, { method: 'PATCH', body: { enabled: on } });
-          reload();
-        } catch (e) { toastError(e, 'Could not update the rule'); }
-      }
-
-      async function setAutoPost(on) {
-        try {
-          await request('/api/recharge/settings', { method: 'PATCH', body: { autoPost: on } });
-          onToast(on
-            ? { title: 'Recharges post themselves',
-                message: 'Paying a bill a rule covers now raises both drafts.' }
-            : { title: 'Recharges are posted by hand',
-                message: 'Bills a rule covers will wait here with a button.' });
-          reload();
-        } catch (e) { toastError(e, 'Could not change that'); }
-      }
-
       if (error) {
         return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
           <Placeholder tone="error" title="Could not load recharges" message={error}
@@ -1517,24 +1476,11 @@
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Intercompany recharge</span></div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Intercompany recharge</h1>
             <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '72ch' }}>
-              When one entity pays a bill that belongs to another, the full amount is recharged to the right entity. Supplier rules match one supplier contact; recharge rules match on any combination of supplier, reference, invoice number, line description or tracking category.
+              When one entity pays a bill that belongs to another, the full amount is recharged to the right entity. A rule matches on any combination of supplier, reference, invoice number, line description or tracking category — and paying a bill it covers raises the draft invoice and the draft bill in Xero straight away.
             </p>
           </div>
           <span style={{ flex: 1 }} />
-          <Button variant="outline" size="sm" onClick={() => setRuleFor({})}>New supplier rule</Button>
           <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
-        </div>
-
-        {/* A stop switch, not a setting to configure: on is how the module
-            works, and this is here so a rule that turns out to be wrong can
-            be stopped without a deploy. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '12px 16px', marginBottom: 14 }}>
-          <Switch checked={data.settings.autoPost} onChange={setAutoPost} />
-          <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: 'var(--text-body)', lineHeight: 1.55 }}>
-            {data.settings.autoPost
-              ? <span><strong>Paying a bill recharges it.</strong> When a rule covers a bill you pay in Bills Hub, the draft invoice and the draft bill are raised straight away. Nothing is authorised — both sides still need approving in Xero.</span>
-              : <span><strong>Recharges are posted by hand.</strong> Bills a rule covers are listed below with a button. Turn this on and paying a bill will recharge it.</span>}
-          </div>
         </div>
 
         {data.testMode && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--amber-100)', borderRadius: 10, padding: '12px 18px', marginBottom: 14, fontSize: 13.5, color: '#6b4d00', lineHeight: 1.6 }}>
@@ -1585,29 +1531,9 @@
             ))}
           </div>}
 
-          {(data.unmatched || []).length > 0 && <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderLeft: '4px solid var(--amber-500)', borderRadius: 16, padding: 18, marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 2 }}>
-              {data.unmatched.length} paid bill{data.unmatched.length === 1 ? '' : 's'} from a supplier with rules, at a premises no rule names
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-              Nothing is recharged, which may be right. It is also what an address typed one way in the rule and another way on the bill looks like — so check these before assuming the rule did its job.
-            </div>
-            {data.unmatched.map(u => (
-              <div key={u.billId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{u.supplier}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.reference} · {cur ? cur + ' ' : ''}{u.totalFmt}</div>
-                  {u.address
-                    ? <AddressLine address={u.address} size={12} />
-                    : <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>No premises address on this bill.</div>}
-                </div>
-              </div>
-            ))}
-          </div>}
-
           {data.runRows.length === 0
             ? <Placeholder title="No recharges yet"
-                message="Add a supplier rule or a recharge rule, and paid bills that belong to another entity will be suggested here." />
+                message="Write a recharge rule, and paying a bill it covers will raise both documents in Xero and record it here." />
             : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto' }}>
               <div style={{ minWidth: 1180 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: RUN_COLS, gap: 12, padding: '12px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -1679,90 +1605,12 @@
                 ))}
               </div>
             </div>}
+
         </React.Fragment>}
 
-        {tab === 'rules' && (() => {
-          const q = ruleQuery.trim().toLowerCase();
-          const shown = data.ruleCards.filter(r => {
-            if (ruleEntity && r.ownerTenantId !== ruleEntity) return false;
-            if (!q) return true;
-            return [r.address, r.referenceContains, r.ownerShort, r.ownerCode]
-              .concat(r.suppliers).filter(Boolean)
-              .some(v => String(v).toLowerCase().includes(q));
-          });
-          const entityCount = new Set(data.ruleCards.map(r => r.ownerTenantId)).size;
-
-          return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <RuleOrder active="rules" />
-            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-            The supplier contact on a bill says whose cost it is — name the contact in Xero after the premises it bills for, and the contact answers the question. If it belongs to the bill header entity, that entity pays its own bill. If it belongs to another, the header entity pays first and 100% is recharged. <strong style={{ color: 'var(--text-body)' }}>When a supplier rule matches, recharge rules are not consulted for that bill at all.</strong>
-            </p>
-
-            {data.ruleCards.length === 0
-              ? <Placeholder title="No supplier rules yet"
-                  message="A rule says which entity a premises belongs to, so a bill paid by one company for another company's building gets recharged automatically."
-                  action={<Button variant="primary" size="md" onClick={() => setRuleFor({})}>New supplier rule</Button>} />
-              : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, padding: 18, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 240 }}>
-                    <Input label="Search" placeholder="Supplier, reference or address" value={ruleQuery} onChange={setRuleQuery} />
-                  </div>
-                  <div style={{ width: 240 }}>
-                    <Select label="Xero entity" value={ruleEntity} onChange={setRuleEntity}
-                      options={[{ label: 'All entities', value: '' }].concat(
-                        entities.filter(e => data.ruleCards.some(r => r.ownerTenantId === e.tenantId))
-                          .map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId })))} />
-                  </div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', paddingBottom: 14 }}>
-                    {shown.length === data.ruleCards.length
-                      ? `${data.ruleCards.length} supplier rule${data.ruleCards.length === 1 ? '' : 's'} across ${entityCount} ${entityCount === 1 ? 'entity' : 'entities'}`
-                      : `${shown.length} of ${data.ruleCards.length} shown`}
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr) minmax(0,1.6fr) 80px 70px', gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <div>Recharge to</div><div>Supplier</div><div>Narrowed by</div><div>Active</div><div />
-                </div>
-
-                {shown.length === 0 && <div style={{ padding: '18px', fontSize: 13.5, color: 'var(--text-muted)' }}>
-                  No supplier rule matches that.
-                </div>}
-
-                {shown.map(r => (
-                  <div key={r.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.1fr) minmax(0,1.6fr) 80px 70px', gap: 12, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13.5, opacity: r.on ? 1 : .55 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                      <Code>{r.ownerCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.ownerShort}</span>
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, color: r.suppliers.length ? 'var(--text-heading)' : 'var(--text-muted)', ...Ellip }}
-                        title={r.suppliers.join(', ')}>{r.supplierLabel}</div>
-                      {!r.suppliers.length && <div style={{ fontSize: 11.5, color: 'var(--color-danger)' }}>open it and choose one</div>}
-                    </div>
-                    <div style={{ minWidth: 0, color: 'var(--text-body)', ...Ellip }}
-                      title={r.referenceContains || ''}>
-                      {!r.suppliers.length
-                        ? <span style={{ color: 'var(--color-danger)' }}>No supplier — this rule matches nothing</span>
-                        : r.referenceContains
-                          ? <span>reference contains "{r.referenceContains}"</span>
-                          : <span style={{ color: 'var(--text-muted)' }}>every bill from this supplier</span>}
-                    </div>
-                    <div><Switch checked={r.on} onChange={v => toggleRule(r, v)} /></div>
-                    <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                      <button aria-label="Edit rule" onClick={() => setRuleFor(r)} className="feta-hover"
-                        style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="pencil" size={15} /></button>
-                      <button aria-label="Delete rule" onClick={() => deleteRule(r)} className="feta-hover"
-                        style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={15} /></button>
-                    </div>
-                  </div>
-                ))}
-              </div>}
-          </div>;
-        })()}
-
         {tab === 'text' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <RuleOrder active="text" />
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-            <strong style={{ color: 'var(--text-body)' }}>Only reached when no supplier rule matched the bill.</strong> A rule acts on bills <strong style={{ color: 'var(--text-body)' }}>marked paid in Bills Hub after the rule was written</strong> — a bill settled directly in Xero does not set a recharge going, and a new rule never reaches back over what is already paid.
+            Rules are tried in order and the first match wins. A rule acts on bills <strong style={{ color: 'var(--text-body)' }}>marked paid in Bills Hub after the rule was written</strong> — a bill settled directly in Xero does not set a recharge going, and a new rule never reaches back over what is already paid.
           </p>
 
           {data.textRuleCards.length === 0
@@ -1775,6 +1623,7 @@
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.meta}</div>
+                  {r.accountsLabel && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.accountsLabel}</div>}
                 </div>
                 <span style={{ flex: 1 }} />
                 {r.waitingLabel && <span style={{ fontSize: 11.5, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'var(--amber-100)', color: '#8a6300' }}>{r.waitingLabel}</span>}
@@ -1816,12 +1665,7 @@
           ))}
         </div>}
 
-        <RuleDialog open={Boolean(ruleFor)} rule={ruleFor} entities={entities}
-          suppliers={data.suppliers}
-          onClose={() => setRuleFor(null)} onToast={onToast}
-          onSaved={() => { setRuleFor(null); reload(); }} />
-
-        <TextRuleDialog open={Boolean(textRuleFor)} rule={textRuleFor} entities={entities}
+        <TextRuleDialog open={Boolean(textRuleFor)} rule={textRuleFor} entities={entities} suppliers={data.suppliers}
           fields={data.conditionFields} operators={data.conditionOperators}
           onClose={() => setTextRuleFor(null)} onToast={onToast}
           onSaved={() => { setTextRuleFor(null); reload(); }} />
@@ -1829,78 +1673,7 @@
       </div>;
     }
 
-    function RuleDialog({ open, rule, entities, suppliers, onClose, onSaved, onToast }) {
-      const [form, setForm] = useState({ suppliers: [], referenceContains: '', ownerTenantId: '' });
-      const [busy, setBusy] = useState(false);
-
-      useEffect(() => {
-        if (!rule) return;
-        setForm({
-          suppliers: rule.suppliers || [],
-          referenceContains: rule.referenceContains || '',
-          ownerTenantId: rule.ownerTenantId || (entities[0] && entities[0].tenantId) || ''
-        });
-      }, [rule, entities]);
-
-      const set = (patch) => setForm(f => ({ ...f, ...patch }));
-      const owner = entities.find(e => e.tenantId === form.ownerTenantId);
-      const ownerCode = owner ? owner.code : 'that entity';
-      const supplier = form.suppliers[0] || '';
-      // The supplier is the rule. Without one there is nothing to match on,
-      // and "any supplier" would claim every paid bill in the account.
-      const ready = Boolean(supplier) && Boolean(form.ownerTenantId);
-
-      async function save() {
-        setBusy(true);
-        try {
-          const body = {
-            suppliers: form.suppliers,
-            referenceContains: form.referenceContains.trim() || null,
-            ownerTenantId: form.ownerTenantId
-          };
-          if (rule && rule.id) await request('/api/recharge/rules/' + rule.id, { method: 'PATCH', body });
-          else await api.post('/api/recharge/rules', body);
-          onToast({
-            title: rule && rule.id ? 'Supplier rule updated' : 'Supplier rule created',
-            message: `Bills from ${supplier} will be recharged to ${ownerCode}.`
-          });
-          onSaved();
-        } catch (e) {
-          onToast({ title: 'Could not save the rule', message: e.message, tone: 'error' });
-        } finally { setBusy(false); }
-      }
-
-      return <Dialog open={open} onClose={onClose} title={rule && rule.id ? 'Edit supplier rule' : 'New supplier rule'}
-        description="The supplier on the bill decides which entity the cost belongs to." size="md">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <SupplierPicker label="Supplier *" options={suppliers || []} value={supplier}
-            onChange={v => set({ suppliers: v ? [v] : [] })}
-            hint="Name the contact in Xero after the premises — TNB - Signum Tower — and the contact says which building it is." />
-          <Input label="Reference" placeholder="Optional, e.g. TNB-" value={form.referenceContains}
-            onChange={v => set({ referenceContains: v })}
-            hint="Only needed when one contact covers several premises." />
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <Select label="Recharge to *" value={form.ownerTenantId} onChange={v => set({ ownerTenantId: v })}
-              options={entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId }))} />
-          </div>
-
-          <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-            When the bill header is {ownerCode}, it pays its own bill and nothing is recharged. When another entity is on the header, that entity pays first, then 100% is recharged to {ownerCode}: a draft invoice in the payer and a draft bill in {ownerCode}, both carrying whatever was attached to the original bill.
-          </div>
-
-          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" size="md" onClick={save}
-              style={busy || !ready ? { opacity: .5, pointerEvents: 'none' } : null}>
-              {busy ? 'Saving…' : 'Save rule'}
-            </Button>
-          </div>
-        </div>
-      </Dialog>;
-    }
-
-    function TextRuleDialog({ open, rule, entities, fields, operators, onClose, onSaved, onToast }) {
+    function TextRuleDialog({ open, rule, entities, suppliers, fields, operators, onClose, onSaved, onToast }) {
       const [form, setForm] = useState(null);
       const [busy, setBusy] = useState(false);
       const [preview, setPreview] = useState(null);
@@ -1914,7 +1687,9 @@
             ? rule.conditions.map(c => ({ field: c.field, operator: c.operator, value: c.value }))
             : [{ field: 'supplier', operator: 'contains', value: '' }],
           payerTenantId: rule.payerTenantId || '',
-          ownerTenantId: rule.ownerTenantId || (entities[0] && entities[0].tenantId) || ''
+          ownerTenantId: rule.ownerTenantId || (entities[0] && entities[0].tenantId) || '',
+          arAccountCode: rule.arAccountCode || '',
+          apAccountCode: rule.apAccountCode || ''
         });
       }, [rule, entities]);
 
@@ -1942,6 +1717,7 @@
       const ready = form.name.trim() && form.ownerTenantId
         && form.conditions.length && form.conditions.every(c => String(c.value || '').trim());
       const owner = entities.find(e => e.tenantId === form.ownerTenantId);
+      const payer = entities.find(e => e.tenantId === form.payerTenantId);
 
       async function save() {
         setBusy(true);
@@ -1950,7 +1726,9 @@
             name: form.name.trim(), matchMode: form.matchMode,
             conditions: form.conditions,
             payerTenantId: form.payerTenantId || null,
-            ownerTenantId: form.ownerTenantId
+            ownerTenantId: form.ownerTenantId,
+            arAccountCode: form.arAccountCode.trim() || null,
+            apAccountCode: form.apAccountCode.trim() || null
           };
           const r = rule && rule.id
             ? await request('/api/recharge/text-rules/' + rule.id, { method: 'PATCH', body })
@@ -1990,7 +1768,14 @@
                     options={(operators || []).map(o => ({ label: o.label, value: o.value }))} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <Input placeholder="Word or phrase" value={c.value} onChange={v => setCond(i, { value: v })} />
+                  {c.field === 'supplier' && (c.operator === 'is' || c.operator === 'contains')
+                    // Contacts named after a premises run long and look alike,
+                    // so typing one is a silent miss waiting to happen. The
+                    // picker is still free text underneath: "contains Tenaga"
+                    // over a family of contacts has to stay possible.
+                    ? <SupplierPicker options={suppliers || []} value={c.value}
+                        onChange={v => setCond(i, { value: v })} allowFreeText />
+                    : <Input placeholder="Word or phrase" value={c.value} onChange={v => setCond(i, { value: v })} />}
                 </div>
                 <button aria-label="Remove condition"
                   onClick={() => set({ conditions: form.conditions.filter((_, j) => j !== i) })}
@@ -2013,6 +1798,24 @@
             options={[{ label: 'Any entity', value: '' }].concat(entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId })))} />
           <Select label="Recharge to *" value={form.ownerTenantId} onChange={v => set({ ownerTenantId: v })}
             options={entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId }))} />
+
+          {/* Two fields and not one: the sales invoice lands in the paying
+              company's chart of accounts and the bill in the receiving
+              company's, and the same code rarely means the same thing in
+              both. Blank is the normal case. */}
+          <Input label="Account on the draft invoice" placeholder="From the bill"
+            value={form.arAccountCode} onChange={v => set({ arAccountCode: v })}
+            hint={`Code in ${payer ? payer.code : 'the paying entity'}'s chart of accounts.`} />
+          <Input label="Account on the draft bill" placeholder="From the bill"
+            value={form.apAccountCode} onChange={v => set({ apAccountCode: v })}
+            hint={`Code in ${owner ? owner.code : 'the receiving entity'}'s chart of accounts.`} />
+
+          <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: 'var(--text-muted)', marginTop: -6, lineHeight: 1.55 }}>
+            Leave both blank and each side posts to whatever the original bill was booked to —
+            the payer's expense nets to zero and the company that used it carries the cost as
+            itself. Fill them in where the two charts of accounts do not line up, or where the
+            group keeps a dedicated intercompany account.
+          </div>
 
           <div style={{ gridColumn: '1 / -1', background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
             <div>
@@ -2288,6 +2091,137 @@
     const SEND_TIMES = ['07:00', '08:00', '08:30', '09:00', '10:00', '12:00', '15:00', '17:00', '18:30'];
     const ROLES = ['Accounts Payable', 'Finance Manager', 'Group Accountant', 'Director', 'Admin'];
     const TIMEZONES = ['Asia/Kuala_Lumpur', 'Asia/Singapore', 'Asia/Jakarta', 'Asia/Bangkok', 'Asia/Hong_Kong', 'Australia/Perth', 'UTC'];
+
+    // ── Activity ────────────────────────────────────────────────────────────
+    //
+    // Every request that changed something, and every sign-in. Reading is not
+    // logged: it is not an action anybody has to answer for, and page loads
+    // would bury the things that are.
+    //
+    // A click that changes nothing never reaches the server; one that does
+    // arrives as the change it made, which is the more useful record —
+    // "Approved 3 bills" rather than "clicked Approve".
+    function ActivityView({ onToast, refreshKey = 0 }) {
+      const [events, setEvents] = useState([]);
+      const [more, setMore] = useState(false);
+      const [filters, setFilters] = useState({ actors: [], kinds: [] });
+      const [who, setWho] = useState('');
+      const [kind, setKind] = useState('');
+      const [days, setDays] = useState('30');
+      const [q, setQ] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [open, setOpen] = useState(null);
+
+      const query = (extra = {}) => {
+        const p = new URLSearchParams();
+        if (who) p.set('userId', who);
+        if (kind) p.set('action', kind);
+        if (days) p.set('days', days);
+        if (q.trim()) p.set('q', q.trim());
+        for (const [k, v] of Object.entries(extra)) p.set(k, v);
+        return p.toString();
+      };
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        try {
+          const [d, f] = await Promise.all([
+            request('/api/activity?' + query()),
+            request('/api/activity/filters')
+          ]);
+          setEvents(d.events || []);
+          setMore(Boolean(d.more));
+          setFilters(f);
+          setError(null);
+        } catch (e) { setError(e.message); }
+        finally { setLoading(false); }
+      }, [who, kind, days, q, refreshKey]);
+
+      useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load]);
+
+      async function loadMore() {
+        try {
+          const d = await request('/api/activity?' + query({ before: events[events.length - 1].id }));
+          setEvents(e => e.concat(d.events || []));
+          setMore(Boolean(d.more));
+        } catch (e) { toastError(e, 'Could not load more'); }
+      }
+
+      if (error) {
+        return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
+          <Placeholder tone="error" title="Could not read the activity log" message={error}
+            action={<Button variant="outline" size="md" onClick={load}>Try again</Button>} />
+        </div>;
+      }
+
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px', opacity: loading ? .6 : 1, transition: 'opacity var(--dur-fast)' }}>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Activity</span></div>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Activity</h1>
+          <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '78ch' }}>
+            Every sign-in, every attempt that failed, and every action that changed something — who did it, when, and what it did. Only an administrator can open this.
+          </p>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, marginBottom: 16 }}>
+          <Select label="Person" value={who} onChange={setWho}
+            options={[{ label: 'Everyone', value: '' }].concat(
+              (filters.actors || []).map(a => ({ label: `${a.label} (${a.events})`, value: String(a.userId) })))} />
+          <Select label="Kind" value={kind} onChange={setKind}
+            options={[{ label: 'Everything', value: '' }].concat(
+              (filters.kinds || []).map(k => ({ label: k.label, value: k.value })))} />
+          <Select label="Since" value={days} onChange={setDays}
+            options={[{ label: 'Last 24 hours', value: '1' }, { label: 'Last 7 days', value: '7' },
+                      { label: 'Last 30 days', value: '30' }, { label: 'Last 90 days', value: '90' },
+                      { label: 'Everything kept', value: '' }]} />
+          <Input label="Search" placeholder="Name, email or what it did" value={q} onChange={setQ} />
+        </div>
+
+        {events.length === 0
+          ? <Placeholder title="Nothing recorded yet"
+              message={loading ? 'Reading the log…' : 'No activity matches those filters. Actions appear here as soon as somebody changes something.'} />
+          : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1fr) minmax(0,1.5fr) 110px 36px', gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)' }}>
+                <div>When</div><div>Who</div><div>What</div><div>Kind</div><div />
+              </div>
+              {events.map(e => (
+                <React.Fragment key={e.id}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1fr) minmax(0,1.5fr) 110px 36px', gap: 12, alignItems: 'center', padding: '11px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13.5 }}>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>{e.atLabel}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }} title={e.email || ''}>{e.who}</div>
+                      {e.ip && <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{e.ip}</div>}
+                    </div>
+                    <div style={{ minWidth: 0, color: e.failed ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }} title={e.summary}>
+                      {e.summary}
+                      {e.failed && <span style={{ fontSize: 11.5, fontWeight: 700, marginLeft: 8 }}>failed · {e.statusCode}</span>}
+                    </div>
+                    <div><Code>{e.action}</Code></div>
+                    <div style={{ textAlign: 'right' }}>
+                      {e.detail && <button aria-label="Show detail" className="feta-hover"
+                        onClick={() => setOpen(open === e.id ? null : e.id)}
+                        style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 5, display: 'inline-flex', borderRadius: '50%' }}>
+                        <Icon name={open === e.id ? 'chevron-up' : 'chevron-down'} size={15} />
+                      </button>}
+                    </div>
+                  </div>
+                  {open === e.id && e.detail && (
+                    <div style={{ padding: '12px 18px 16px', borderBottom: '1px solid var(--neutral-100)', background: 'var(--neutral-50)' }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 6 }}>{e.method} {e.path}</div>
+                      <pre style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--text-body)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--font-mono, ui-monospace, monospace)' }}>
+                        {JSON.stringify(e.detail, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </React.Fragment>
+              ))}
+              {more && <div style={{ padding: 14, textAlign: 'center' }}>
+                <Button variant="outline" size="sm" onClick={loadMore}>Load more</Button>
+              </div>}
+            </div>}
+      </div>;
+    }
 
     function SettingsView({ entities, onToast, refreshKey = 0 }) {
       const [data, setData] = useState(null);
@@ -2776,12 +2710,14 @@
         window.history.replaceState({}, '', window.location.pathname);
       }, [pushToast]);
 
+      // Activity is only offered to a super admin. The route checks it again
+      // — a tab that is merely hidden is not a permission.
       const viewTabs = [
         { value: 'bills', label: 'Bills' },
         { value: 'recharge', label: 'Recharge' },
         { value: 'bank', label: 'Bank files' },
         { value: 'settings', label: 'Notifications' }
-      ];
+      ].concat(me && me.user && me.user.isSuperAdmin ? [{ value: 'activity', label: 'Activity' }] : []);
       const orgCount = xero ? xero.count || 0 : null;
       const connected = xero ? xero.connected : true;
       const needsReconnect = (xero && xero.needsReconnect) || 0;
@@ -2855,6 +2791,7 @@
         {view === 'bank' && <BankView onToast={pushToast} refreshKey={dataNonce}
           testing={testing} onToggleTesting={toggleTesting} />}
         {view === 'settings' && <SettingsView entities={entities} onToast={pushToast} refreshKey={dataNonce} />}
+        {view === 'activity' && <ActivityView onToast={pushToast} refreshKey={dataNonce} />}
 
         <OrganisationsDialog open={orgsOpen} onToast={pushToast}
           onClose={() => setOrgsOpen(false)}

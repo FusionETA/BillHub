@@ -30,7 +30,13 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
+// Above every API router, so an endpoint written tomorrow is logged
+// tomorrow rather than whenever somebody remembers. attachUser runs first
+// so the log knows who; it is harmless on routes that do their own.
+app.use('/api', require('./auth/middleware').attachUser, require('./auth/activity').middleware);
+
 app.use('/api/auth', require('./auth/router'));
+app.use('/api/activity', require('./billhub/activityRouter'));
 app.use('/api/xero', require('./billhub/xeroRouter'));
 app.use('/api/bills', require('./billhub/router'));
 app.use('/api/payments', require('./billhub/paymentsRouter'));
@@ -105,6 +111,13 @@ if (require.main === module) {
         sync.startScheduler();
         require('./billhub/digest').startScheduler();
         require('./billhub/recharge').startScheduler();
+        // The log grows for ever otherwise. Once at boot, then daily.
+        (async () => {
+          const act = require('./models/activity');
+          await act.prune();
+          const t = setInterval(() => act.prune(), 24 * 3600 * 1000);
+          if (t.unref) t.unref();
+        })().catch((e) => console.error('[activity]', e.message));
       })
       .catch((err) => console.error('[db] NOT connected:', err.message));
   });

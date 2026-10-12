@@ -77,20 +77,23 @@ the paperwork for the recharge in both companies at once.
    table, saying which company it went to and why, with links into both
    documents in Xero.
 
-3. **The "why" is the interesting part.** There are two ways a bill gets
-   matched, and they exist because a Xero bill has *no premises field*:
+3. **The "why" is the interesting part.** A Xero bill has *no premises
+   field*, so a rule matches on what the bill actually carries: the
+   supplier contact, the reference, the invoice number, the line
+   description, or a tracking category — any combination.
 
-   - **Supplier rules** — one supplier contact, one entity. The trick is
-     to name the contact in Xero after the premises it bills for:
-     `Tenaga Nasional Berhad - Signum Tower`. Then the contact itself
-     answers the question, with nothing to read off the PDF.
-   - **Recharge rules** — match on the supplier, the reference, the
-     amount, and so on. This is the fallback for everything an address
-     cannot identify: EPF, insurance, a supplier billing several sites on
-     one contact.
+   The trick that makes this simple for utilities is upstream: name the
+   Xero contact after the premises it bills for,
+   `Tenaga Nasional Berhad - Signum Tower`, and one condition —
+   *supplier is that contact* — answers the whole question. Where one
+   contact covers several buildings, add a condition on the reference.
 
-   Show one of each. The TNB bills match on the address; the EPF bill has
-   no address that means anything, so it matches on the supplier.
+   Rules are tried in order and the first match wins, so a narrow rule
+   sits above a broad one.
+
+   Each rule can also name the ledger account for each side. Left blank —
+   the normal case — both post to whatever the original bill was booked
+   to, so the payer's expense nets to zero.
 
 4. **Nothing to click.** Marking the bill paid is the whole trigger — the
    recharge posts itself:
@@ -100,6 +103,10 @@ the paperwork for the recharge in both companies at once.
    The list on the Recharge tab is now the exceptions: bills paid before a
    rule covered them, and anything the last sweep has not reached. Those
    keep a button.
+
+6. **The Activity tab**, if you are signed in as an administrator. Every
+   sign-in, every failed attempt, and every action that changed something —
+   who, when, and what it did.
 
    Both are drafts so each side approves its own, and anything raised in
    error is deleted rather than credited. Whatever was attached to the
@@ -192,8 +199,11 @@ on the reference, with recharge rules.
 ### Both
 
 17. **Who are the users**, and what should each of them be allowed to do?
-    Everyone can currently do everything.
+    Everyone who can sign in can currently do everything. The only
+    distinction today is administrator, which controls who can read the
+    activity log.
 
-18. **Is there anything in either flow that has to be kept for audit** —
-    who approved a payment run, who posted a recharge, what the file
-    contained at the time?
+18. **The activity log keeps every change for 400 days.** Is that long
+    enough, and is there anything it should capture that it does not? It
+    records what each action *did*, not which buttons were pressed getting
+    there.

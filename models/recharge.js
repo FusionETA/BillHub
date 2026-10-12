@@ -1,7 +1,5 @@
 // Recharge settings, rules and runs.
-const crypto = require('crypto');
 const db = require('../db');
-const premises = require('../lib/premises');
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -51,178 +49,10 @@ async function updateSettings(accountId, fields = {}) {
 // made of. Rules written before the address came out keep the key they were
 // saved with; editing one recomputes it, and the clash check below is what
 // catches a pair that have become duplicates of each other.
-function ruleKey(referenceContains, supplierNames = []) {
-  const suppliers = [...new Set(supplierNames.map(premises.normalise).filter(Boolean))].sort();
-  return crypto.createHash('sha256')
-    .update([premises.normalise(referenceContains), suppliers.join(',')].join('|'))
-    .digest('hex');
-}
-
-async function listRules(accountId) {
-  const rules = await db.query(
-    `SELECT r.*, e.code AS owner_code, e.short_name AS owner_short
-       FROM recharge_rules r
-       LEFT JOIN entities e ON e.account_id = r.account_id AND e.xero_tenant_id = r.owner_tenant_id
-      WHERE r.account_id = ?
-      ORDER BY e.code, r.id`,
-    [accountId]
-  );
-  if (!rules.length) return [];
-  const sup = await db.query(
-    `SELECT s.rule_id, s.supplier_name, s.supplier_key
-       FROM recharge_rule_suppliers s
-       JOIN recharge_rules r ON r.id = s.rule_id
-      WHERE r.account_id = ?
-      ORDER BY s.supplier_name`,
-    [accountId]
-  );
-  const byRule = new Map();
-  for (const x of sup) {
-    if (!byRule.has(x.rule_id)) byRule.set(x.rule_id, []);
-    byRule.get(x.rule_id).push({ name: x.supplier_name, key: x.supplier_key });
-  }
-  return rules.map((r) => ({ ...r, suppliers: byRule.get(r.id) || [] }));
-}
-
-async function getRule(accountId, id) {
-  return (await listRules(accountId)).find((r) => r.id === Number(id)) || null;
-}
-
+// A 400 rather than a 500: everything thrown through this is something the
+// person typed, and the message is written to be shown to them.
 function bad(message) {
   return Object.assign(new Error(message), { statusCode: 400 });
-}
-
-function validateRule({ suppliers, ownerTenantId }) {
-  // The supplier carries the premises now: a contact named "TNB - Signum
-  // Tower" says which building it is, so the rule needs nothing else.
-  //
-  // Required, and not defaultable to "any supplier". A rule with no supplier
-  // would match every paid bill in the account and recharge the lot to one
-  // entity, which is the worst thing this module could be talked into doing.
-  if (!cleanSuppliers(suppliers).length) {
-    throw bad('Choose the supplier. A rule with no supplier would claim every bill in the account.');
-  }
-  if (!ownerTenantId) throw bad('Choose the entity to recharge to.');
-}
-
-// Suppliers are optional: none means every supplier, which is the right rule
-// for a premises one company occupies outright.
-function cleanSuppliers(list) {
-  const out = [];
-  const seen = new Set();
-  for (const raw of (Array.isArray(list) ? list : [])) {
-    const name = String(raw || '').trim();
-    const key = premises.normalise(name);
-    if (!name || !key || seen.has(key)) continue;
-    seen.add(key);
-    out.push({ name, key });
-  }
-  return out;
-}
-
-async function clashingRule(accountId, key, exceptId = null) {
-  return db.getOne(
-    `SELECT r.id, r.premises_address, e.code
-       FROM recharge_rules r
-       LEFT JOIN entities e ON e.account_id = r.account_id AND e.xero_tenant_id = r.owner_tenant_id
-      WHERE r.account_id = ? AND r.rule_key = ? ${exceptId ? 'AND r.id <> ?' : ''}`,
-    exceptId ? [accountId, key, exceptId] : [accountId, key]
-  );
-}
-
-async function createRule(accountId, { suppliers = [], referenceContains = null, ownerTenantId, enabled = true }) {
-  validateRule({ suppliers, ownerTenantId });
-  const reference = String(referenceContains || '').trim() || null;
-  const list = cleanSuppliers(suppliers);
-  const key = ruleKey(reference, list.map((x) => x.name));
-
-  // Checked here as well as by the unique index, because a duplicate key
-  // error says nothing about which rule already claims this.
-  const clash = await clashingRule(accountId, key);
-  if (clash) {
-    throw Object.assign(
-      new Error(`That supplier is already recharged to ${clash.code || 'another entity'} by an identical rule. Edit that one instead.`),
-      { statusCode: 409 }
-    );
-  }
-
-  return db.transaction(async (conn) => {
-    const [res] = await conn.execute(
-      `INSERT INTO recharge_rules
-         (account_id, reference_contains, owner_tenant_id, rule_key, enabled)
-       VALUES (?,?,?,?,?)`,
-      [accountId, reference, ownerTenantId, key, enabled ? 1 : 0]
-    );
-    for (const x of list) {
-      await conn.execute(
-        'INSERT INTO recharge_rule_suppliers (rule_id, supplier_name, supplier_key) VALUES (?,?,?)',
-        [res.insertId, x.name, x.key]
-      );
-    }
-    return res.insertId;
-  });
-}
-
-async function updateRule(accountId, id, fields = {}) {
-  const current = await getRule(accountId, id);
-  if (!current) throw Object.assign(new Error('Rule not found.'), { statusCode: 404 });
-
-  // Only the toggle moves on its own; anything touching what a rule matches
-  // is re-validated against the whole merged rule, not the patch alone.
-  const merged = {
-    referenceContains: 'referenceContains' in fields ? fields.referenceContains : current.reference_contains,
-    ownerTenantId: fields.ownerTenantId ?? current.owner_tenant_id,
-    suppliers: 'suppliers' in fields ? fields.suppliers : current.suppliers.map((x) => x.name)
-  };
-  const touches = ['referenceContains', 'ownerTenantId', 'suppliers'].some((k) => k in fields);
-  if (touches) validateRule(merged);
-
-  const reference = String(merged.referenceContains || '').trim() || null;
-  const list = cleanSuppliers(merged.suppliers);
-  const key = ruleKey(reference, list.map((x) => x.name));
-
-  if (touches && key !== current.rule_key) {
-    const clash = await clashingRule(accountId, key, id);
-    if (clash) {
-      throw Object.assign(
-        new Error(`Another rule already covers ${list.map((x) => `"${x.name}"`).join(', ')} in exactly the same way.`),
-        { statusCode: 409 }
-      );
-    }
-  }
-
-  return db.transaction(async (conn) => {
-    const sets = [];
-    const params = [];
-    if (touches) {
-      // premises_address and address_key go to NULL: a rule that has been
-      // edited since the address came out should not keep one, or it reads
-      // as though it still matters.
-      sets.push('premises_address = NULL', 'address_key = NULL',
-                'reference_contains = ?', 'owner_tenant_id = ?', 'rule_key = ?');
-      params.push(reference, merged.ownerTenantId, key);
-    }
-    if ('enabled' in fields) { sets.push('enabled = ?'); params.push(fields.enabled ? 1 : 0); }
-    if (sets.length) {
-      params.push(accountId, id);
-      await conn.execute(`UPDATE recharge_rules SET ${sets.join(', ')} WHERE account_id = ? AND id = ?`, params);
-    }
-    if ('suppliers' in fields) {
-      await conn.execute('DELETE FROM recharge_rule_suppliers WHERE rule_id = ?', [id]);
-      for (const x of list) {
-        await conn.execute(
-          'INSERT INTO recharge_rule_suppliers (rule_id, supplier_name, supplier_key) VALUES (?,?,?)',
-          [id, x.name, x.key]
-        );
-      }
-    }
-    return 1;
-  });
-}
-
-async function deleteRule(accountId, id) {
-  const res = await db.execute('DELETE FROM recharge_rules WHERE account_id = ? AND id = ?', [accountId, id]);
-  return res.affectedRows;
 }
 
 // ── Recharge rules ──────────────────────────────────────────────────────────
@@ -306,8 +136,14 @@ function validateTextRule({ name, ownerTenantId }) {
   if (!ownerTenantId) throw bad('Choose the entity to recharge to.');
 }
 
+const code = (v) => {
+  const t = String(v == null ? '' : v).trim();
+  return t ? t.slice(0, 32) : null;
+};
+
 async function createTextRule(accountId, {
-  name, matchMode = 'all', conditions = [], payerTenantId = null, ownerTenantId, enabled = true
+  name, matchMode = 'all', conditions = [], payerTenantId = null, ownerTenantId, enabled = true,
+  arAccountCode = null, apAccountCode = null
 }) {
   validateTextRule({ name, ownerTenantId });
   const conds = cleanConditions(conditions);
@@ -318,10 +154,12 @@ async function createTextRule(accountId, {
   return db.transaction(async (conn) => {
     const [res] = await conn.execute(
       `INSERT INTO recharge_text_rules
-         (account_id, name, match_mode, payer_tenant_id, owner_tenant_id, enabled)
-       VALUES (?,?,?,?,?,?)`,
+         (account_id, name, match_mode, payer_tenant_id, owner_tenant_id, enabled,
+          ar_account_code, ap_account_code)
+       VALUES (?,?,?,?,?,?,?,?)`,
       [accountId, String(name).trim(), matchMode === 'any' ? 'any' : 'all',
-       payerTenantId || null, ownerTenantId, enabled ? 1 : 0]
+       payerTenantId || null, ownerTenantId, enabled ? 1 : 0,
+       code(arAccountCode), code(apAccountCode)]
     );
     let i = 0;
     for (const c of conds) {
@@ -361,6 +199,10 @@ async function updateTextRule(accountId, id, fields = {}) {
     if ('ownerTenantId' in fields) { sets.push('owner_tenant_id = ?'); params.push(fields.ownerTenantId); }
     if ('enabled' in fields) { sets.push('enabled = ?'); params.push(fields.enabled ? 1 : 0); }
     if ('position' in fields) { sets.push('position = ?'); params.push(Number(fields.position) || 0); }
+    // Blank clears it, which is how a rule goes back to posting to whatever
+    // the original bill was booked to.
+    if ('arAccountCode' in fields) { sets.push('ar_account_code = ?'); params.push(code(fields.arAccountCode)); }
+    if ('apAccountCode' in fields) { sets.push('ap_account_code = ?'); params.push(code(fields.apAccountCode)); }
     if (sets.length) {
       params.push(accountId, id);
       await conn.execute(`UPDATE recharge_text_rules SET ${sets.join(', ')} WHERE account_id = ? AND id = ?`, params);
@@ -547,10 +389,6 @@ async function summary(accountId, { includeTest = false } = {}) {
      WHERE r.account_id = ? AND r.status <> 'cancelled'${includeTest ? '' : ' AND r.test_mode = 0'}`,
     [accountId]
   );
-  const addr = await db.getOne(
-    'SELECT COUNT(*) AS total, SUM(enabled) AS active FROM recharge_rules WHERE account_id = ?',
-    [accountId]
-  );
   const text = await db.getOne(
     'SELECT COUNT(*) AS total, SUM(enabled) AS active FROM recharge_text_rules WHERE account_id = ?',
     [accountId]
@@ -562,10 +400,8 @@ async function summary(accountId, { includeTest = false } = {}) {
     arInvoices: n(lines?.ar_invoices),
     apBills: n(lines?.ap_bills),
     apEntities: n(lines?.ap_entities),
-    rulesTotal: n(addr?.total) + n(text?.total),
-    rulesActive: n(addr?.active) + n(text?.active),
-    addressRules: n(addr?.total),
-    addressRulesActive: n(addr?.active),
+    rulesTotal: n(text?.total),
+    rulesActive: n(text?.active),
     textRules: n(text?.total),
     textRulesActive: n(text?.active)
   };
@@ -573,7 +409,6 @@ async function summary(accountId, { includeTest = false } = {}) {
 
 module.exports = {
   getSettings, updateSettings,
-  listRules, getRule, createRule, updateRule, deleteRule, validateRule, ruleKey,
   listTextRules, getTextRule, createTextRule, updateTextRule, deleteTextRule, markTextRuleRun,
   FIELDS, OPERATORS, fieldLabel, operatorLabel, fieldNeedsXero,
   listRuns, getRun, createRun, setLinePosted, setLineError, refreshRunStatus,

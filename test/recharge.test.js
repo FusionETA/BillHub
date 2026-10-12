@@ -246,56 +246,66 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
   check('the settings that remain still save', cfg.status === 200 && cfg.body.settings.referencePrefix === 'IC-', cfg.body.settings);
 
-  console.log('\nAddress rules');
-  const rule = await req('POST', '/api/recharge/rules', {
-    cookie,
-    body: { suppliers: ['Tenaga Nasional Berhad'], premisesAddress: KILANG, ownerTenantId: kj.tenantId }
-  });
+  console.log('\nA rule for one supplier');
+  // The commonest rule there is, and the one the Recharge tab is built
+  // around: a contact named after the premises it bills for, and the entity
+  // that premises belongs to.
+  const supplierRule = (supplier, ownerTenantId, extra = {}) =>
+    req('POST', '/api/recharge/text-rules', {
+      cookie,
+      body: {
+        name: extra.name || supplier,
+        matchMode: 'all',
+        conditions: [{ field: 'supplier', operator: 'is', value: supplier }].concat(
+          extra.reference ? [{ field: 'reference', operator: 'contains', value: extra.reference }] : []),
+        ownerTenantId,
+        ...(extra.arAccountCode ? { arAccountCode: extra.arAccountCode } : {}),
+        ...(extra.apAccountCode ? { apAccountCode: extra.apAccountCode } : {})
+      }
+    });
+
+  const rule = await supplierRule('Tenaga Nasional Berhad', kj.tenantId);
   check('a rule is created', rule.status === 201, rule.body);
-  check('it reads as both of the things it can do',
-    rule.body.rule.effect === `Header ABKJ: no recharge · Any other header: 100% recharged to ABKJ`,
-    rule.body.rule.effect);
-  check('it names the supplier it covers',
-    rule.body.rule.supplierLabel === 'Tenaga Nasional Berhad', rule.body.rule.supplierLabel);
+  check('it names the entity it recharges to', rule.body.rule.ownerCode === 'ABKJ', rule.body.rule);
+  check('and reads back the condition it was given',
+    rule.body.rule.conditions.length === 1
+    && rule.body.rule.conditions[0].value === 'Tenaga Nasional Berhad', rule.body.rule.conditions);
 
-  // The one input a rule cannot be saved without. A rule with no supplier
-  // would match every paid bill in the account and recharge the lot to one
-  // entity, so it is refused rather than read as "any supplier".
-  const noSupplier = await req('POST', '/api/recharge/rules', {
-    cookie, body: { ownerTenantId: kj.tenantId }
+  const noConditions = await req('POST', '/api/recharge/text-rules', {
+    cookie, body: { name: 'Everything', conditions: [], ownerTenantId: kj.tenantId }
   });
-  check('a rule with no supplier is refused — it would claim every bill',
-    noSupplier.status === 400 && /every bill in the account/i.test(noSupplier.body.error),
-    noSupplier.body.error);
+  check('a rule with no condition is refused — it would claim every bill',
+    noConditions.status === 400 && /match every paid bill/i.test(noConditions.body.error),
+    noConditions.body.error);
 
-  const blankSupplier = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['   '], ownerTenantId: kj.tenantId }
+  const noOwner = await req('POST', '/api/recharge/text-rules', {
+    cookie, body: { name: 'Nowhere', conditions: [{ field: 'supplier', operator: 'is', value: 'X' }] }
   });
-  check('and so is one whose supplier is only whitespace',
-    blankSupplier.status === 400, blankSupplier.body.error);
-
-  const noOwner = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['X Supplier'] }
-  });
-  check('a rule with no owner is refused',
+  check('a rule with no entity is refused',
     noOwner.status === 400 && /entity to recharge to/i.test(noOwner.body.error), noOwner.body.error);
 
-  // Same supplier, same place, typed differently. The second says nothing the
-  // first does not, and two rules for one bill is not a decision anybody made.
-  const dup = await req('POST', '/api/recharge/rules', {
-    cookie,
-    body: { suppliers: ['TENAGA NASIONAL BERHAD'], premisesAddress: 'KILANG AYU BORNEO JALAN REKO 43000 KAJANG', ownerTenantId: kk.tenantId }
-  });
-  check('a duplicate supplier + premises is refused, however it is punctuated',
-    dup.status === 409 && /already recharged to ABKJ/.test(dup.body.error), dup.body.error);
+  // The water bill and the electricity bill for one building are two rules,
+  // and both are legitimate.
+  const water = await supplierRule('Jabatan Air Negeri Sabah', kk.tenantId);
+  check('a second rule for another supplier is fine', water.status === 201, water.body);
 
-  // Same premises, different supplier: the water bill and the electricity bill
-  // for one building are two different rules and both are legitimate.
-  const water = await req('POST', '/api/recharge/rules', {
-    cookie,
-    body: { suppliers: ['Jabatan Air Negeri Sabah'], premisesAddress: WISMA, ownerTenantId: kk.tenantId }
+  console.log('\nAccounts a rule posts to');
+  const coded = await supplierRule('Account Coded Supplier', kk.tenantId,
+    { name: 'With accounts', arAccountCode: '260', apAccountCode: '429' });
+  check('a rule can name the account for each side', coded.status === 201, coded.body);
+  check('and reads them back',
+    coded.body.rule.arAccountCode === '260' && coded.body.rule.apAccountCode === '429',
+    coded.body.rule);
+  check('with a line saying so, for somebody reading the card',
+    /260/.test(coded.body.rule.accountsLabel || '') && /429/.test(coded.body.rule.accountsLabel || ''),
+    coded.body.rule.accountsLabel);
+  const cleared = await req('PATCH', '/api/recharge/text-rules/' + coded.body.rule.id, {
+    cookie, body: { arAccountCode: '', apAccountCode: '' }
   });
-  check('a second supplier at a different premises is fine', water.status === 201, water.body);
+  check('and blanking them puts it back to the account off the bill',
+    cleared.body.rule.arAccountCode === '' && cleared.body.rule.accountsLabel === null,
+    cleared.body.rule);
+  await req('DELETE', '/api/recharge/text-rules/' + coded.body.rule.id, { cookie });
 
   console.log('\nPaid means paid HERE');
   // The sync writes xero_status and fully_paid_on from Xero, so both are
@@ -364,23 +374,21 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     vNoMatch.outcome === 'recharge' && vNoMatch.ownerCode === 'ABKJ', vNoMatch);
 
   // …and the way to stop that is a reference on the rule.
-  const narrowed = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['Swanston Security'], referenceContains: 'SEC-KK',
-                    ownerTenantId: kk.tenantId }
-  });
+  const narrowed = await supplierRule('Swanston Security', kk.tenantId,
+    { name: 'Security at KK', reference: 'SEC-KK' });
   check('a rule can be narrowed to a reference', narrowed.status === 201, narrowed.body);
   const wrongRef = await makeBill(abm.tenantId, {
     ref: 'SEC-KJ-0826', supplier: 'Swanston Security', total: 310.00
   });
   const vWrongRef = await verdict(wrongRef);
-  check('and a bill without that reference is left alone, and says which reference it wanted',
-    vWrongRef.outcome === 'no-rule' && /SEC-KK/.test(vWrongRef.reason), vWrongRef);
+  check('and a bill without that reference is left alone',
+    vWrongRef.outcome === 'no-rule', vWrongRef);
   const rightRef = await makeBill(abm.tenantId, {
     ref: 'SEC-KK-0826', supplier: 'Swanston Security', total: 290.00
   });
   check('while one carrying it is recharged',
     (await verdict(rightRef)).ownerCode === 'ABKK');
-  await req('DELETE', '/api/recharge/rules/' + narrowed.body.rule.id, { cookie });
+  await req('DELETE', '/api/recharge/text-rules/' + narrowed.body.rule.id, { cookie });
 
   console.log('\nFinding the premises when nothing has written it onto the bill');
   // No premises_address — the only place the address appears is the line
@@ -401,9 +409,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // The whole of a supplier rule: the contact says which building it is,
   // because somebody named it after the building in Xero.
   const LOT9 = 'Tenaga Nasional Berhad - Lot 9';
-  const madeLot9 = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: [LOT9], ownerTenantId: kk.tenantId }
-  });
+  const madeLot9 = await supplierRule(LOT9, kk.tenantId);
   check('a rule is a supplier and an entity, and needs nothing else',
     madeLot9.status === 201, madeLot9.body);
 
@@ -428,28 +434,34 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('nor does another bill from the same contact',
     (await verdict(sibling)).ownerCode === 'ABKK' && calls.length === 0, calls.map((c) => c.path));
 
-  // Two rules naming one supplier: the one that also narrows on a reference
-  // is the more specific and has to win, or the answer would be whichever
-  // row the database happened to return first.
-  const narrow = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: [LOT9], referenceContains: 'TNB-LOT9-09', ownerTenantId: kj.tenantId }
-  });
+  // Two rules naming one supplier. Rules are tried in order and the first
+  // match wins, so the narrower one only does anything if it sits above the
+  // broader one — which is the whole reason the tab lets them be ordered.
+  const narrow = await supplierRule(LOT9, kj.tenantId,
+    { name: LOT9 + ' (Sept)', reference: 'TNB-LOT9-09' });
   check('a second rule can narrow the same supplier by reference',
     narrow.status === 201, narrow.body);
-  check('the bill carrying that reference follows the narrower rule',
+  check('below the broader rule it never fires, which is what order means',
+    (await verdict(sibling)).ownerCode === 'ABKK');
+  await req('PATCH', '/api/recharge/text-rules/' + narrow.body.rule.id,
+    { cookie, body: { position: -1 } });
+  check('moved above it, the bill carrying that reference follows the narrower rule',
     (await verdict(sibling)).ownerCode === 'ABKJ');
   check('and the one that does not still follows the broader rule',
     (await verdict(onContact)).ownerCode === 'ABKK');
-  await req('DELETE', '/api/recharge/rules/' + narrow.body.rule.id, { cookie });
+  await req('DELETE', '/api/recharge/text-rules/' + narrow.body.rule.id, { cookie });
 
   // Two rules that describe exactly the same bills: the second says nothing
   // the first does not, and silently shadowing one with the other is how a
   // recharge ends up somewhere nobody chose.
-  const sameAgain = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: [LOT9], ownerTenantId: kj.tenantId }
-  });
-  check('an identical rule is refused, naming the entity that already claims it',
-    sameAgain.status === 409 && /ABKK/.test(sameAgain.body.error), sameAgain.body.error);
+  // Two rules naming one supplier is allowed — the narrower one wins, which
+  // is the case just above. The order they sit in is what decides, and that
+  // is the rule tab's own concern.
+  const sameAgain = await supplierRule(LOT9, kj.tenantId, { name: LOT9 + ' (second)' });
+  check('a second rule for the same supplier is allowed, and ranks after the first',
+    sameAgain.status === 201 && (await verdict(onContact)).ownerCode === 'ABKK',
+    sameAgain.body);
+  await req('DELETE', '/api/recharge/text-rules/' + sameAgain.body.rule.id, { cookie });
 
   console.log('\nAsking what a bill would do before it is paid');
   const ahead = await req('POST', '/api/recharge/decide', {
@@ -648,8 +660,8 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   console.log('\nThe runs table');
   const view = await req('GET', '/api/recharge', { cookie });
   const row = view.body.runRows.find((c) => c.id === runId);
-  check('the run row names the rule that decided it, and the supplier',
-    /^Supplier rule · Tenaga Nasional Berhad$/.test(row.notes), row.notes);
+  check('the run row names the rule that decided it',
+    /^Recharge rule · Tenaga Nasional Berhad$/.test(row.notes), row.notes);
   check('it links all three documents into Xero',
     Boolean(row.billUrl && row.invoiceUrl && row.billNoUrl),
     { bill: row.billUrl, invoice: row.invoiceUrl, billNo: row.billNoUrl });
@@ -693,22 +705,6 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     refs.includes('TNB-OTHER-0826'), refs);
   check('an already-recharged bill is not', !refs.includes('TNB-GRP-0726'), refs);
 
-  // The silent-failure case: a rule names the supplier, its reference rules
-  // the bill out, and nothing happens. Said out loud, because a rule that
-  // never fires looks like a rule with nothing to do.
-  const quiet = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: ['Quiet Supplier'], referenceContains: 'NEVER-',
-                    ownerTenantId: kk.tenantId }
-  });
-  await makeBill(abm.tenantId, { ref: 'QS-0826', supplier: 'Quiet Supplier', total: 120.00 });
-  const viewNow = await req('GET', '/api/recharge', { cookie });
-  const unmatchedRefs = (viewNow.body.unmatched || []).map((u) => u.reference);
-  check('a bill a rule should have covered and did not is reported',
-    unmatchedRefs.includes('QS-0826'), unmatchedRefs);
-  check('and a supplier no rule names is not reported as a miss',
-    !unmatchedRefs.includes('MISC-0826'), unmatchedRefs);
-  await req('DELETE', '/api/recharge/rules/' + quiet.body.rule.id, { cookie });
-
   const one = sugg.body.suggestions.find((s) => s.reference === 'TNB-LINE-0826');
   check('a suggestion carries the supplier and the owner',
     one && one.supplier === 'Tenaga Nasional Berhad' && one.ownerCode === 'ABKJ', one);
@@ -723,11 +719,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     after.body.suggestions.map((s) => s.reference));
 
   console.log('\nEditing a rule');
-  const moved = await req('PATCH', '/api/recharge/rules/' + rule.body.rule.id, {
+  const moved = await req('PATCH', '/api/recharge/text-rules/' + rule.body.rule.id, {
     cookie, body: { ownerTenantId: kk.tenantId }
   });
   check('the owner can be changed', moved.status === 200 && moved.body.rule.ownerCode === 'ABKK', moved.body.rule);
-  const offed = await req('PATCH', '/api/recharge/rules/' + rule.body.rule.id, { cookie, body: { enabled: false } });
+  const offed = await req('PATCH', '/api/recharge/text-rules/' + rule.body.rule.id, { cookie, body: { enabled: false } });
   check('and it can be switched off without re-stating the supplier',
     offed.status === 200 && offed.body.rule.on === false, offed.body.rule);
   check('a disabled rule stops deciding',
@@ -847,9 +843,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // statement — one contact, one entity — so it decides, and a recharge rule
   // written across a whole supplier family cannot quietly override it.
   const BOTH_SUPPLIER = 'Tenaga Nasional Berhad - Blok C';
-  const named = await req('POST', '/api/recharge/rules', {
-    cookie, body: { suppliers: [BOTH_SUPPLIER], ownerTenantId: kj.tenantId }
-  });
+  const named = await supplierRule(BOTH_SUPPLIER, kj.tenantId);
   check('a rule can name the contact for one building', named.status === 201, named.body);
   const both = await makeBill(abm.tenantId, {
     ref: 'TNB-BOTH-0826', supplier: BOTH_SUPPLIER, total: 500.00
@@ -1185,15 +1179,15 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     final.body.rechargeStats[1].label === 'Xero invoices'
     && final.body.rechargeStats[2].label === 'Xero bills',
     final.body.rechargeStats.map((c) => c.label));
-  check('both rule kinds get their own tab',
-    final.body.rechargeTabs[1].label === 'Supplier rules'
-    && final.body.rechargeTabs[2].label === 'Recharge rules', final.body.rechargeTabs);
+  check('there is one kind of rule, and it has a tab',
+    final.body.rechargeTabs.length === 2
+    && final.body.rechargeTabs[1].label === 'Recharge rules', final.body.rechargeTabs);
   check('the condition vocabulary is offered to the dialog',
     final.body.conditionFields.some((f) => f.value === 'tracking')
     && final.body.conditionOperators.some((o) => o.value === 'starts_with'),
     { f: final.body.conditionFields.length, o: final.body.conditionOperators.length });
-  check('the active-rules card splits the two kinds',
-    /address · .* recharge rule/.test(final.body.rechargeStats[3].sub), final.body.rechargeStats[3].sub);
+  check('the active-rules card says how many of the rules written are on',
+    /^of \d+ rules? written$/.test(final.body.rechargeStats[3].sub), final.body.rechargeStats[3].sub);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();

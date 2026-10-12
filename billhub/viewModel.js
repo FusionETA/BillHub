@@ -394,12 +394,11 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
 
   // Which rule decided this, as a line somebody can read against the rules
   // tabs. Snapshotted values first: the rule may since have been edited.
+  // Runs posted under the rule kinds that came before keep saying so: this
+  // is the record of what actually decided, not of what would decide today.
   const notes = r.text_rule_name
     ? `Recharge rule · ${r.text_rule_name}`
     : r.premises_address
-      // Runs posted while rules still carried an address keep saying so:
-      // this is the record of what actually decided, not of what would
-      // decide today.
       ? `Address rule · ${r.premises_address}`
       : r.rule_id
         ? `Supplier rule · ${r.supplier_name || 'supplier'}`
@@ -463,32 +462,6 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
   };
 }
 
-function rechargeRuleCard(r) {
-  if (!r) return null;
-  const code = r.owner_code || '—';
-  const suppliers = (r.suppliers || []).map((x) => x.name);
-  return {
-    id: r.id,
-    ownerTenantId: r.owner_tenant_id,
-    ownerCode: code,
-    ownerShort: r.owner_short || '—',
-    suppliers,
-    // A rule is its supplier. None means it matches nothing — it cannot mean
-    // "any supplier", which would claim every paid bill in the account — so
-    // the cell has to say that rather than sit blank.
-    supplierLabel: suppliers.length === 0 ? 'No supplier'
-      : suppliers.length === 1 ? suppliers[0]
-      : `${suppliers[0]} + ${suppliers.length - 1} more`,
-    referenceContains: r.reference_contains || null,
-    on: Boolean(r.enabled),
-    effect: `Header ${code}: no recharge · Any other header: 100% recharged to ${code}`,
-    // Only reachable from a rule written before the address came out, which
-    // had no supplier because it did not need one. Saying so beats a row
-    // that looks configured and quietly never fires.
-    incomplete: !suppliers.length || !r.owner_tenant_id
-  };
-}
-
 // A recharge rule. `waiting` is how many paid bills it is sitting on.
 function rechargeTextRuleCard(r, waiting = 0) {
   if (!r) return null;
@@ -512,6 +485,13 @@ function rechargeTextRuleCard(r, waiting = 0) {
     ownerCode: r.owner_code || '—',
     ownerShort: r.owner_short || '—',
     on: Boolean(r.enabled),
+    arAccountCode: r.ar_account_code || '',
+    apAccountCode: r.ap_account_code || '',
+    // Said on the card, because "which account did that post to" is the
+    // question somebody asks about a recharge they did not watch happen.
+    accountsLabel: (r.ar_account_code || r.ap_account_code)
+      ? `Invoice ${r.ar_account_code || 'from the bill'} · Bill ${r.ap_account_code || 'from the bill'}`
+      : null,
     waiting: Number(waiting) || 0,
     waitingLabel: waiting ? `${waiting} paid bill${waiting === 1 ? '' : 's'} waiting` : null,
     // What the rule covers, said in terms of the only two moments that
@@ -579,9 +559,7 @@ function rechargeStatCards(stats, currency = 'RM') {
     {
       label: 'Active rules',
       amount: String(stats.rulesActive),
-      // Split by kind, because "10 rules" says nothing about whether the
-      // premises side or the text side is doing the work.
-      sub: `${stats.addressRules} address · ${stats.textRules} recharge rule${stats.textRules === 1 ? '' : 's'}`,
+      sub: `of ${stats.textRules} rule${stats.textRules === 1 ? '' : 's'} written`,
       color: 'var(--neutral-400)'
     }
   ];
@@ -591,6 +569,6 @@ module.exports = {
   billRow, statCards, statusTabs, metaText, banner, money, shortDate,
   batchCard, bankStatCards, bankAccountRow, bankFormatRow, payeeRow,
   digestSettings, nextRunLabel, recipientRow, digestRunRow,
-  rechargeRunRow, rechargeRuleCard, rechargeTextRuleCard, rechargeSettings,
+  rechargeRunRow, rechargeTextRuleCard, rechargeSettings,
   rechargeSuggestion, rechargeStatCards
 };

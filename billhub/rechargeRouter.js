@@ -5,7 +5,6 @@
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
-//   GET/POST/PATCH/DELETE /api/recharge/rules[/:id]
 //   POST   /api/recharge/plan               dry-run a recharge
 //   POST   /api/recharge/runs               create one (nothing in Xero yet)
 //   POST   /api/recharge/runs/:id/post      create the documents in Xero
@@ -51,9 +50,8 @@ router.get('/', async (req, res) => {
     // While testing mode is on, runs worked out under it are shown alongside
     // the real ones; afterwards they disappear, the same as a test batch.
     const testing = await testMode.isOn(accountId);
-    const [runs, rules, textRules, stats, settings] = await Promise.all([
+    const [runs, textRules, stats, settings] = await Promise.all([
       model.listRuns(accountId, { status: req.query.status || null, includeTest: testing }),
-      model.listRules(accountId),
       model.listTextRules(accountId),
       model.summary(accountId, { includeTest: testing }),
       model.getSettings(accountId)
@@ -73,24 +71,12 @@ router.get('/', async (req, res) => {
       rechargeStats: vm.rechargeStatCards(stats, currency),
       rechargeTabs: [
         { value: 'runs', label: 'Recharge runs', count: runs.length },
-        { value: 'rules', label: 'Supplier rules', count: rules.length },
         { value: 'text', label: 'Recharge rules', count: textRules.length }
       ],
       runRows: runs.map((r) => vm.rechargeRunRow(r, { currency, shortCodes: codes })),
-      ruleCards: rules.map(vm.rechargeRuleCard),
       textRuleCards: textRules.map((r) => vm.rechargeTextRuleCard(r, waiting.get(r.id) || 0)),
       settings: vm.rechargeSettings(settings),
       suggestions: pending.map((p) => vm.rechargeSuggestion(p, currency)),
-      // Bills a rule should have covered and did not. Reported rather than
-      // left silent — a rule that never fires looks exactly like a rule that
-      // had nothing to do.
-      unmatched: (pending.unmatched || []).map((u) => ({
-        billId: u.bill.id,
-        supplier: u.bill.contact_name,
-        reference: u.bill.reference || u.bill.invoice_number,
-        totalFmt: vm.money(u.bill.total),
-        address: u.bill.premises_address || null
-      })),
       // What a recharge rule can test, and how. Sent rather than hardcoded in
       // the browser so the dialog can never offer a field the engine does
       // not understand.
@@ -190,40 +176,6 @@ router.patch('/settings', async (req, res) => {
     await model.updateSettings(accountId, req.body || {});
     res.json({ ok: true, settings: vm.rechargeSettings(await model.getSettings(accountId)) });
   } catch (err) { fail(res, err, 400); }
-});
-
-// ── Rules ───────────────────────────────────────────────────────────────────
-
-router.get('/rules', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
-  try {
-    res.json({ rules: (await model.listRules(accountId)).map(vm.rechargeRuleCard) });
-  } catch (err) { fail(res, err); }
-});
-
-router.post('/rules', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
-  try {
-    const id = await model.createRule(accountId, req.body || {});
-    res.status(201).json({ ok: true, rule: vm.rechargeRuleCard(await model.getRule(accountId, id)) });
-  } catch (err) { fail(res, err, 400); }
-});
-
-router.patch('/rules/:id(\\d+)', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
-  try {
-    await model.updateRule(accountId, Number(req.params.id), req.body || {});
-    res.json({ ok: true, rule: vm.rechargeRuleCard(await model.getRule(accountId, Number(req.params.id))) });
-  } catch (err) { fail(res, err, 400); }
-});
-
-router.delete('/rules/:id(\\d+)', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
-  try {
-    const n = await model.deleteRule(accountId, Number(req.params.id));
-    if (!n) return res.status(404).json({ error: 'Rule not found.' });
-    res.json({ ok: true });
-  } catch (err) { fail(res, err); }
 });
 
 // ── Recharge rules ──────────────────────────────────────────────────────────
