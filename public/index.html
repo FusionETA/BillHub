@@ -1371,6 +1371,25 @@
         return () => { cancelled = true; };
       }, [nonce, refreshKey]);
 
+      // Paying a bill and opening this tab lands inside the few seconds the
+      // recharge takes: the sales invoice exists, the bill does not yet, and
+      // the page says "only one side reached Xero" over something that is
+      // about to finish on its own. A page that does not move looks like a
+      // page reporting a result.
+      //
+      // So while anything is mid-flight, ask again. Capped rather than
+      // open-ended: a run that genuinely failed stays failed, and polling it
+      // for ever would be asking a question already answered.
+      const settling = data && (
+        data.suggestions.length > 0 || data.runRows.some(r => r.partial || r.canPost));
+      const tries = useRef(0);
+      useEffect(() => { tries.current = 0; }, [refreshKey]);
+      useEffect(() => {
+        if (!settling || tries.current >= 8) return;
+        const t = setTimeout(() => { tries.current += 1; reload(); }, 2500);
+        return () => clearTimeout(t);
+      }, [settling, nonce]);
+
       function toastError(e, title) {
         onToast({
           title: e.payload && e.payload.needsXeroReconnect ? 'Xero needs reconnecting' : title,
