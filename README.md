@@ -540,58 +540,44 @@ or have one each, which is the sign the contacts are already per premises.
 It reads both `POBOX` and `STREET`, and distinguishes "none has an address"
 from "none could be read".
 
-### Two kinds of rule, tried in order
+### Two tables, and only one of them recharges
 
-**1. Address rules — the premises register.** One row per utility account at
-one building:
+**1. Address rules — the premises register.** Reference data for
+**WazzOCR**, not for the recharge engine.
 
-| Utility | Address | Paid first by | Xero contact | Recharge to |
-| --- | --- | --- | --- | --- |
-| TNB | Lot 9, Jalan Perusahaan Empat | ABM | TNB - Lot 9 | ABKJ |
-| Indah Water | Lot 9, Jalan Perusahaan Empat | *whoever is billed* | IWK - Lot 9 | ABKJ |
+Somebody photographs a utility bill into WazzOCR's WhatsApp. WazzOCR reads
+the premises address off it, looks it up here, and learns the three things
+the paper cannot tell it:
 
-**The Xero contact is what matches a bill.** It is the only one of the five a
-Xero bill carries. The utility and the address are what make forty rows
-readable by whoever maintains them, and what they copy off the paper bill —
-nothing is tested against them. Matching the address itself was built and
-removed: a Xero call per bill, two spellings of every Malaysian address held
-at once, and still a miss on `Jln` against `Jalan`.
+| Utility | Address on the bill | Create bill in | Xero contact | Account | Recharge to |
+| --- | --- | --- | --- | --- | --- |
+| TNB | Lot 9, Jalan Perusahaan Empat | ABM | TNB - Lot 9 | 445 | *ABKJ* |
 
-The **Utility** column offers what this account actually bills, not a list
-written somewhere else: `lib/utilities.js` recognises a contact name as TNB,
-SESB, Air Selangor, Indah Water, Jabatan Air and the rest, and the dropdown
-is built from the contacts on the account's own bills plus any utility
-already typed into a row. Offering Syabas to a group billing only in Sabah
-is a list nobody reads; leaving out the one they do use is worse. The field
-is free text underneath, so a utility the patterns miss can still be typed.
+`GET /api/recharge/premises?address=…&utility=…` is the lookup. The
+**address is the key**, because the address is what is printed on the bill —
+the opposite way round from a recharge rule, which matches on what a Xero
+bill already carries. Matching is containment on a stripped key, so
+punctuation and case do not matter and a longer address on the bill still
+finds a row holding the distinctive part. An abbreviation is not forgiven:
+`Jln` does not find `Jalan`, because guessing is how a bill lands on the
+wrong company. Unique per utility at an address, or WazzOCR would have two
+answers and no way to choose.
 
-```bash
-npm run utilities                 # which utilities, how many bills, how many contacts
-npm run utilities -- --unmatched  # recurring suppliers the patterns did not recognise
-npm run utilities -- --utility TNB
-```
+**Nothing on this tab decides a recharge.** By the time a bill reaches Bills
+Hub, which organisation it sits in has already been settled; a second
+opinion here would be a rule nobody wrote. *Recharge to* is a note, so one
+table shows the whole chain — the recharge itself comes from a recharge
+rule once the bill is paid.
 
-The second of those matters most. Anything recurring that went unrecognised
-is either a utility `lib/utilities.js` is missing or a supplier that belongs
-in a recharge rule — and the contacts-per-utility count says which utilities
-can use the register at all: one contact per premises is a row each, one
-contact across many premises needs a recharge rule on the reference instead.
+The dialog is a **table, not a form**: rows are added underneath and the
+whole lot saves in one click, because entering forty premises one dialog at
+a time is the thing the screen exists to avoid. Saving is all or nothing
+with the offending row marked.
 
-*Paid first by* narrows a row to one paying company, and on a real account
-it is not optional decoration. A contact name is **per-organisation** in
-Xero — `Tenaga Nasional Berhad` in one company is a different contact from
-the same name in another — and the register matches on the name. Ayu
-Borneo's generic TNB contact carries **1,834 bills across 30 companies**, so
-a row naming it with no payer recharges all thirty to one entity. Each row
-therefore shows what it covers (`1,834 bills · 30 orgs`) and is marked when
-it is broad and unnarrowed. Where two rows name one contact, the one that also names the
-payer wins; otherwise the answer would be whichever row came back first.
-
-The dialog is a **table, not a form**: rows are added underneath and the whole
-lot saves in one click, because entering forty premises one dialog at a time
-is the thing the screen exists to avoid. Saving is all or nothing and the
-offending row is marked — half a register is harder to finish than an empty
-one.
+Each row shows how many bills its contact already carries and in how many
+organisations. A contact spread over many is a generic one, and pointing a
+single building at it is what makes the simple recharge rule impossible
+later.
 
 **2. Recharge rules.**
 
@@ -601,13 +587,8 @@ optional payer filter, and the entity to recharge to. This is what covers
 rent, tenancies, central payroll deductions and anything the register cannot
 say in five columns.
 
-**The register is consulted first.** A row in it is the specific statement —
-this utility account, at this building — and a recharge rule written across
-a whole supplier family must not quietly outrank it. A recharge rule's
-"waiting" count skips bills the register has already claimed, or it would
-promise drafts that never arrive.
-
-**Among recharge rules, the first match in order wins.** Two rules naming one
+**Recharge rules are the only thing that recharges.** The first match in
+order wins. Two rules naming one
 supplier is legitimate — the narrower one simply has to sit above the broader
 one, which is what the ordering on the tab is for. A rule with no condition
 is refused: it would match every paid bill in the account and recharge the

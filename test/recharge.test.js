@@ -304,32 +304,68 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const water = await supplierRule('Jabatan Air Negeri Sabah', kk.tenantId);
   check('a second rule for another supplier is fine', water.status === 201, water.body);
 
-  console.log('\nThe premises register');
-  // One row per utility account at one building. The Xero contact is what
-  // matches a bill — the only one of the five fields a Xero bill carries.
+  console.log('\nThe premises register — reference data for WazzOCR');
+  // Not a matcher for recharging. Somebody photographs a bill into
+  // WazzOCR's WhatsApp; it reads the premises address and looks it up here
+  // for the three things the paper cannot tell it — which organisation to
+  // create the bill in, which contact, which account code.
   const register = (rows) => req('POST', '/api/recharge/address-rules', { cookie, body: { rules: rows } });
+  const WISMA_ADDR = 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu';
 
   const made = await register([
-    { utility: 'TNB', premisesAddress: 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu',
-      contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId },
-    { utility: 'Indah Water', premisesAddress: 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu',
+    { utility: 'TNB', premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
+      contactName: 'Tenaga Nasional Berhad - Wisma', accountCode: '445', ownerTenantId: kk.tenantId },
+    { utility: 'Indah Water', premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
       contactName: 'Indah Water - Wisma', ownerTenantId: kk.tenantId }
   ]);
   check('several rows are added in one go', made.status === 201 && made.body.created === 2, made.body);
-  check('and each reads back as the five columns the table shows',
-    made.body.rules.some((r) => r.utility === 'TNB' && r.ownerCode === 'ABKK'
-      && /Wisma Ayu Borneo/.test(r.address) && r.contactName === 'Tenaga Nasional Berhad - Wisma'),
-    made.body.rules);
-  check('a row with no paying entity says so rather than sitting blank',
-    made.body.rules.every((r) => r.payerTenantId || r.payerLabel === 'Whoever is billed'),
-    made.body.rules.map((r) => r.payerLabel));
+  check('and each reads back as the columns the table shows',
+    made.body.rules.some((r) => r.utility === 'TNB' && r.payerLabel === 'ABM'
+      && r.accountCode === '445' && r.ownerCode === 'ABKK'), made.body.rules);
+  check('two utilities at one building are two rows, not a clash',
+    made.body.rules.filter((r) => r.address === WISMA_ADDR).length === 2, made.body.rules);
 
+  console.log('\nWhat WazzOCR asks it');
+  const ask = (address, utility) =>
+    req('GET', `/api/recharge/premises?address=${encodeURIComponent(address)}`
+      + (utility ? `&utility=${encodeURIComponent(utility)}` : ''), { cookie });
+
+  const found = await ask(WISMA_ADDR, 'TNB');
+  check('an address comes back with where the bill goes',
+    found.status === 200 && found.body.createBillIn.code === 'ABM'
+    && found.body.contactName === 'Tenaga Nasional Berhad - Wisma'
+    && found.body.accountCode === '445', found.body);
+  check('and with where it will end up, as a note',
+    found.body.rechargeTo && found.body.rechargeTo.code === 'ABKK', found.body.rechargeTo);
+
+  // WazzOCR reads an address off a photograph. Punctuation and case will
+  // not survive that; a missing word should not be forgiven.
+  const messy = await ask('WISMA AYU BORNEO  JALAN LINTAS  88300 KOTA KINABALU', 'TNB');
+  check('punctuation and case do not matter', messy.status === 200, messy.body);
+  const abbreviated = await ask('Wisma Ayu Borneo, Jln Lintas, 88300 Kota Kinabalu', 'TNB');
+  check('but an abbreviation is not guessed at — that is how a bill lands on the wrong company',
+    abbreviated.status === 404, abbreviated.body);
+
+  // The address stored can be the distinctive part; a longer one printed on
+  // the bill still finds it.
+  const longer = await ask(`Aras 12, ${WISMA_ADDR}, Sabah, Malaysia`, 'TNB');
+  check('a longer address on the bill still finds the row', longer.status === 200, longer.body);
+
+  check('the utility picks between two rows at one address',
+    (await ask(WISMA_ADDR, 'Indah Water')).body.contactName === 'Indah Water - Wisma');
+  const unmapped = await ask('Lot 5, Jalan Nowhere, 12345 Ipoh', 'TNB');
+  check('a premises nobody has mapped says so, rather than guessing',
+    unmapped.status === 404, unmapped.body);
+
+  console.log('\nSaving a table of them');
   // All or nothing. Saving eight of nine rows leaves somebody rereading the
   // table to work out which eight.
   const countBefore = (await req('GET', '/api/recharge/address-rules', { cookie })).body.rules.length;
   const partly = await register([
-    { utility: 'Syabas', contactName: 'Syabas - Wisma', ownerTenantId: kk.tenantId },
-    { utility: 'Gas', contactName: '', ownerTenantId: kk.tenantId }
+    { utility: 'Syabas', premisesAddress: 'Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves',
+      payerTenantId: abm.tenantId, contactName: 'Syabas - Lot 9', ownerTenantId: kk.tenantId },
+    { utility: 'Gas', premisesAddress: '', payerTenantId: abm.tenantId,
+      contactName: 'Gas - Lot 9', ownerTenantId: kk.tenantId }
   ]);
   check('one bad row saves none of them', partly.status === 400, partly.body);
   check('and names the row it stopped on, counting the way the dialog does',
@@ -338,142 +374,60 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('nothing from that batch reached the table', countAfter === countBefore,
     { countBefore, countAfter });
 
+  const noAddress = await register([
+    { utility: 'TNB', payerTenantId: abm.tenantId, contactName: 'X', ownerTenantId: kk.tenantId }]);
+  check('a row with no address is refused — WazzOCR would never find it',
+    noAddress.status === 400 && /premises address/i.test(noAddress.body.error), noAddress.body.error);
+
+  const noPayer = await register([
+    { utility: 'TNB', premisesAddress: 'Lot 77, Jalan Lain, 40000 Shah Alam',
+      contactName: 'X', ownerTenantId: kk.tenantId }]);
+  check('and one with nowhere to create the bill is refused too',
+    noPayer.status === 400 && /create the bill in/i.test(noPayer.body.error), noPayer.body.error);
+
   const dupBatch = await register([
-    { utility: 'TNB', contactName: 'Dup Contact', ownerTenantId: kk.tenantId },
-    { utility: 'TNB', contactName: 'Dup Contact', ownerTenantId: kk.tenantId }
+    { utility: 'TNB', premisesAddress: 'Lot 3, Jalan Dua, 50000 KL',
+      payerTenantId: abm.tenantId, contactName: 'A', ownerTenantId: kk.tenantId },
+    { utility: 'TNB', premisesAddress: 'LOT 3 JALAN DUA 50000 KL',
+      payerTenantId: abm.tenantId, contactName: 'B', ownerTenantId: kj.tenantId }
   ]);
-  check('two identical rows in one batch are caught before the database sees them',
+  check('one utility twice at one address is caught before the database sees it',
     dupBatch.status === 400 && dupBatch.body.problems.length === 1
-    && dupBatch.body.problems[0].at === 2 && /row 1/.test(dupBatch.body.problems[0].error),
-    dupBatch.body.problems);
+    && dupBatch.body.problems[0].at === 2, dupBatch.body.problems);
 
   const repeat = await register([
-    { utility: 'TNB', contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId }
-  ]);
-  check('and so is a row that repeats one already saved', repeat.status === 409, repeat.body);
+    { utility: 'TNB', premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
+      contactName: 'Someone Else', ownerTenantId: kk.tenantId }]);
+  check('and so is one that repeats a row already saved', repeat.status === 409, repeat.body);
 
-  // The dropdown has to be this account's utilities, not a list written
-  // somewhere else — otherwise it offers a water company in the wrong state
-  // and leaves out the one they actually bill.
-  const { detect } = require('../lib/utilities');
-  check('a contact is recognised as the utility it is',
-    detect('Tenaga Nasional Berhad - Lot 9') === 'TNB'
-    && detect('Pengurusan Air Selangor Sdn Bhd') === 'Air Selangor'
-    && detect('Jabatan Air Negeri Sabah') === 'Jabatan Air',
-    [detect('Tenaga Nasional Berhad - Lot 9'), detect('Pengurusan Air Selangor Sdn Bhd')]);
-  check('and one that is not a utility is left alone rather than guessed at',
-    detect('Swanston Security') === null && detect('KWSP (EPF)') === null,
-    [detect('Swanston Security'), detect('KWSP (EPF)')]);
-
-  const offered = (await req('GET', '/api/recharge', { cookie })).body.utilities || [];
-  check('the dropdown offers a utility this account actually bills',
-    offered.includes('TNB'), offered);
-  check('and not one it has never seen',
-    !offered.includes('Gas Malaysia') && !offered.includes('Syabas'), offered);
-  check('a utility already typed into the register stays on the list',
-    offered.includes('Indah Water'), offered);
-  // The contract, rather than a list of names that moves with the seed:
-  // everything offered is either detected on a contact here or already
-  // typed into a row. Nothing arrives from somewhere else.
-  const contacts = (await db.query(
-    'SELECT DISTINCT contact_name AS n FROM bills WHERE account_id = 1')).map((r) => r.n);
-  const detected = new Set(require('../lib/utilities').fromContacts(contacts));
-  const typedIn = new Set((await db.query(
-    'SELECT DISTINCT utility AS u FROM recharge_rules WHERE account_id = 1')).map((r) => r.u));
-  const { ALWAYS_OFFERED } = require('../lib/utilities');
-  check('and nothing is offered that came from none of those',
-    offered.every((u) => detected.has(u) || typedIn.has(u) || ALWAYS_OFFERED.includes(u)),
-    offered.filter((u) => !detected.has(u) && !typedIn.has(u) && !ALWAYS_OFFERED.includes(u)));
-  // Rent is the exception the list has to carry: a landlord is called
-  // whatever they are called, so no pattern finds one, and on a real
-  // account rent is the second-largest recharge case after utilities.
-  check('rent is offered even though no supplier name can reveal it',
-    offered.includes('Rent'), offered);
-
-  // The foot-gun the real account showed: 1,834 TNB bills across 30
-  // companies sit on one generic contact name, and the register matches on
-  // the NAME — so a row naming it claims all thirty unless it names the
-  // payer. The row has to say so before somebody finds out from the runs.
-  const broadBill1 = await makeBill(abm.tenantId, {
-    ref: 'GEN-TNB-0826', supplier: 'Tenaga Nasional Berhad', total: 500.00 });
-  const broadBill2 = await makeBill(kk.tenantId, {
-    ref: 'GEN-TNB-0926', supplier: 'Tenaga Nasional Berhad', total: 600.00 });
-  await register([{ utility: 'TNB', contactName: 'Tenaga Nasional Berhad', ownerTenantId: kj.tenantId }]);
-  const registerRows = (await req('GET', '/api/recharge/address-rules', { cookie })).body.rules;
-  const generic = registerRows.find((r) => r.contactName === 'Tenaga Nasional Berhad');
-  check('a row says how many bills and organisations it covers',
-    generic && generic.bills >= 2 && generic.orgs >= 2, generic);
-  check('and a row with no payer over several organisations is marked as broad',
-    generic.broad === true, generic);
-
-  const narrowed2 = await register([{ utility: 'TNB', contactName: 'Tenaga Nasional Berhad',
-    payerTenantId: abm.tenantId, ownerTenantId: kk.tenantId }]);
-  check('naming the payer is what narrows it', narrowed2.status === 201,
-    narrowed2.body);
-  check('and that row is not marked broad',
-    narrowed2.body.rules.find((r) => r.payerTenantId === abm.tenantId).broad === false,
-    narrowed2.body.rules.find((r) => r.payerTenantId === abm.tenantId));
-
-  // Taken out again: a row on the generic contact claims every TNB bill in
-  // the account, which is the point being made here and would otherwise
-  // decide every section below this one.
-  for (const r of narrowed2.body.rules.filter((x) => x.contactName === 'Tenaga Nasional Berhad')) {
-    await req('DELETE', '/api/recharge/address-rules/' + r.id, { cookie });
-  }
-  check('and removing them leaves the generic TNB bills to the rules below',
-    !(await req('GET', '/api/recharge/address-rules', { cookie })).body.rules
-      .some((r) => r.contactName === 'Tenaga Nasional Berhad'));
-
-  console.log('\nThe register decides before a recharge rule does');
+  console.log('\nIt decides nothing about recharging');
+  // The point of the clarification this was built from: by the time a bill
+  // is in Bills Hub, which organisation it sits in has already been
+  // decided. A second opinion here would be a rule nobody wrote.
   const wismaBill = await makeBill(abm.tenantId, {
     ref: 'TNB-WISMA-0826', supplier: 'Tenaga Nasional Berhad - Wisma', total: 880.00
   });
-  check('a bill from a mapped contact goes where the row says',
-    (await verdict(wismaBill)).ownerCode === 'ABKK');
+  const noRule = await verdict(wismaBill);
+  check('a bill whose contact is in the register is NOT recharged by it',
+    noRule.outcome === 'no-rule', noRule);
 
-  // Nothing is read out of Xero to decide it: the contact is already on the
-  // local row, which is what makes the register usable over thousands.
-  calls.length = 0;
-  await verdict(wismaBill);
-  check('and deciding it costs Xero nothing', calls.length === 0, calls.map((c) => c.path));
-
-  // A recharge rule written across a whole supplier family must not quietly
-  // outrank a row about one building.
-  const wide = await req('POST', '/api/recharge/text-rules', {
+  // …and a recharge rule for the same contact is what does decide it.
+  const viaRule = await req('POST', '/api/recharge/text-rules', {
     cookie,
-    body: { name: 'All Tenaga to KJ', matchMode: 'all',
-      conditions: [{ field: 'supplier', operator: 'contains', value: 'Tenaga' }],
-      ownerTenantId: kj.tenantId }
+    body: { name: 'Wisma TNB', matchMode: 'all',
+      conditions: [{ field: 'supplier', operator: 'is', value: 'Tenaga Nasional Berhad - Wisma' }],
+      ownerTenantId: kk.tenantId }
   });
-  check('the register wins over a recharge rule that also covers the bill',
-    (await verdict(wismaBill)).ownerCode === 'ABKK');
-  check('and that rule stops counting the bill as one it is waiting on',
-    !(await req('GET', '/api/recharge', { cookie })).body.textRuleCards
-      .find((r) => r.id === wide.body.id).waiting, 'counted a bill it cannot have');
-  await req('DELETE', '/api/recharge/text-rules/' + wide.body.id, { cookie });
+  check('a recharge rule for the same contact is what recharges it',
+    (await verdict(wismaBill)).ownerCode === 'ABKK', viaRule.body);
+  await req('DELETE', '/api/recharge/text-rules/' + viaRule.body.rule.id, { cookie });
 
-  // The same contact settled by two companies is two rows, and the one that
-  // names the payer is the more specific.
-  await register([
-    { utility: 'TNB', contactName: 'Tenaga Nasional Berhad - Wisma',
-      payerTenantId: kj.tenantId, ownerTenantId: kj.tenantId }
-  ]);
-  const payerRow = await register([
-    { utility: 'TNB', contactName: 'Shared Contact', payerTenantId: abm.tenantId, ownerTenantId: kk.tenantId },
-    { utility: 'TNB', contactName: 'Shared Contact', ownerTenantId: kj.tenantId }
-  ]);
-  check('one contact can be mapped twice when the payers differ', payerRow.status === 201, payerRow.body);
-  const sharedBill = await makeBill(abm.tenantId, {
-    ref: 'SHARED-0826', supplier: 'Shared Contact', total: 120.00
-  });
-  check('and the row naming the payer wins over the one that does not',
-    (await verdict(sharedBill)).ownerCode === 'ABKK');
-
-  // Switching a row off has to stop it deciding, or the toggle is decoration.
+  // Switching a row off has to stop WazzOCR finding it, or the toggle is
+  // decoration.
   const offRow = made.body.rules.find((r) => r.contactName === 'Tenaga Nasional Berhad - Wisma');
   await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: false } });
-  const offVerdict = await verdict(wismaBill);
-  check('a row switched off stops deciding', offVerdict.ownerCode !== 'ABKK', offVerdict);
+  check('a row switched off is not returned by a lookup',
+    (await ask(WISMA_ADDR, 'TNB')).status === 404);
   await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: true } });
 
   console.log('\nThe chart of accounts a rule chooses from');

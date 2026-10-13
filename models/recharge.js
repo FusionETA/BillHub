@@ -60,10 +60,18 @@ function bad(message) {
 
 // ── Address rules: the premises register ────────────────────────────────────
 //
-// One row per utility account at one building. What matches a bill is the
-// Xero CONTACT — the only one of the five fields a Xero bill carries. The
-// utility and the address are there to make forty rows readable by whoever
-// maintains them, and are what they copy off the paper bill.
+// Reference data for WazzOCR, not for the recharge engine.
+//
+// Somebody photographs a utility bill into WazzOCR's WhatsApp. WazzOCR reads
+// the premises address off it, looks it up here, and learns the three things
+// the paper cannot tell it: which Xero organisation to create the bill in,
+// which contact to put it under, and which account code to post it to.
+//
+// So the ADDRESS is the key — it is what is printed on the bill — and the
+// other columns are the answer. That is the opposite way round from a
+// recharge rule, which matches on what a Xero bill already carries.
+//
+// Nothing here decides a recharge. See billhub/recharge.js loadRules.
 
 // What the Utility column offers. Built from the account's OWN contacts,
 // not from a list written somewhere else: offering Syabas to a group that
@@ -87,20 +95,21 @@ async function utilityOptions(accountId) {
     .sort((a, b) => a.localeCompare(b));
 }
 
-function addressRuleKey(contactName, payerTenantId, ownerTenantId) {
+// Keyed on what WazzOCR looks up: the utility at the address. Two rows for
+// one utility at one building would leave it with two answers and no way to
+// choose, which is worse than having none.
+function addressRuleKey(utility, premisesAddress) {
   return crypto.createHash('sha256')
-    .update([premises.normalise(contactName), payerTenantId || '', ownerTenantId || ''].join('|'))
+    .update([premises.normalise(utility), premises.normalise(premisesAddress)].join('|'))
     .digest('hex');
 }
 
-// How much each row actually covers. A contact name is per-organisation in
-// Xero — "Tenaga Nasional Berhad" in one company is a different contact from
-// the same name in another — and the register matches on the NAME, so a row
-// naming a generic contact claims every organisation's bills from it.
-//
-// On a real account that is 1,834 bills across 30 companies behind one name.
-// Naming the payer narrows it to one; leaving it blank does not, and the
-// difference has to be visible on the row rather than discovered afterwards.
+// How many bills already sit under each row's contact, and in how many
+// organisations. Not a warning any more — nothing here claims a bill — but
+// the number that says whether the contact is one premises or a generic one
+// shared by thirty companies, which is the difference between a row that
+// means something and a row that will put every building's bill in one
+// place.
 async function addressRuleBreadth(accountId) {
   const rows = await db.query(
     `SELECT contact_name AS name, COUNT(*) AS bills,
@@ -128,7 +137,7 @@ async function listAddressRules(accountId) {
        LEFT JOIN entities o ON o.account_id = r.account_id AND o.xero_tenant_id = r.owner_tenant_id
        LEFT JOIN entities p ON p.account_id = r.account_id AND p.xero_tenant_id = r.payer_tenant_id
       WHERE r.account_id = ?
-      ORDER BY r.utility, r.premises_address, r.id`,
+      ORDER BY r.premises_address, r.utility, r.id`,
     [accountId]
   );
   return rules.map((r) => ({ ...r, ...(breadth.get(r.contact_key) || { bills: 0, orgs: 0 }) }));
@@ -142,13 +151,19 @@ async function getAddressRule(accountId, id) {
 // has to be able to say which of nine rows is wrong, and saving the other
 // eight while reporting the ninth is worse than saving none — half a
 // register is harder to finish than an empty one.
-function checkAddressRule({ contactName, ownerTenantId, payerTenantId }) {
-  if (!contactName || !String(contactName).trim()) return 'Choose the Xero contact — it is what matches the bill.';
-  if (!premises.normalise(contactName)) return 'That contact name is only punctuation.';
-  if (!ownerTenantId) return 'Choose the entity to recharge to.';
-  if (payerTenantId && payerTenantId === ownerTenantId) {
-    return 'The paying entity and the entity it is recharged to are the same, so nothing would happen.';
+function checkAddressRule({ premisesAddress, contactName, payerTenantId }) {
+  // The address is what WazzOCR has in its hand, so a row without one can
+  // never be found.
+  if (!premisesAddress || !String(premisesAddress).trim()) {
+    return 'Write the premises address — it is what WazzOCR reads off the bill.';
   }
+  if (premises.tooShort(premisesAddress)) {
+    return 'That address is too short to identify a premises. Write it as the bill prints it.';
+  }
+  if (!contactName || !String(contactName).trim()) {
+    return 'Choose the Xero contact WazzOCR should put the bill under.';
+  }
+  if (!payerTenantId) return 'Choose the entity WazzOCR should create the bill in.';
   return null;
 }
 
@@ -158,9 +173,10 @@ async function createAddressRules(accountId, rows = []) {
   const clean = (Array.isArray(rows) ? rows : []).map((r, i) => ({
     at: i + 1,
     utility: String(r.utility || '').trim().slice(0, 64) || null,
-    premisesAddress: String(r.premisesAddress || '').trim().slice(0, 512) || null,
+    premisesAddress: String(r.premisesAddress || '').trim().slice(0, 512),
     payerTenantId: r.payerTenantId || null,
     contactName: String(r.contactName || '').trim().slice(0, 255),
+    accountCode: String(r.accountCode || '').trim().slice(0, 32) || null,
     ownerTenantId: r.ownerTenantId || null,
     enabled: r.enabled === false ? 0 : 1
   }));
@@ -176,11 +192,11 @@ async function createAddressRules(accountId, rows = []) {
   // complain about one of them in terms of a row number nobody can see.
   const seen = new Map();
   for (const row of clean) {
-    if (!row.contactName || !row.ownerTenantId) continue;
-    const key = addressRuleKey(row.contactName, row.payerTenantId, row.ownerTenantId);
+    if (!row.premisesAddress) continue;
+    const key = addressRuleKey(row.utility, row.premisesAddress);
     if (seen.has(key)) {
       problems.push({ at: row.at, contactName: row.contactName,
-        error: `The same contact and entities as row ${seen.get(key)}.` });
+        error: `The same utility at the same address as row ${seen.get(key)}.` });
     } else seen.set(key, row.at);
   }
   if (problems.length) throw Object.assign(new Error(problems[0].error), { statusCode: 400, problems });
@@ -188,27 +204,47 @@ async function createAddressRules(accountId, rows = []) {
   return db.transaction(async (conn) => {
     const ids = [];
     for (const row of clean) {
-      const key = addressRuleKey(row.contactName, row.payerTenantId, row.ownerTenantId);
+      const key = addressRuleKey(row.utility, row.premisesAddress);
       const [existing] = await conn.execute(
-        'SELECT id, contact_name FROM recharge_rules WHERE account_id = ? AND rule_key = ?',
+        'SELECT id, premises_address FROM recharge_rules WHERE account_id = ? AND rule_key = ?',
         [accountId, key]);
       if (existing.length) {
         throw Object.assign(
-          new Error(`"${row.contactName}" is already mapped the same way (row ${row.at}).`),
+          new Error(`${row.utility || 'That utility'} at "${row.premisesAddress}" is already mapped (row ${row.at}).`),
           { statusCode: 409 });
       }
       const [res] = await conn.execute(
         `INSERT INTO recharge_rules
-           (account_id, utility, premises_address, payer_tenant_id,
-            contact_name, contact_key, owner_tenant_id, rule_key, enabled)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-        [accountId, row.utility, row.premisesAddress, row.payerTenantId,
-         row.contactName, premises.normalise(row.contactName), row.ownerTenantId, key, row.enabled]
+           (account_id, utility, premises_address, address_key, payer_tenant_id,
+            contact_name, contact_key, account_code, owner_tenant_id, rule_key, enabled)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [accountId, row.utility, row.premisesAddress, premises.normalise(row.premisesAddress),
+         row.payerTenantId, row.contactName, premises.normalise(row.contactName),
+         row.accountCode, row.ownerTenantId, key, row.enabled]
       );
       ids.push(res.insertId);
     }
     return ids;
   });
+}
+
+// What WazzOCR asks: "I have read this address off a bill — where does it
+// go?" Containment on the stripped key, the same matching lib/premises.js
+// has always done, so punctuation and case do not matter but a missing word
+// does. The most specific match wins: a longer stored address beats a
+// shorter one, because the shorter is more likely to be a prefix of several.
+async function lookupPremises(accountId, { address, utility = null } = {}) {
+  const text = String(address || '');
+  if (!premises.normalise(text)) return null;
+  const rows = (await listAddressRules(accountId)).filter((r) => r.enabled);
+  let best = null;
+  for (const r of rows) {
+    if (utility && premises.normalise(r.utility) !== premises.normalise(utility)) continue;
+    const m = premises.match(text, r.premises_address);
+    if (!m) continue;
+    if (!best || m.length > best.length) best = { length: m.length, rule: r };
+  }
+  return best ? best.rule : null;
 }
 
 async function updateAddressRule(accountId, id, fields = {}) {
@@ -220,38 +256,43 @@ async function updateAddressRule(accountId, id, fields = {}) {
     premisesAddress: 'premisesAddress' in fields ? fields.premisesAddress : current.premises_address,
     payerTenantId: 'payerTenantId' in fields ? (fields.payerTenantId || null) : current.payer_tenant_id,
     contactName: 'contactName' in fields ? fields.contactName : current.contact_name,
-    ownerTenantId: fields.ownerTenantId ?? current.owner_tenant_id
+    accountCode: 'accountCode' in fields ? fields.accountCode : current.account_code,
+    ownerTenantId: 'ownerTenantId' in fields ? (fields.ownerTenantId || null) : current.owner_tenant_id
   };
-  const touches = ['utility', 'premisesAddress', 'payerTenantId', 'contactName', 'ownerTenantId']
-    .some((k) => k in fields);
+  const touches = ['utility', 'premisesAddress', 'payerTenantId', 'contactName',
+                   'accountCode', 'ownerTenantId'].some((k) => k in fields);
   if (touches) {
     const why = checkAddressRule(merged);
     if (why) throw bad(why);
   }
 
-  const key = addressRuleKey(merged.contactName, merged.payerTenantId, merged.ownerTenantId);
+  const key = addressRuleKey(merged.utility, merged.premisesAddress);
   if (touches && key !== current.rule_key) {
     const clash = await db.getOne(
       'SELECT id FROM recharge_rules WHERE account_id = ? AND rule_key = ? AND id <> ?',
       [accountId, key, id]);
     if (clash) {
       throw Object.assign(
-        new Error(`Another row already maps "${merged.contactName}" the same way.`), { statusCode: 409 });
+        new Error(`Another row already maps ${merged.utility || 'that utility'} at "${merged.premisesAddress}".`),
+        { statusCode: 409 });
     }
   }
 
   const sets = [];
   const params = [];
   if (touches) {
-    sets.push('utility = ?', 'premises_address = ?', 'payer_tenant_id = ?',
-              'contact_name = ?', 'contact_key = ?', 'owner_tenant_id = ?', 'rule_key = ?');
+    sets.push('utility = ?', 'premises_address = ?', 'address_key = ?', 'payer_tenant_id = ?',
+              'contact_name = ?', 'contact_key = ?', 'account_code = ?',
+              'owner_tenant_id = ?', 'rule_key = ?');
     params.push(
       String(merged.utility || '').trim().slice(0, 64) || null,
-      String(merged.premisesAddress || '').trim().slice(0, 512) || null,
+      String(merged.premisesAddress).trim().slice(0, 512),
+      premises.normalise(merged.premisesAddress),
       merged.payerTenantId || null,
       String(merged.contactName).trim().slice(0, 255),
       premises.normalise(merged.contactName),
-      merged.ownerTenantId, key);
+      String(merged.accountCode || '').trim().slice(0, 32) || null,
+      merged.ownerTenantId || null, key);
   }
   if ('enabled' in fields) { sets.push('enabled = ?'); params.push(fields.enabled ? 1 : 0); }
   if (!sets.length) return 0;
@@ -623,6 +664,7 @@ module.exports = {
   getSettings, updateSettings,
   utilityOptions,
   listAddressRules, getAddressRule, createAddressRules, updateAddressRule, deleteAddressRule,
+  lookupPremises,
   listTextRules, getTextRule, createTextRule, updateTextRule, deleteTextRule, markTextRuleRun,
   FIELDS, OPERATORS, fieldLabel, operatorLabel, fieldNeedsXero,
   listRuns, getRun, createRun, setLinePosted, setLineError, refreshRunStatus,

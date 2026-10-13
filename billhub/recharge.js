@@ -326,38 +326,16 @@ function isPaid(bill) {
   return Boolean(bill.marked_paid_at);
 }
 
-// Both rule sets, loaded once so a scan over many bills does not re-query.
+// Loaded once, so a scan over many bills does not re-query.
+//
+// Recharge rules only. The premises register is NOT consulted here and must
+// not be: it tells WazzOCR which organisation to create a bill in and under
+// which contact, upstream of Bills Hub ever seeing it. By the time a bill is
+// here that decision has already been made, and a second opinion on it would
+// be a rule nobody wrote claiming bills a recharge rule was meant to.
 async function loadRules(accountId) {
-  const [address, text] = await Promise.all([
-    model.listAddressRules(accountId), model.listTextRules(accountId)
-  ]);
-  return {
-    address: address.filter((r) => r.enabled && r.owner_tenant_id && r.contact_key),
-    text: text.filter((r) => r.enabled && r.owner_tenant_id)
-  };
-}
-
-// The address rule covering this bill, if one does.
-//
-// Matched on the Xero contact, which is the only one of a row's five fields
-// a Xero bill carries. Narrowed by the paying entity where the row names
-// one: the same contact can be settled by two companies, and a row that
-// names the payer is a statement about one of them.
-//
-// Where two rows name the same contact, the one that also names the payer
-// is the more specific and wins — otherwise the answer would be whichever
-// row the database returned first, which is not a decision anybody made.
-function matchAddressRule(bill, rules) {
-  const key = premisesLib.normalise(bill.contact_name);
-  if (!key) return null;
-  let best = null;
-  for (const rule of rules) {
-    if (rule.contact_key !== key) continue;
-    if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
-    const score = rule.payer_tenant_id ? 1 : 0;
-    if (!best || score > best.score) best = { rule, score };
-  }
-  return best;
+  const text = await model.listTextRules(accountId);
+  return { text: text.filter((r) => r.enabled && r.owner_tenant_id) };
 }
 
 // The first recharge rule whose conditions the bill satisfies. Ordered by
@@ -374,11 +352,7 @@ async function matchTextRule(accountId, bill, rules, { fetch = true, assumePaid 
 
 function verdictFor(rule, bill, { address = null, kind }) {
   const owner = rule.owner_short || rule.owner_code;
-  // An address rule has no name; what identifies it is the row — the
-  // utility at the premises, or failing that the contact it matches on.
-  const what = kind === 'address'
-    ? [rule.utility, rule.premises_address].filter(Boolean).join(' at ') || rule.contact_name
-    : `"${rule.name}"`;
+  const what = `"${rule.name}"`;
   if (rule.owner_tenant_id === bill.xero_tenant_id) {
     return {
       outcome: 'own', rule, kind, address: address || rule.premises_address || null,
@@ -417,12 +391,6 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
     };
   }
 
-  // Checked first. A row in the register is the specific statement — this
-  // utility account, at this building — and a recharge rule written across
-  // a whole supplier family must not quietly outrank it.
-  const hit = matchAddressRule(bill, all.address);
-  if (hit) return verdictFor(hit.rule, bill, { kind: 'address' });
-
   const text = await matchTextRule(accountId, bill, all.text, { fetch, assumePaid });
   if (text) return verdictFor(text, bill, { kind: 'text' });
 
@@ -451,7 +419,7 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
 
 // Validates a proposed recharge. One supplier, one owner, the whole amount —
 // there is no split to work out, because a rule names a single entity.
-async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null, textRuleId = null }) {
+async function planRun(accountId, { billId, ownerTenantId = null, textRuleId = null }) {
   const settings = await model.getSettings(accountId);
   const [bill] = await bills.getManyByIds(accountId, [Number(billId)]);
   if (!bill) throw err('Bill not found.', 404);
@@ -502,9 +470,6 @@ async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null,
     rule = verdict.rule;
     kind = verdict.kind;
     address = verdict.address;
-  } else if (ruleId) {
-    rule = await model.getAddressRule(accountId, ruleId);
-    kind = rule ? 'address' : null;
   } else if (textRuleId) {
     rule = await model.getTextRule(accountId, textRuleId);
     kind = rule ? 'text' : null;
@@ -539,8 +504,10 @@ async function planRun(accountId, { billId, ownerTenantId = null, ruleId = null,
     lines,
     address,
     total: Number(bill.total),
-    // Which kind of rule raised it, kept apart so a run can say so later.
-    ruleId: kind === 'address' && rule ? rule.id : null,
+    // rule_id on a run is the retired address rule, kept for the handful of
+    // runs raised before the register stopped deciding anything. Nothing
+    // sets it now.
+    ruleId: null,
     textRuleId: kind === 'text' && rule ? rule.id : null
   };
 }
@@ -925,7 +892,7 @@ async function candidateBills(accountId, { limit = 200, billIds = null, supplier
 // between companies before somebody has to remember it.
 async function suggestions(accountId, { limit = 50 } = {}) {
   const rules = await loadRules(accountId);
-  if (!rules.address.length && !rules.text.length) return [];
+  if (!rules.text.length) return [];
 
   const candidates = await candidateBills(accountId, { limit: Math.max(limit * 4, 200) });
   const out = [];
@@ -1004,7 +971,7 @@ async function sweep(accountId, { limit = 50 } = {}) {
       try {
         const run = await createRun(id, {
           billId: p.bill.id,
-          ruleId: p.kind === 'address' ? p.rule.id : null,
+          ruleId: null,
           textRuleId: p.kind === 'text' ? p.rule.id : null
         });
         const out = await postRun(id, run.id);
@@ -1097,7 +1064,6 @@ async function waitingFor(accountId, rule, { rules = null, limit = 200, ignoreWr
     return other[0] < mine[0] || (other[0] === mine[0] && other[1] < mine[1]);
   });
 
-  const addressRules = (await loadRules(accountId)).address;
   const candidates = await candidateBills(accountId, { limit });
   const out = [];
   for (const bill of candidates) {
@@ -1105,9 +1071,6 @@ async function waitingFor(accountId, rule, { rules = null, limit = 200, ignoreWr
     if (!ignoreWritten && !withinStart(bill, rule)) continue;
     // Recharging an entity to itself does nothing.
     if (rule.owner_tenant_id === bill.xero_tenant_id) continue;
-    // The register is consulted first, so a bill it covers is not this
-    // rule's to claim — counting it would promise a draft that never comes.
-    if (matchAddressRule(bill, addressRules)) continue;
     if (!await conditionsMatch(accountId, bill, rule)) continue;
     if (earlier.length && await matchTextRule(accountId, bill, earlier)) continue;
     out.push(bill);
@@ -1123,7 +1086,6 @@ async function waitingCounts(accountId, { rules = null } = {}) {
   if (!all.text.length) return counts;
 
   for (const bill of await candidateBills(accountId, { limit: 400 })) {
-    if (matchAddressRule(bill, all.address)) continue;
     const hit = await matchTextRule(accountId, bill, all.text);
     if (hit && hit.owner_tenant_id !== bill.xero_tenant_id) {
       counts.set(hit.id, (counts.get(hit.id) || 0) + 1);
@@ -1161,7 +1123,7 @@ async function runTextRule(accountId, ruleId) {
 
 module.exports = {
   decide, loadRules, premisesText, planRun, createRun, postRun, suggestions,
-  sweep, sweepSoon, startScheduler, stopScheduler, chartOfAccounts, matchAddressRule,
+  sweep, sweepSoon, startScheduler, stopScheduler, chartOfAccounts,
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
   isPaid, OUTCOMES, contactAddress, addressText,

@@ -128,7 +128,7 @@ const ADJUSTMENTS = [
     check: `SELECT
               (SELECT COUNT(*) FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rules'
-                  AND COLUMN_NAME = 'contact_key') AS shaped,
+                  AND COLUMN_NAME = 'account_code') AS shaped,
               (SELECT COUNT(*) FROM recharge_rules) AS rows_held`,
     needed: (row) => Number(row.shaped) === 0 && Number(row.rows_held) === 0,
     // recharge_runs.rule_id points here, so the constraint comes off first
@@ -142,17 +142,19 @@ const ADJUSTMENTS = [
             id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             account_id       BIGINT UNSIGNED NOT NULL,
             utility          VARCHAR(64) NULL,
-            premises_address VARCHAR(512) NULL,
+            premises_address VARCHAR(512) NOT NULL,
+            address_key      VARCHAR(512) NOT NULL,
             payer_tenant_id  VARCHAR(64) NULL,
             contact_name     VARCHAR(255) NOT NULL,
             contact_key      VARCHAR(255) NOT NULL,
-            owner_tenant_id  VARCHAR(64) NOT NULL,
+            account_code     VARCHAR(32) NULL,
+            owner_tenant_id  VARCHAR(64) NULL,
             rule_key         CHAR(64) NULL,
             enabled          TINYINT(1) NOT NULL DEFAULT 1,
             position         INT DEFAULT 0,
             created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uq_rule_premises (account_id, rule_key),
-            INDEX idx_rule_contact (account_id, contact_key),
+            INDEX idx_rule_address (account_id, address_key),
             CONSTRAINT fk_rrule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
           ALTER TABLE recharge_runs
@@ -162,12 +164,16 @@ const ADJUSTMENTS = [
   {
     // Separate from the rebuild above, which only fires on a table that has
     // not been reshaped at all. A database that caught the middle of this
-    // change has the new columns but not this one, and the rebuild steps
-    // over it — so the column is also ensured on its own.
-    why: 'recharge_rules.payer_tenant_id — which entity settles the supplier',
-    check: hasColumn('recharge_rules', 'payer_tenant_id'),
+    // change has some of these and not others, and the rebuild steps over
+    // it — so each is also ensured on its own.
+    why: 'recharge_rules — the columns WazzOCR needs, on a half-reshaped table',
+    check: hasColumn('recharge_rules', 'account_code'),
     needed: (row) => Number(row.n) === 0,
-    sql: ensureColumn('recharge_rules', 'payer_tenant_id', 'VARCHAR(64) NULL')
+    sql: [
+      ensureColumn('recharge_rules', 'payer_tenant_id', 'VARCHAR(64) NULL'),
+      ensureColumn('recharge_rules', 'account_code', 'VARCHAR(32) NULL'),
+      ensureColumn('recharge_rules', 'address_key', 'VARCHAR(512) NULL')
+    ].join(';\n')
   },
   {
     // CREATE TABLE IF NOT EXISTS is its own guard, but the runner still has

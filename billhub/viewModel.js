@@ -462,7 +462,7 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
   };
 }
 
-// One row of the premises register, as the five-column table reads it.
+// One row of the premises register, as the table reads it.
 function addressRuleRow(r) {
   if (!r) return null;
   return {
@@ -472,26 +472,29 @@ function addressRuleRow(r) {
     // NULL means "whoever is on the bill header", which is the common case
     // and has to read as a decision rather than as a blank cell.
     payerTenantId: r.payer_tenant_id || '',
-    payerLabel: r.payer_tenant_id ? (r.payer_code || '—') : 'Whoever is billed',
+    payerLabel: r.payer_tenant_id ? (r.payer_code || '—') : 'Not set',
     contactName: r.contact_name || '',
-    ownerTenantId: r.owner_tenant_id,
-    ownerCode: r.owner_code || '—',
-    ownerShort: r.owner_short || '—',
+    accountCode: r.account_code || '',
+    // A note on the row, not something this table does: the recharge comes
+    // from a recharge rule.
+    ownerTenantId: r.owner_tenant_id || '',
+    ownerCode: r.owner_tenant_id ? (r.owner_code || '—') : '',
+    ownerShort: r.owner_short || '',
     on: Boolean(r.enabled),
     bills: Number(r.bills || 0),
     orgs: Number(r.orgs || 0),
-    // A contact name is per-organisation in Xero, and the register matches
-    // on the name — so a row naming a contact that exists in many companies
-    // claims all of them unless it names the payer. Said on the row,
-    // because the alternative is finding out from the runs table.
-    broad: Number(r.orgs || 0) > 1 && !r.payer_tenant_id,
+    // A contact already carrying bills in many organisations is a generic
+    // one. Worth saying: pointing a premises at it means WazzOCR files that
+    // building's bills under the same contact as thirty others, and the
+    // simple recharge rule this register exists to make possible stops
+    // being possible.
+    broad: Number(r.orgs || 0) > 1,
     coverLabel: Number(r.bills || 0)
       ? `${r.bills} bill${Number(r.bills) === 1 ? '' : 's'} · ${r.orgs} org${Number(r.orgs) === 1 ? '' : 's'}`
       : 'no bills yet',
-    // The contact is the only field that matches a bill; a row without one
-    // decides nothing. Only reachable from a hand-edited database, but a
-    // row that looks configured and never fires is worth saying out loud.
-    incomplete: !r.contact_name || !r.owner_tenant_id
+    // WazzOCR needs all three to act on a row: where to look it up, where to
+    // create the bill, and who to put it under.
+    incomplete: !r.premises_address || !r.contact_name || !r.payer_tenant_id
   };
 }
 

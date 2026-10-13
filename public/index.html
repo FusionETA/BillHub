@@ -1653,20 +1653,20 @@
 
         {tab === 'rules' && (() => {
           const rows = data.addressRuleRows || [];
-          const COLS = 'minmax(0,.85fr) minmax(0,1.6fr) minmax(0,.9fr) minmax(0,1.5fr) minmax(0,.8fr) 70px 56px';
+          const COLS = 'minmax(0,.8fr) minmax(0,1.7fr) minmax(0,.9fr) minmax(0,1.5fr) minmax(0,.7fr) minmax(0,.7fr) 64px 50px';
           return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
-              One row per utility account at one building. <strong style={{ color: 'var(--text-body)' }}>The Xero contact is what matches a bill</strong> — it is the only one of these five a Xero bill carries. The utility and the address are there so forty rows can be read and searched; nothing is tested against them. <strong style={{ color: 'var(--text-body)' }}>Checked before recharge rules.</strong>
+              <strong style={{ color: 'var(--text-body)' }}>This is for WazzOCR, not for recharging.</strong> When somebody photographs a utility bill into WazzOCR, it reads the premises address and looks it up here to learn what the paper cannot tell it: which Xero organisation to create the bill in, which contact to use, and which account code to post it to. Bills Hub recharges the bill later, from the Recharge rules tab — nothing on this tab decides that.
             </p>
 
             {rows.length === 0
               ? <Placeholder title="No premises mapped yet"
-                  message="Map each utility account to the entity whose building it is. Add as many rows as you like in one go — the dialog is a table, not a form."
+                  message="Tell WazzOCR where each premises' bills belong: the organisation to create the bill in, the contact to use, and the account code. Add as many rows as you like in one go — the dialog is a table, not a form."
                   action={<Button variant="primary" size="md" onClick={() => setAddressRules(true)}>New address rules</Button>} />
               : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto' }}>
                 <div style={{ minWidth: 1020 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)' }}>
-                    <div>Utility</div><div>Address</div><div>Paid first by</div><div>Xero contact</div><div>Recharge to</div><div>Active</div><div />
+                    <div>Utility</div><div>Address on the bill</div><div>Create bill in</div><div>Xero contact</div><div>Account</div><div>Recharge to</div><div>Active</div><div />
                   </div>
                   {rows.map(r => (
                     <div key={r.id} style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13.5, opacity: r.on ? 1 : .55 }}>
@@ -1675,7 +1675,7 @@
                       <div style={{ ...Ellip }}>
                         {r.payerTenantId
                           ? <Code>{r.payerLabel}</Code>
-                          : <span style={{ color: 'var(--text-muted)' }}>{r.payerLabel}</span>}
+                          : <span style={{ color: 'var(--color-danger)' }}>{r.payerLabel}</span>}
                       </div>
                       <div style={{ minWidth: 0 }} title={r.contactName}>
                         <div style={{ color: r.incomplete ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }}>
@@ -1684,13 +1684,24 @@
                         {/* A generic contact exists in every organisation
                             that buys from it, and the row matches on the
                             name — so without a payer it claims all of them. */}
-                        <div style={{ fontSize: 11.5, color: r.broad ? 'var(--color-danger)' : 'var(--text-subtle)' }}>
-                          {r.broad
-                            ? `${r.coverLabel} — every one of those is recharged to ${r.ownerCode}`
-                            : r.coverLabel}
+                        {/* A contact already carrying bills in many
+                            organisations is a generic one — filing a single
+                            building's bills under it is what makes a simple
+                            recharge rule impossible later. */}
+                        <div style={{ fontSize: 11.5, color: r.broad ? 'var(--amber-600, #8a6300)' : 'var(--text-subtle)' }}>
+                          {r.broad ? `${r.coverLabel} — a shared contact, not one premises` : r.coverLabel}
                         </div>
                       </div>
-                      <div style={{ minWidth: 0 }}><Code>{r.ownerCode}</Code></div>
+                      <div style={{ minWidth: 0, ...Ellip }}>
+                        {r.accountCode
+                          ? <Code>{r.accountCode}</Code>
+                          : <span style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>WazzOCR picks</span>}
+                      </div>
+                      <div style={{ minWidth: 0, ...Ellip }}>
+                        {r.ownerCode
+                          ? <Code>{r.ownerCode}</Code>
+                          : <span style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>—</span>}
+                      </div>
                       <div><Switch checked={r.on} onChange={v => toggleAddressRule(r, v)} /></div>
                       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                         <button aria-label="Delete row" onClick={() => deleteAddressRule(r)} className="feta-hover"
@@ -1826,7 +1837,8 @@
     // one click. Blank rows are ignored, so there is no cost to leaving a
     // few spare ones at the bottom.
     function AddressRulesDialog({ open, entities, suppliers, utilities, onClose, onSaved, onToast }) {
-      const blank = () => ({ utility: '', premisesAddress: '', payerTenantId: '', contactName: '', ownerTenantId: '' });
+      const blank = () => ({ utility: '', premisesAddress: '', payerTenantId: '',
+                             contactName: '', accountCode: '', ownerTenantId: '' });
       const [rows, setRows] = useState([blank(), blank(), blank()]);
       const [busy, setBusy] = useState(false);
       const [problems, setProblems] = useState({});   // row index -> message
@@ -1840,7 +1852,10 @@
       // only those are checked — spare rows at the bottom are not mistakes.
       const started = (r) => Object.values(r).some(v => String(v || '').trim());
       const filled = rows.map((r, i) => ({ r, i })).filter(x => started(x.r));
-      const ready = filled.length > 0 && filled.every(x => x.r.contactName && x.r.ownerTenantId);
+      // The three WazzOCR cannot act without: what to look up, where to put
+      // the bill, and who to put it under.
+      const ready = filled.length > 0
+        && filled.every(x => x.r.premisesAddress && x.r.payerTenantId && x.r.contactName);
 
       async function save() {
         setBusy(true); setProblems({});
@@ -1868,29 +1883,34 @@
         .concat(entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId })));
 
       return <Dialog open={open} onClose={onClose} title="New address rules"
-        description="One row per utility account at one building. Add as many as you like, then save them together." size="lg">
+        description="Where WazzOCR should file each premises' bills. Add as many rows as you like, then save them together." size="lg">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <datalist id="utility-list">
             {(utilities || []).map(u => <option key={u} value={u} />)}
           </datalist>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1.5fr) 150px minmax(0,1.5fr) 150px 32px', gap: 8, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-            <div>Utility</div><div>Address</div><div>Paid first by</div><div>Xero contact *</div><div>Recharge to *</div><div />
+          <div style={{ display: 'grid', gridTemplateColumns: '130px minmax(0,1.4fr) 140px minmax(0,1.4fr) 130px 130px 32px', gap: 8, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <div>Utility</div><div>Address on the bill *</div><div>Create bill in *</div><div>Xero contact *</div><div>Account</div><div>Recharge to</div><div />
           </div>
 
           {rows.map((r, i) => (
             <div key={i}>
-              <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1.5fr) 150px minmax(0,1.5fr) 150px 32px', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '130px minmax(0,1.4fr) 140px minmax(0,1.4fr) 130px 130px 32px', gap: 8, alignItems: 'center' }}>
                 <Input placeholder="TNB" value={r.utility} list="utility-list"
                   onChange={v => set(i, { utility: v })} />
                 <Input placeholder="As the bill prints it" value={r.premisesAddress}
                   onChange={v => set(i, { premisesAddress: v })} />
                 <Select value={r.payerTenantId} onChange={v => set(i, { payerTenantId: v })}
-                  options={entityOpts('Whoever is billed')} />
+                  options={entityOpts('Choose…')} />
                 <SupplierPicker options={suppliers || []} value={r.contactName}
                   onChange={v => set(i, { contactName: v })} allowFreeText />
+                {/* The chart of whichever organisation the bill is created
+                    in — a code from another company's chart would be a
+                    bill WazzOCR cannot post. */}
+                <AccountField hint="" tenantId={r.payerTenantId}
+                  value={r.accountCode} onChange={v => set(i, { accountCode: v })} />
                 <Select value={r.ownerTenantId} onChange={v => set(i, { ownerTenantId: v })}
-                  options={entityOpts('Choose…')} />
+                  options={entityOpts('Not set')} />
                 <button aria-label="Remove row" onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}
                   style={{ border: 'none', background: 'none', color: rows.length > 1 ? 'var(--text-subtle)' : 'var(--neutral-200)', cursor: rows.length > 1 ? 'pointer' : 'not-allowed', padding: 6, display: 'flex' }}
                   disabled={rows.length <= 1}><Icon name="x" size={16} /></button>
@@ -1911,7 +1931,7 @@
           </div>
 
           <div style={{ background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-            Saving is all or nothing — if one row is wrong, none are saved and that row is marked. Blank rows are ignored, so spare ones at the bottom cost nothing.
+            The address is what WazzOCR looks up, so it has to read as the bill prints it. <strong>Recharge to</strong> is a note — the recharge itself comes from a recharge rule once the bill is paid here. Saving is all or nothing: if one row is wrong, none are saved and that row is marked. Blank rows are ignored.
           </div>
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 2 }}>

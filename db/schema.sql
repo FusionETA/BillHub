@@ -479,50 +479,53 @@ CREATE TABLE IF NOT EXISTS recharge_settings (
   CONSTRAINT fk_rcs_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ── Address rules ───────────────────────────────────────────────────────────
+-- ── Address rules: the premises register ────────────────────────────────────
 --
--- The premises register: one row per utility account at one building.
+-- Reference data for **WazzOCR**, not for the recharge engine.
 --
---   TNB          Lot 9, Jalan Perusahaan Empat   ABM pays   "TNB - Lot 9"   → ABKJ
---   Indah Water  Lot 9, Jalan Perusahaan Empat   ABM pays   "IWK - Lot 9"   → ABKJ
+-- Somebody photographs a utility bill into WazzOCR's WhatsApp. WazzOCR reads
+-- the premises address off it, looks it up here, and learns three things it
+-- cannot get from the paper: which Xero organisation to create the bill in,
+-- which contact to put it under, and which account code to post it to.
 --
--- What matches a bill is the **Xero contact**, because that is the only one
--- of these five things a Xero bill actually carries. The utility and the
--- address are what make a row of forty readable by the person maintaining
--- it, and what they fill in from the paper bill — not what the engine tests.
--- Matching on the address itself was tried and removed: it needed a Xero
--- call per bill, two spellings of every Malaysian address, and still missed
--- on "Jln" against "Jalan".
+-- Bills Hub does not consult this table when deciding a recharge. By the
+-- time a bill reaches Bills Hub those decisions are already made, and
+-- recharging is the Recharge rules tab's job — see recharge_text_rules. The
+-- two meet only in the sense that a well-chosen contact here makes a simple
+-- recharge rule possible later.
 --
--- Checked before recharge rules. This table is the specific statement — this
--- account, at this building — and a recharge rule written across a whole
--- supplier family must not quietly outrank it.
+-- The ADDRESS is the lookup key, because the address is what is printed on
+-- the bill. Unique per utility: TNB and Air Selangor at one building are two
+-- rows, and two rows for the same utility at the same building would leave
+-- WazzOCR with no answer to pick.
 CREATE TABLE IF NOT EXISTS recharge_rules (
   id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   account_id       BIGINT UNSIGNED NOT NULL,
-  -- Which utility, as somebody would say it out loud: TNB, Indah Water,
-  -- Air Selangor. A label for reading and filtering, not for matching.
+  -- Which utility, as somebody would say it: TNB, Indah Water, Rent.
   utility          VARCHAR(64) NULL,
-  -- The premises this account is for, as the bill prints it. Also a label:
-  -- see the note above.
-  premises_address VARCHAR(512) NULL,
-  -- The entity that settles the supplier. NULL = whichever entity is on the
-  -- bill header, which is the common case.
+  -- The premises, as the bill prints it. What WazzOCR matches on.
+  premises_address VARCHAR(512) NOT NULL,
+  -- premises_address with every separator stripped — see lib/premises.js.
+  address_key      VARCHAR(512) NOT NULL,
+  -- Where WazzOCR creates the bill: the organisation that settles it.
   payer_tenant_id  VARCHAR(64) NULL,
-  -- The Xero contact the bill arrives under. This is the one that decides.
+  -- The Xero contact WazzOCR puts the bill under.
   contact_name     VARCHAR(255) NOT NULL,
-  -- contact_name with every separator stripped — see lib/premises.normalise.
   contact_key      VARCHAR(255) NOT NULL,
-  -- The entity the cost belongs to, and so the entity it is recharged to.
-  owner_tenant_id  VARCHAR(64) NOT NULL,
-  -- sha256 of the contact key, the payer and the owner. Two rows with the
-  -- same key say the same thing twice.
+  -- The account code the bill line posts to, in the paying organisation's
+  -- chart of accounts. NULL leaves it to whatever WazzOCR would pick.
+  account_code     VARCHAR(32) NULL,
+  -- Where the cost ends up, recorded so one table shows the whole chain.
+  -- A note: the recharge itself comes from a recharge rule.
+  owner_tenant_id  VARCHAR(64) NULL,
+  -- sha256 of the utility and the address key. Two rows with the same key
+  -- would give WazzOCR two answers to one bill.
   rule_key         CHAR(64) NULL,
   enabled          TINYINT(1) NOT NULL DEFAULT 1,
   position         INT DEFAULT 0,
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_rule_premises (account_id, rule_key),
-  INDEX idx_rule_contact (account_id, contact_key),
+  INDEX idx_rule_address (account_id, address_key),
   CONSTRAINT fk_rrule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
