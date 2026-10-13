@@ -17,6 +17,8 @@ const no = (m, fix) => { bad += 1; console.log('  NO    ' + m); if (fix) console
 
 (async () => {
   console.log(`\nAUTH_SOURCE=${authSource.MODE}`);
+  console.log(`MySQL ${process.env.DB_USER || '?'}@${process.env.DB_HOST || '?'}`
+    + ` database \`${process.env.DB_NAME || '?'}\``);
   if (!authSource.BORROWED) {
     console.log('\nBills Hub is using its own users and sessions, so there is nothing');
     console.log('to check. Set AUTH_SOURCE=wazzocr to borrow WazzOCR\'s.\n');
@@ -41,6 +43,27 @@ const no = (m, fix) => { bad += 1; console.log('  NO    ' + m); if (fix) console
     }
   }
   if (!reachable) {
+    try {
+      const rows = await db.query('SHOW DATABASES');
+      const names = rows.map((r) => Object.values(r)[0])
+        .filter((n) => !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(n));
+      console.log(`\nSchemas this MySQL user can see: ${names.join(', ') || '(none)'}`);
+      const near = names.filter((n) => /wazz|ocr/i.test(n) && n !== authSource.WAZZOCR_DB);
+      if (near.length) {
+        console.log(`\nThat list has ${near.map((n) => `"${n}"`).join(' and ')}, which looks like`);
+        console.log(`what you want. Set WAZZOCR_DB_NAME to it and restart.`);
+      } else {
+        console.log('\nNothing in that list looks like WazzOCR\'s database. Either this');
+        console.log('MySQL user has no grant on it, or Bills Hub is pointed at a');
+        console.log('different server than WazzOCR — compare DB_HOST in the two .env');
+        console.log('files. A grant looks like:');
+        console.log(`\n  GRANT SELECT ON \`${authSource.WAZZOCR_DB}\`.\`sessions\` TO '${process.env.DB_USER || 'billhub'}'@'%';`);
+        console.log(`  GRANT SELECT ON \`${authSource.WAZZOCR_DB}\`.\`users\` TO '${process.env.DB_USER || 'billhub'}'@'%';`);
+        console.log('  FLUSH PRIVILEGES;');
+      }
+    } catch (e) {
+      console.log(`\nCould not list schemas either: ${e.message}`);
+    }
     console.log('\nNothing below can be checked until that is fixed.\n');
     process.exitCode = 1;
     return;
