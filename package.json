@@ -43,7 +43,8 @@
     "convert-supplier-rules": "node scripts/convert-supplier-rules.js",
     "super-admin": "node scripts/super-admin.js",
     "utilities": "node scripts/utilities.js",
-    "wazzup-channel": "node scripts/wazzup-channel.js"
+    "wazzup-channel": "node scripts/wazzup-channel.js",
+    "auth-preflight": "node scripts/auth-preflight.js"
   },
   "engines": {
     "node": ">=18"
