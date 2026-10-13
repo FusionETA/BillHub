@@ -102,9 +102,11 @@ SAJ / Telekom / Celcom / Maxis / Assessment, then look it up". **Don't.**
 - It excludes **every landlord**, and rent is the second-largest recharge
   case on this account — Impiana 3C, IOI City Mall, ANSA Hotel, and a long
   tail of individuals. None of them is a utility name.
-- It excludes utilities the list has not caught up with. SESB and Jabatan
-  Air are real on this account; a hand-written list of eight would have
-  missed them for as long as nobody updated it.
+- It excludes utilities the list has not caught up with. Ayu Borneo bills
+  eight today, but the group operates in Sabah and Sarawak, where
+  electricity is SESB or Sarawak Energy and water is Jabatan Air, LAKU or
+  Kuching Water — none of them on a list written from today's eight. A
+  hand-written list is wrong from the first new building.
 - **The register is already the gate.** A premises nobody mapped returns
   404. A supplier list is a second gate that can only ever be more wrong
   than the first, and it is a second thing to maintain.
@@ -135,7 +137,26 @@ best reading rather than omitting it.
 On a Malaysian utility bill the premises is usually the address NOT next to
 the supplier's logo, and is often labelled Alamat Premis, Service Address,
 Alamat Penghantaran or similar.
+
+Suppliers you will see most, to help you read the letterhead. This is a
+hint, NOT a filter — a bill from anyone else is handled exactly the same:
+
+  Electricity  TNB / Tenaga Nasional · SESB / Sabah Electricity ·
+               Sarawak Energy
+  Water        Air Selangor · Syabas · SAJ · Jabatan Air · LAKU ·
+               Kuching Water · Air Kelantan · PBA
+  Sewerage     Indah Water / IWK · Alam Flora · SWCorp
+  Gas          Gas Malaysia · Petronas Gas
+  Telecoms     Telekom Malaysia / unifi / TM Technology Services ·
+               Maxis · Celcom · Digi · U Mobile · Time · Astro
+  Council      Majlis Bandaraya / Perbandaran / Daerah · DBKL ·
+               cukai taksiran · cukai tanah
+  Rent         A landlord, who is called whatever they are called.
 ```
+
+`BillHub/lib/utilities.js` holds the same list as patterns, and
+`npm run utilities -- --unmatched` reports recurring suppliers none of them
+recognised — which is how a missing one gets noticed rather than guessed at.
 
 Then send every address in `addresses` as a repeated `address` parameter.
 Matching ignores case and punctuation but **not** abbreviations, which is why
