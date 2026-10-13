@@ -304,6 +304,106 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const water = await supplierRule('Jabatan Air Negeri Sabah', kk.tenantId);
   check('a second rule for another supplier is fine', water.status === 201, water.body);
 
+  console.log('\nThe premises register');
+  // One row per utility account at one building. The Xero contact is what
+  // matches a bill — the only one of the five fields a Xero bill carries.
+  const register = (rows) => req('POST', '/api/recharge/address-rules', { cookie, body: { rules: rows } });
+
+  const made = await register([
+    { utility: 'TNB', premisesAddress: 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu',
+      contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId },
+    { utility: 'Indah Water', premisesAddress: 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu',
+      contactName: 'Indah Water - Wisma', ownerTenantId: kk.tenantId }
+  ]);
+  check('several rows are added in one go', made.status === 201 && made.body.created === 2, made.body);
+  check('and each reads back as the five columns the table shows',
+    made.body.rules.some((r) => r.utility === 'TNB' && r.ownerCode === 'ABKK'
+      && /Wisma Ayu Borneo/.test(r.address) && r.contactName === 'Tenaga Nasional Berhad - Wisma'),
+    made.body.rules);
+  check('a row with no paying entity says so rather than sitting blank',
+    made.body.rules.every((r) => r.payerTenantId || r.payerLabel === 'Whoever is billed'),
+    made.body.rules.map((r) => r.payerLabel));
+
+  // All or nothing. Saving eight of nine rows leaves somebody rereading the
+  // table to work out which eight.
+  const countBefore = (await req('GET', '/api/recharge/address-rules', { cookie })).body.rules.length;
+  const partly = await register([
+    { utility: 'Syabas', contactName: 'Syabas - Wisma', ownerTenantId: kk.tenantId },
+    { utility: 'Gas', contactName: '', ownerTenantId: kk.tenantId }
+  ]);
+  check('one bad row saves none of them', partly.status === 400, partly.body);
+  check('and names the row it stopped on, counting the way the dialog does',
+    partly.body.problems && partly.body.problems[0].at === 2, partly.body.problems);
+  const countAfter = (await req('GET', '/api/recharge/address-rules', { cookie })).body.rules.length;
+  check('nothing from that batch reached the table', countAfter === countBefore,
+    { countBefore, countAfter });
+
+  const dupBatch = await register([
+    { utility: 'TNB', contactName: 'Dup Contact', ownerTenantId: kk.tenantId },
+    { utility: 'TNB', contactName: 'Dup Contact', ownerTenantId: kk.tenantId }
+  ]);
+  check('two identical rows in one batch are caught before the database sees them',
+    dupBatch.status === 400 && dupBatch.body.problems.length === 1
+    && dupBatch.body.problems[0].at === 2 && /row 1/.test(dupBatch.body.problems[0].error),
+    dupBatch.body.problems);
+
+  const repeat = await register([
+    { utility: 'TNB', contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId }
+  ]);
+  check('and so is a row that repeats one already saved', repeat.status === 409, repeat.body);
+
+  console.log('\nThe register decides before a recharge rule does');
+  const wismaBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-WISMA-0826', supplier: 'Tenaga Nasional Berhad - Wisma', total: 880.00
+  });
+  check('a bill from a mapped contact goes where the row says',
+    (await verdict(wismaBill)).ownerCode === 'ABKK');
+
+  // Nothing is read out of Xero to decide it: the contact is already on the
+  // local row, which is what makes the register usable over thousands.
+  calls.length = 0;
+  await verdict(wismaBill);
+  check('and deciding it costs Xero nothing', calls.length === 0, calls.map((c) => c.path));
+
+  // A recharge rule written across a whole supplier family must not quietly
+  // outrank a row about one building.
+  const wide = await req('POST', '/api/recharge/text-rules', {
+    cookie,
+    body: { name: 'All Tenaga to KJ', matchMode: 'all',
+      conditions: [{ field: 'supplier', operator: 'contains', value: 'Tenaga' }],
+      ownerTenantId: kj.tenantId }
+  });
+  check('the register wins over a recharge rule that also covers the bill',
+    (await verdict(wismaBill)).ownerCode === 'ABKK');
+  check('and that rule stops counting the bill as one it is waiting on',
+    !(await req('GET', '/api/recharge', { cookie })).body.textRuleCards
+      .find((r) => r.id === wide.body.id).waiting, 'counted a bill it cannot have');
+  await req('DELETE', '/api/recharge/text-rules/' + wide.body.id, { cookie });
+
+  // The same contact settled by two companies is two rows, and the one that
+  // names the payer is the more specific.
+  await register([
+    { utility: 'TNB', contactName: 'Tenaga Nasional Berhad - Wisma',
+      payerTenantId: kj.tenantId, ownerTenantId: kj.tenantId }
+  ]);
+  const payerRow = await register([
+    { utility: 'TNB', contactName: 'Shared Contact', payerTenantId: abm.tenantId, ownerTenantId: kk.tenantId },
+    { utility: 'TNB', contactName: 'Shared Contact', ownerTenantId: kj.tenantId }
+  ]);
+  check('one contact can be mapped twice when the payers differ', payerRow.status === 201, payerRow.body);
+  const sharedBill = await makeBill(abm.tenantId, {
+    ref: 'SHARED-0826', supplier: 'Shared Contact', total: 120.00
+  });
+  check('and the row naming the payer wins over the one that does not',
+    (await verdict(sharedBill)).ownerCode === 'ABKK');
+
+  // Switching a row off has to stop it deciding, or the toggle is decoration.
+  const offRow = made.body.rules.find((r) => r.contactName === 'Tenaga Nasional Berhad - Wisma');
+  await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: false } });
+  const offVerdict = await verdict(wismaBill);
+  check('a row switched off stops deciding', offVerdict.ownerCode !== 'ABKK', offVerdict);
+  await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: true } });
+
   console.log('\nThe chart of accounts a rule chooses from');
   // Typed account codes fail at the last step, after one document may
   // already be posted. The dialog offers the real chart instead, and asks
@@ -1226,9 +1326,9 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     final.body.rechargeStats[1].label === 'Xero invoices'
     && final.body.rechargeStats[2].label === 'Xero bills',
     final.body.rechargeStats.map((c) => c.label));
-  check('there is one kind of rule, and it has a tab',
-    final.body.rechargeTabs.length === 2
-    && final.body.rechargeTabs[1].label === 'Recharge rules', final.body.rechargeTabs);
+  check('both rule kinds get their own tab, in the order they are tried',
+    final.body.rechargeTabs.map((t) => t.label).join(' | ')
+      === 'Recharge runs | Address rules | Recharge rules', final.body.rechargeTabs);
   check('the condition vocabulary is offered to the dialog',
     final.body.conditionFields.some((f) => f.value === 'tracking')
     && final.body.conditionOperators.some((o) => o.value === 'starts_with'),

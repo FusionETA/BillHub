@@ -1,5 +1,7 @@
 // Recharge settings, rules and runs.
+const crypto = require('crypto');
 const db = require('../db');
+const premises = require('../lib/premises');
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,171 @@ async function updateSettings(accountId, fields = {}) {
 // person typed, and the message is written to be shown to them.
 function bad(message) {
   return Object.assign(new Error(message), { statusCode: 400 });
+}
+
+// ── Address rules: the premises register ────────────────────────────────────
+//
+// One row per utility account at one building. What matches a bill is the
+// Xero CONTACT — the only one of the five fields a Xero bill carries. The
+// utility and the address are there to make forty rows readable by whoever
+// maintains them, and are what they copy off the paper bill.
+
+const UTILITIES = [
+  'TNB', 'Indah Water', 'Air Selangor', 'Syabas', 'Gas Malaysia',
+  'Telekom Malaysia', 'Sewerage', 'Assessment', 'Quit rent'
+];
+
+function addressRuleKey(contactName, payerTenantId, ownerTenantId) {
+  return crypto.createHash('sha256')
+    .update([premises.normalise(contactName), payerTenantId || '', ownerTenantId || ''].join('|'))
+    .digest('hex');
+}
+
+async function listAddressRules(accountId) {
+  return db.query(
+    `SELECT r.*,
+            o.code AS owner_code, o.short_name AS owner_short,
+            p.code AS payer_code, p.short_name AS payer_short
+       FROM recharge_rules r
+       LEFT JOIN entities o ON o.account_id = r.account_id AND o.xero_tenant_id = r.owner_tenant_id
+       LEFT JOIN entities p ON p.account_id = r.account_id AND p.xero_tenant_id = r.payer_tenant_id
+      WHERE r.account_id = ?
+      ORDER BY r.utility, r.premises_address, r.id`,
+    [accountId]
+  );
+}
+
+async function getAddressRule(accountId, id) {
+  return (await listAddressRules(accountId)).find((r) => r.id === Number(id)) || null;
+}
+
+// One row's worth of validation, returned rather than thrown: a bulk save
+// has to be able to say which of nine rows is wrong, and saving the other
+// eight while reporting the ninth is worse than saving none — half a
+// register is harder to finish than an empty one.
+function checkAddressRule({ contactName, ownerTenantId, payerTenantId }) {
+  if (!contactName || !String(contactName).trim()) return 'Choose the Xero contact — it is what matches the bill.';
+  if (!premises.normalise(contactName)) return 'That contact name is only punctuation.';
+  if (!ownerTenantId) return 'Choose the entity to recharge to.';
+  if (payerTenantId && payerTenantId === ownerTenantId) {
+    return 'The paying entity and the entity it is recharged to are the same, so nothing would happen.';
+  }
+  return null;
+}
+
+// Save a whole table at once. Everything or nothing: a partial save leaves
+// somebody rereading forty rows to find which eight went in.
+async function createAddressRules(accountId, rows = []) {
+  const clean = (Array.isArray(rows) ? rows : []).map((r, i) => ({
+    at: i + 1,
+    utility: String(r.utility || '').trim().slice(0, 64) || null,
+    premisesAddress: String(r.premisesAddress || '').trim().slice(0, 512) || null,
+    payerTenantId: r.payerTenantId || null,
+    contactName: String(r.contactName || '').trim().slice(0, 255),
+    ownerTenantId: r.ownerTenantId || null,
+    enabled: r.enabled === false ? 0 : 1
+  }));
+  if (!clean.length) throw bad('Nothing to save.');
+
+  const problems = [];
+  for (const row of clean) {
+    const why = checkAddressRule(row);
+    if (why) problems.push({ at: row.at, contactName: row.contactName, error: why });
+  }
+
+  // A duplicate inside the batch, before the database gets a chance to
+  // complain about one of them in terms of a row number nobody can see.
+  const seen = new Map();
+  for (const row of clean) {
+    if (!row.contactName || !row.ownerTenantId) continue;
+    const key = addressRuleKey(row.contactName, row.payerTenantId, row.ownerTenantId);
+    if (seen.has(key)) {
+      problems.push({ at: row.at, contactName: row.contactName,
+        error: `The same contact and entities as row ${seen.get(key)}.` });
+    } else seen.set(key, row.at);
+  }
+  if (problems.length) throw Object.assign(new Error(problems[0].error), { statusCode: 400, problems });
+
+  return db.transaction(async (conn) => {
+    const ids = [];
+    for (const row of clean) {
+      const key = addressRuleKey(row.contactName, row.payerTenantId, row.ownerTenantId);
+      const [existing] = await conn.execute(
+        'SELECT id, contact_name FROM recharge_rules WHERE account_id = ? AND rule_key = ?',
+        [accountId, key]);
+      if (existing.length) {
+        throw Object.assign(
+          new Error(`"${row.contactName}" is already mapped the same way (row ${row.at}).`),
+          { statusCode: 409 });
+      }
+      const [res] = await conn.execute(
+        `INSERT INTO recharge_rules
+           (account_id, utility, premises_address, payer_tenant_id,
+            contact_name, contact_key, owner_tenant_id, rule_key, enabled)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [accountId, row.utility, row.premisesAddress, row.payerTenantId,
+         row.contactName, premises.normalise(row.contactName), row.ownerTenantId, key, row.enabled]
+      );
+      ids.push(res.insertId);
+    }
+    return ids;
+  });
+}
+
+async function updateAddressRule(accountId, id, fields = {}) {
+  const current = await getAddressRule(accountId, id);
+  if (!current) throw Object.assign(new Error('Rule not found.'), { statusCode: 404 });
+
+  const merged = {
+    utility: 'utility' in fields ? fields.utility : current.utility,
+    premisesAddress: 'premisesAddress' in fields ? fields.premisesAddress : current.premises_address,
+    payerTenantId: 'payerTenantId' in fields ? (fields.payerTenantId || null) : current.payer_tenant_id,
+    contactName: 'contactName' in fields ? fields.contactName : current.contact_name,
+    ownerTenantId: fields.ownerTenantId ?? current.owner_tenant_id
+  };
+  const touches = ['utility', 'premisesAddress', 'payerTenantId', 'contactName', 'ownerTenantId']
+    .some((k) => k in fields);
+  if (touches) {
+    const why = checkAddressRule(merged);
+    if (why) throw bad(why);
+  }
+
+  const key = addressRuleKey(merged.contactName, merged.payerTenantId, merged.ownerTenantId);
+  if (touches && key !== current.rule_key) {
+    const clash = await db.getOne(
+      'SELECT id FROM recharge_rules WHERE account_id = ? AND rule_key = ? AND id <> ?',
+      [accountId, key, id]);
+    if (clash) {
+      throw Object.assign(
+        new Error(`Another row already maps "${merged.contactName}" the same way.`), { statusCode: 409 });
+    }
+  }
+
+  const sets = [];
+  const params = [];
+  if (touches) {
+    sets.push('utility = ?', 'premises_address = ?', 'payer_tenant_id = ?',
+              'contact_name = ?', 'contact_key = ?', 'owner_tenant_id = ?', 'rule_key = ?');
+    params.push(
+      String(merged.utility || '').trim().slice(0, 64) || null,
+      String(merged.premisesAddress || '').trim().slice(0, 512) || null,
+      merged.payerTenantId || null,
+      String(merged.contactName).trim().slice(0, 255),
+      premises.normalise(merged.contactName),
+      merged.ownerTenantId, key);
+  }
+  if ('enabled' in fields) { sets.push('enabled = ?'); params.push(fields.enabled ? 1 : 0); }
+  if (!sets.length) return 0;
+  params.push(accountId, id);
+  const res = await db.execute(
+    `UPDATE recharge_rules SET ${sets.join(', ')} WHERE account_id = ? AND id = ?`, params);
+  return res.affectedRows;
+}
+
+async function deleteAddressRule(accountId, id) {
+  const res = await db.execute(
+    'DELETE FROM recharge_rules WHERE account_id = ? AND id = ?', [accountId, Number(id)]);
+  return res.affectedRows;
 }
 
 // ── Recharge rules ──────────────────────────────────────────────────────────
@@ -409,6 +576,8 @@ async function summary(accountId, { includeTest = false } = {}) {
 
 module.exports = {
   getSettings, updateSettings,
+  UTILITIES,
+  listAddressRules, getAddressRule, createAddressRules, updateAddressRule, deleteAddressRule,
   listTextRules, getTextRule, createTextRule, updateTextRule, deleteTextRule, markTextRuleRun,
   FIELDS, OPERATORS, fieldLabel, operatorLabel, fieldNeedsXero,
   listRuns, getRun, createRun, setLinePosted, setLineError, refreshRunStatus,

@@ -115,6 +115,61 @@ const ADJUSTMENTS = [
             ADD INDEX idx_text_rule_lookup (account_id, enabled, created_at)`
   },
   {
+    // The premises register. recharge_rules held the old address rules, and
+    // scripts/convert-supplier-rules.js emptied it — so this replaces the
+    // table outright rather than performing five column operations whose
+    // combined result has to be guessed to match db/schema.sql.
+    //
+    // Guarded on the table being EMPTY. A row in it would be a mapping
+    // nobody could get back, so where one exists this does nothing and the
+    // address-rule queries fail loudly on first use, which is the outcome
+    // that gets looked at rather than the one that gets lived with.
+    why: 'recharge_rules — rebuilt as the premises register',
+    check: `SELECT
+              (SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rules'
+                  AND COLUMN_NAME = 'contact_key') AS shaped,
+              (SELECT COUNT(*) FROM recharge_rules) AS rows_held`,
+    needed: (row) => Number(row.shaped) === 0 && Number(row.rows_held) === 0,
+    // recharge_runs.rule_id points here, so the constraint comes off first
+    // and goes back on after — a run keeps its rule_id either way, and the
+    // ON DELETE SET NULL it carries is why a posted run survives its rule
+    // being deleted at all.
+    sql: `ALTER TABLE recharge_runs DROP FOREIGN KEY fk_run_rule;
+          DROP TABLE IF EXISTS recharge_rule_suppliers;
+          DROP TABLE IF EXISTS recharge_rules;
+          CREATE TABLE recharge_rules (
+            id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id       BIGINT UNSIGNED NOT NULL,
+            utility          VARCHAR(64) NULL,
+            premises_address VARCHAR(512) NULL,
+            payer_tenant_id  VARCHAR(64) NULL,
+            contact_name     VARCHAR(255) NOT NULL,
+            contact_key      VARCHAR(255) NOT NULL,
+            owner_tenant_id  VARCHAR(64) NOT NULL,
+            rule_key         CHAR(64) NULL,
+            enabled          TINYINT(1) NOT NULL DEFAULT 1,
+            position         INT DEFAULT 0,
+            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_rule_premises (account_id, rule_key),
+            INDEX idx_rule_contact (account_id, contact_key),
+            CONSTRAINT fk_rrule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+          ALTER TABLE recharge_runs
+            ADD CONSTRAINT fk_run_rule FOREIGN KEY (rule_id)
+            REFERENCES recharge_rules(id) ON DELETE SET NULL`
+  },
+  {
+    // Separate from the rebuild above, which only fires on a table that has
+    // not been reshaped at all. A database that caught the middle of this
+    // change has the new columns but not this one, and the rebuild steps
+    // over it — so the column is also ensured on its own.
+    why: 'recharge_rules.payer_tenant_id — which entity settles the supplier',
+    check: hasColumn('recharge_rules', 'payer_tenant_id'),
+    needed: (row) => Number(row.n) === 0,
+    sql: ensureColumn('recharge_rules', 'payer_tenant_id', 'VARCHAR(64) NULL')
+  },
+  {
     // CREATE TABLE IF NOT EXISTS is its own guard, but the runner still has
     // to be told when there is nothing to do, or it prints a change on every
     // deployment for ever.
@@ -247,50 +302,15 @@ const ADJUSTMENTS = [
     needed: (row) => Number(row.n) === 0,
     sql: 'ALTER TABLE entities ADD COLUMN short_code VARCHAR(16) NULL'
   },
-  // ── Recharge: two kinds of rule ───────────────────────────────────────────
+  // ── Recharge: the premises register ──────────────────────────────────────
   //
-  // An address rule now covers several suppliers (or none, meaning any), and
-  // can be narrowed by a reference. Bill type is gone — it described the rule
-  // rather than deciding anything, and the supplier already says what kind of
-  // bill it is.
-  {
-    why: 'recharge_rules.reference_contains — narrow an address rule by the bill reference',
-    check: hasColumn('recharge_rules', 'reference_contains'),
-    needed: (row) => Number(row.n) === 0,
-    sql: 'ALTER TABLE recharge_rules ADD COLUMN reference_contains VARCHAR(255) NULL'
-  },
-  {
-    // supplier_name moves to its own table, so a rule can name several. The
-    // existing single value is carried across rather than dropped.
-    why: 'recharge_rule_suppliers — an address rule covers a set of suppliers',
-    check: `SELECT COUNT(*) AS n FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rule_suppliers'`,
-    needed: (row) => Number(row.n) === 0,
-    sql: `CREATE TABLE recharge_rule_suppliers (
-            id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            rule_id       BIGINT UNSIGNED NOT NULL,
-            supplier_name VARCHAR(255) NOT NULL,
-            supplier_key  VARCHAR(255) NOT NULL,
-            UNIQUE KEY uq_rule_supplier (rule_id, supplier_key),
-            INDEX idx_supplier_key (supplier_key),
-            CONSTRAINT fk_rs_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE CASCADE
-          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-  },
-  {
-    // Carry and drop in one step, because a check that names supplier_name
-    // cannot run on a database where supplier_name is already gone — MySQL
-    // parses the whole statement before any guard can skip it. Carried, not
-    // simply dropped: a rule whose supplier vanished would widen silently
-    // from one supplier to every supplier.
-    why: 'recharge_rules.supplier_name — moved into recharge_rule_suppliers',
-    check: hasColumn('recharge_rules', 'supplier_name'),
-    needed: (row) => Number(row.n) === 1,
-    sql: `INSERT IGNORE INTO recharge_rule_suppliers (rule_id, supplier_name, supplier_key)
-          SELECT id, supplier_name, LOWER(REGEXP_REPLACE(supplier_name, '[^a-zA-Z0-9]', ''))
-            FROM recharge_rules
-           WHERE supplier_name IS NOT NULL AND supplier_name <> '';
-          ALTER TABLE recharge_rules DROP COLUMN supplier_name`
-  },
+  // Three adjustments stood here, building the address rule's old shape: a
+  // reference to narrow it, a table of suppliers per rule, and the move of
+  // supplier_name into that table. None of them appear in db/schema.sql any
+  // more, and the rebuild above drops all three — so running them would
+  // have put back exactly what it had just taken away, on every deployment
+  // for ever. They are gone rather than reordered: an adjustment whose
+  // result the target schema does not contain has no business running.
   {
     // Carried a bill type for part of this release and then stopped: the
     // supplier already says what kind of bill it is. Only ever existed on a
@@ -369,17 +389,11 @@ const ADJUSTMENTS = [
        + 'ADD COLUMN owner_tenant_id VARCHAR(64) NULL, '
        + 'ADD COLUMN rule_key CHAR(64) NULL'
   },
-  {
-    // The old table demanded a payer on every rule. A rule names a premises
-    // and nothing else now, so the column goes — but only where nothing is
-    // stored in it, and nullable first so an older database that still has
-    // values can at least accept new rules.
-    why: 'recharge_rules.payer_tenant_id — a rule names a premises, not a payer',
-    check: hasColumn('recharge_rules', 'payer_tenant_id'),
-    needed: (row) => Number(row.n) === 1,
-    sql: `ALTER TABLE recharge_rules MODIFY payer_tenant_id VARCHAR(64) NULL;
-          ${dropIfUnused('recharge_rules', ['payer_tenant_id'], 'payer_tenant_id IS NOT NULL')}`
-  },
+  // An adjustment stood here dropping recharge_rules.payer_tenant_id, from
+  // the release where a rule named a premises and nothing else. The register
+  // names a payer again — the same contact can be settled by two companies —
+  // so the column is back in db/schema.sql and dropping it would take it
+  // out again on every deployment.
   {
     // The lookup index led with payer_tenant_id, which no longer exists and
     // was never what a rule is found by. Left alone, an upgraded database

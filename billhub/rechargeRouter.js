@@ -6,6 +6,7 @@
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
 //   GET    /api/recharge/accounts/:tenantId  one organisation's chart of accounts
+//   GET/POST/PATCH/DELETE /api/recharge/address-rules[/:id]   the premises register
 //   POST   /api/recharge/plan               dry-run a recharge
 //   POST   /api/recharge/runs               create one (nothing in Xero yet)
 //   POST   /api/recharge/runs/:id/post      create the documents in Xero
@@ -51,8 +52,9 @@ router.get('/', async (req, res) => {
     // While testing mode is on, runs worked out under it are shown alongside
     // the real ones; afterwards they disappear, the same as a test batch.
     const testing = await testMode.isOn(accountId);
-    const [runs, textRules, stats, settings] = await Promise.all([
+    const [runs, addressRules, textRules, stats, settings] = await Promise.all([
       model.listRuns(accountId, { status: req.query.status || null, includeTest: testing }),
+      model.listAddressRules(accountId),
       model.listTextRules(accountId),
       model.summary(accountId, { includeTest: testing }),
       model.getSettings(accountId)
@@ -72,9 +74,14 @@ router.get('/', async (req, res) => {
       rechargeStats: vm.rechargeStatCards(stats, currency),
       rechargeTabs: [
         { value: 'runs', label: 'Recharge runs', count: runs.length },
+        { value: 'rules', label: 'Address rules', count: addressRules.length },
         { value: 'text', label: 'Recharge rules', count: textRules.length }
       ],
       runRows: runs.map((r) => vm.rechargeRunRow(r, { currency, shortCodes: codes })),
+      addressRuleRows: addressRules.map(vm.addressRuleRow),
+      // Offered rather than hardcoded in the browser, so the list can grow
+      // without a deploy of the page.
+      utilities: model.UTILITIES,
       textRuleCards: textRules.map((r) => vm.rechargeTextRuleCard(r, waiting.get(r.id) || 0)),
       settings: vm.rechargeSettings(settings),
       suggestions: pending.map((p) => vm.rechargeSuggestion(p, currency)),
@@ -193,6 +200,53 @@ router.get('/accounts/:tenantId', async (req, res) => {
     console.error('[recharge] chart of accounts failed:', err.message);
     res.status(200).json({ accounts: [], error: err.message });
   }
+});
+
+// ── Address rules: the premises register ────────────────────────────────────
+
+router.get('/address-rules', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    res.json({ rules: (await model.listAddressRules(accountId)).map(vm.addressRuleRow) });
+  } catch (err) { fail(res, err); }
+});
+
+// Takes an array. Adding forty premises one dialog at a time is the thing
+// this screen exists to avoid, so the whole table arrives in one request
+// and is saved in one transaction — all of it or none.
+router.post('/address-rules', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  const body = req.body || {};
+  const rows = Array.isArray(body) ? body : (Array.isArray(body.rules) ? body.rules : [body]);
+  try {
+    const ids = await model.createAddressRules(accountId, rows);
+    res.status(201).json({
+      ok: true, created: ids.length,
+      rules: (await model.listAddressRules(accountId)).map(vm.addressRuleRow)
+    });
+  } catch (err) {
+    // `problems` names the row, so the dialog can mark it rather than
+    // making somebody reread forty of them.
+    if (err.problems) return res.status(400).json({ error: err.message, problems: err.problems });
+    fail(res, err, 400);
+  }
+});
+
+router.patch('/address-rules/:id(\\d+)', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    await model.updateAddressRule(accountId, Number(req.params.id), req.body || {});
+    res.json({ ok: true, rule: vm.addressRuleRow(await model.getAddressRule(accountId, Number(req.params.id))) });
+  } catch (err) { fail(res, err, 400); }
+});
+
+router.delete('/address-rules/:id(\\d+)', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    const gone = await model.deleteAddressRule(accountId, Number(req.params.id));
+    if (!gone) return res.status(404).json({ error: 'Rule not found.' });
+    res.json({ ok: true });
+  } catch (err) { fail(res, err); }
 });
 
 // ── Recharge rules ──────────────────────────────────────────────────────────

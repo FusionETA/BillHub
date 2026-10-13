@@ -540,32 +540,48 @@ or have one each, which is the sign the contacts are already per premises.
 It reads both `POBOX` and `STREET`, and distinguishes "none has an address"
 from "none could be read".
 
-### One kind of rule
+### Two kinds of rule, tried in order
 
-A rule is a name, a set of conditions over `supplier` / `reference` /
-`invoice number` / `line description` / `tracking category`, joined by **all**
-or **any**, an optional payer filter, and the entity to recharge to.
+**1. Address rules — the premises register.** One row per utility account at
+one building:
 
-There were two kinds. The first matched a premises address, and then — once
-the contacts were named after the premises they bill for — one supplier
-contact. Both were strictly weaker than this one: `supplier is "TNB - Signum
-Tower"` says the same thing and keeps saying it when the next rule needs a
-reference as well. Two kinds meant two tabs, two dialogs, two code paths and
-an ordering question between them, for one sentence of expressive power.
+| Utility | Address | Paid first by | Xero contact | Recharge to |
+| --- | --- | --- | --- | --- |
+| TNB | Lot 9, Jalan Perusahaan Empat | ABM | TNB - Lot 9 | ABKJ |
+| Indah Water | Lot 9, Jalan Perusahaan Empat | *whoever is billed* | IWK - Lot 9 | ABKJ |
 
-`scripts/convert-supplier-rules.js` moves the old ones across. It is not a
-migration: it has to be run deliberately, and it reports before it writes.
-Two things it handles, because a converted rule that behaved differently
-would be worse than one that failed loudly —
+**The Xero contact is what matches a bill.** It is the only one of the five a
+Xero bill carries. The utility and the address are what make forty rows
+readable by whoever maintains them, and what they copy off the paper bill —
+nothing is tested against them. Matching the address itself was built and
+removed: a Xero call per bill, two spellings of every Malaysian address held
+at once, and still a miss on `Jln` against `Jalan`.
 
-- **Order.** Supplier rules were consulted before every recharge rule, so a
-  converted one takes the top position. Otherwise a broad rule written
-  earlier starts claiming its bills.
-- **Scope.** A recharge rule only acts on bills marked paid *after it was
-  written*; a supplier rule had no such limit. The converted rule inherits
-  the original's `created_at`, so the set of bills it covers does not move.
+*Paid first by* narrows a row to one paying company, for a contact two of
+them settle. Where two rows name one contact, the one that also names the
+payer wins; otherwise the answer would be whichever row came back first.
 
-**Rules are tried in order and the first match wins.** Two rules naming one
+The dialog is a **table, not a form**: rows are added underneath and the whole
+lot saves in one click, because entering forty premises one dialog at a time
+is the thing the screen exists to avoid. Saving is all or nothing and the
+offending row is marked — half a register is harder to finish than an empty
+one.
+
+**2. Recharge rules.**
+
+A name, a set of conditions over `supplier` / `reference` / `invoice number` /
+`line description` / `tracking category`, joined by **all** or **any**, an
+optional payer filter, and the entity to recharge to. This is what covers
+rent, tenancies, central payroll deductions and anything the register cannot
+say in five columns.
+
+**The register is consulted first.** A row in it is the specific statement —
+this utility account, at this building — and a recharge rule written across
+a whole supplier family must not quietly outrank it. A recharge rule's
+"waiting" count skips bills the register has already claimed, or it would
+promise drafts that never arrive.
+
+**Among recharge rules, the first match in order wins.** Two rules naming one
 supplier is legitimate — the narrower one simply has to sit above the broader
 one, which is what the ordering on the tab is for. A rule with no condition
 is refused: it would match every paid bill in the account and recharge the

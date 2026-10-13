@@ -462,6 +462,29 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
   };
 }
 
+// One row of the premises register, as the five-column table reads it.
+function addressRuleRow(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    utility: r.utility || '',
+    address: r.premises_address || '',
+    // NULL means "whoever is on the bill header", which is the common case
+    // and has to read as a decision rather than as a blank cell.
+    payerTenantId: r.payer_tenant_id || '',
+    payerLabel: r.payer_tenant_id ? (r.payer_code || '—') : 'Whoever is billed',
+    contactName: r.contact_name || '',
+    ownerTenantId: r.owner_tenant_id,
+    ownerCode: r.owner_code || '—',
+    ownerShort: r.owner_short || '—',
+    on: Boolean(r.enabled),
+    // The contact is the only field that matches a bill; a row without one
+    // decides nothing. Only reachable from a hand-edited database, but a
+    // row that looks configured and never fires is worth saying out loud.
+    incomplete: !r.contact_name || !r.owner_tenant_id
+  };
+}
+
 // A recharge rule. `waiting` is how many paid bills it is sitting on.
 function rechargeTextRuleCard(r, waiting = 0) {
   if (!r) return null;
@@ -570,5 +593,5 @@ module.exports = {
   batchCard, bankStatCards, bankAccountRow, bankFormatRow, payeeRow,
   digestSettings, nextRunLabel, recipientRow, digestRunRow,
   rechargeRunRow, rechargeTextRuleCard, rechargeSettings,
-  rechargeSuggestion, rechargeStatCards
+  addressRuleRow, rechargeSuggestion, rechargeStatCards
 };

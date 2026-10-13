@@ -423,7 +423,9 @@
 
     function Dialog({ open, title, description, size = 'md', onClose, children }) {
       if (!open) return null;
-      const w = size === 'sm' ? 440 : 640;
+      // 'lg' is for a dialog that is a table rather than a form — five
+      // columns of the premises register do not fit in a form's width.
+      const w = size === 'sm' ? 440 : size === 'lg' ? 1120 : 640;
       // The panel is capped at the viewport and its body scrolls. Without
       // that a dialog simply grew past the bottom of the screen: the Pay
       // dialog with a recharge panel and a warning per payee ran off the
@@ -1359,6 +1361,7 @@
       const [busy, setBusy] = useState(null);
       const [nonce, setNonce] = useState(0);
       const [textRuleFor, setTextRuleFor] = useState(null); // recharge rule, same convention
+      const [addressRules, setAddressRules] = useState(false);
       const reload = () => setNonce(n => n + 1);
 
       useEffect(() => {
@@ -1447,6 +1450,22 @@
         finally { setBusy(null); }
       }
 
+      async function toggleAddressRule(rule, on) {
+        try {
+          await request('/api/recharge/address-rules/' + rule.id, { method: 'PATCH', body: { enabled: on } });
+          reload();
+        } catch (e) { toastError(e, 'Could not update that row'); }
+      }
+
+      async function deleteAddressRule(rule) {
+        try {
+          await request('/api/recharge/address-rules/' + rule.id, { method: 'DELETE' });
+          onToast({ title: 'Row deleted',
+            message: `${rule.contactName} is no longer mapped to ${rule.ownerCode}.` });
+          reload();
+        } catch (e) { toastError(e, 'Could not delete that row'); }
+      }
+
       async function deleteTextRule(rule) {
         try {
           await request('/api/recharge/text-rules/' + rule.id, { method: 'DELETE' });
@@ -1499,7 +1518,12 @@
             </p>
           </div>
           <span style={{ flex: 1 }} />
-          <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
+          {/* Kept together: two buttons wrapping independently put one on
+              each line and read as two unrelated controls. */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Button variant="outline" size="sm" onClick={() => setAddressRules(true)}>New address rules</Button>
+            <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
+          </div>
         </div>
 
         {data.testMode && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--amber-100)', borderRadius: 10, padding: '12px 18px', marginBottom: 14, fontSize: 13.5, color: '#6b4d00', lineHeight: 1.6 }}>
@@ -1627,6 +1651,49 @@
 
         </React.Fragment>}
 
+        {tab === 'rules' && (() => {
+          const rows = data.addressRuleRows || [];
+          const COLS = 'minmax(0,.85fr) minmax(0,1.6fr) minmax(0,.9fr) minmax(0,1.5fr) minmax(0,.8fr) 70px 56px';
+          return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
+              One row per utility account at one building. <strong style={{ color: 'var(--text-body)' }}>The Xero contact is what matches a bill</strong> — it is the only one of these five a Xero bill carries. The utility and the address are there so forty rows can be read and searched; nothing is tested against them. <strong style={{ color: 'var(--text-body)' }}>Checked before recharge rules.</strong>
+            </p>
+
+            {rows.length === 0
+              ? <Placeholder title="No premises mapped yet"
+                  message="Map each utility account to the entity whose building it is. Add as many rows as you like in one go — the dialog is a table, not a form."
+                  action={<Button variant="primary" size="md" onClick={() => setAddressRules(true)}>New address rules</Button>} />
+              : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto' }}>
+                <div style={{ minWidth: 1020 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <div>Utility</div><div>Address</div><div>Paid first by</div><div>Xero contact</div><div>Recharge to</div><div>Active</div><div />
+                  </div>
+                  {rows.map(r => (
+                    <div key={r.id} style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13.5, opacity: r.on ? 1 : .55 }}>
+                      <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.utility || '—'}</div>
+                      <div style={{ color: 'var(--text-body)', ...Ellip }} title={r.address}>{r.address || '—'}</div>
+                      <div style={{ ...Ellip }}>
+                        {r.payerTenantId
+                          ? <Code>{r.payerLabel}</Code>
+                          : <span style={{ color: 'var(--text-muted)' }}>{r.payerLabel}</span>}
+                      </div>
+                      <div style={{ minWidth: 0, color: r.incomplete ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }}
+                        title={r.contactName}>
+                        {r.contactName || 'No contact — this row matches nothing'}
+                      </div>
+                      <div style={{ minWidth: 0 }}><Code>{r.ownerCode}</Code></div>
+                      <div><Switch checked={r.on} onChange={v => toggleAddressRule(r, v)} /></div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button aria-label="Delete row" onClick={() => deleteAddressRule(r)} className="feta-hover"
+                          style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="trash-2" size={15} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>}
+          </div>;
+        })()}
+
         {tab === 'text' && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
             Rules are tried in order and the first match wins. A rule acts on bills <strong style={{ color: 'var(--text-body)' }}>marked paid in Bills Hub after the rule was written</strong> — a bill settled directly in Xero does not set a recharge going, and a new rule never reaches back over what is already paid.
@@ -1684,6 +1751,11 @@
           ))}
         </div>}
 
+        <AddressRulesDialog open={addressRules} entities={entities}
+          suppliers={data.suppliers} utilities={data.utilities}
+          onClose={() => setAddressRules(false)} onToast={onToast}
+          onSaved={() => { setAddressRules(false); reload(); }} />
+
         <TextRuleDialog open={Boolean(textRuleFor)} rule={textRuleFor} entities={entities} suppliers={data.suppliers}
           fields={data.conditionFields} operators={data.conditionOperators}
           onClose={() => setTextRuleFor(null)} onToast={onToast}
@@ -1735,6 +1807,113 @@
         options={[{ label: 'From the bill', value: '' }]
           .concat(value && !known ? [{ label: `${value} — not in this chart`, value }] : [])
           .concat(accounts.map(a => ({ label: `${a.code} · ${a.name}`, value: a.code })))} />;
+    }
+
+    // Adding the premises register.
+    //
+    // A table, not a form. Forty utility accounts entered one dialog at a
+    // time — fill, save, reopen, fill, save — is the thing this screen is
+    // for avoiding, so rows are added underneath and the whole lot saves in
+    // one click. Blank rows are ignored, so there is no cost to leaving a
+    // few spare ones at the bottom.
+    function AddressRulesDialog({ open, entities, suppliers, utilities, onClose, onSaved, onToast }) {
+      const blank = () => ({ utility: '', premisesAddress: '', payerTenantId: '', contactName: '', ownerTenantId: '' });
+      const [rows, setRows] = useState([blank(), blank(), blank()]);
+      const [busy, setBusy] = useState(false);
+      const [problems, setProblems] = useState({});   // row index -> message
+
+      useEffect(() => {
+        if (open) { setRows([blank(), blank(), blank()]); setProblems({}); }
+      }, [open]);
+
+      const set = (i, patch) => setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r));
+      // A row is "started" once anything is in it. Only those are sent, and
+      // only those are checked — spare rows at the bottom are not mistakes.
+      const started = (r) => Object.values(r).some(v => String(v || '').trim());
+      const filled = rows.map((r, i) => ({ r, i })).filter(x => started(x.r));
+      const ready = filled.length > 0 && filled.every(x => x.r.contactName && x.r.ownerTenantId);
+
+      async function save() {
+        setBusy(true); setProblems({});
+        try {
+          const r = await api.post('/api/recharge/address-rules', {
+            rules: filled.map(x => x.r)
+          });
+          onToast({ title: `${r.created} row${r.created === 1 ? '' : 's'} added`,
+            message: 'Paying a bill from any of these contacts will recharge it.' });
+          onSaved();
+        } catch (e) {
+          // The server names the row it stopped on, counting from one. Shown
+          // against that row rather than as a sentence about a number.
+          const map = {};
+          for (const p of (e.payload && e.payload.problems) || []) {
+            const at = filled[p.at - 1];
+            if (at) map[at.i] = p.error;
+          }
+          setProblems(map);
+          onToast({ title: 'Nothing was saved', message: e.message, tone: 'error' });
+        } finally { setBusy(false); }
+      }
+
+      const entityOpts = (first) => [{ label: first, value: '' }]
+        .concat(entities.map(e => ({ label: `${e.code} · ${e.short}`, value: e.tenantId })));
+
+      return <Dialog open={open} onClose={onClose} title="New address rules"
+        description="One row per utility account at one building. Add as many as you like, then save them together." size="lg">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <datalist id="utility-list">
+            {(utilities || []).map(u => <option key={u} value={u} />)}
+          </datalist>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1.5fr) 150px minmax(0,1.5fr) 150px 32px', gap: 8, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+            <div>Utility</div><div>Address</div><div>Paid first by</div><div>Xero contact *</div><div>Recharge to *</div><div />
+          </div>
+
+          {rows.map((r, i) => (
+            <div key={i}>
+              <div style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1.5fr) 150px minmax(0,1.5fr) 150px 32px', gap: 8, alignItems: 'center' }}>
+                <Input placeholder="TNB" value={r.utility} list="utility-list"
+                  onChange={v => set(i, { utility: v })} />
+                <Input placeholder="As the bill prints it" value={r.premisesAddress}
+                  onChange={v => set(i, { premisesAddress: v })} />
+                <Select value={r.payerTenantId} onChange={v => set(i, { payerTenantId: v })}
+                  options={entityOpts('Whoever is billed')} />
+                <SupplierPicker options={suppliers || []} value={r.contactName}
+                  onChange={v => set(i, { contactName: v })} allowFreeText />
+                <Select value={r.ownerTenantId} onChange={v => set(i, { ownerTenantId: v })}
+                  options={entityOpts('Choose…')} />
+                <button aria-label="Remove row" onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}
+                  style={{ border: 'none', background: 'none', color: rows.length > 1 ? 'var(--text-subtle)' : 'var(--neutral-200)', cursor: rows.length > 1 ? 'pointer' : 'not-allowed', padding: 6, display: 'flex' }}
+                  disabled={rows.length <= 1}><Icon name="x" size={16} /></button>
+              </div>
+              {problems[i] && <div style={{ fontSize: 12, color: 'var(--color-danger)', padding: '4px 0 2px' }}>{problems[i]}</div>}
+            </div>
+          ))}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <button onClick={() => setRows(rs => rs.concat([blank()]))}
+              style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer', padding: '2px 0' }}>Add row</button>
+            <button onClick={() => setRows(rs => rs.concat(Array.from({ length: 5 }, blank)))}
+              style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 0' }}>Add five</button>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+              {filled.length === 0 ? 'Nothing filled in yet' : `${filled.length} row${filled.length === 1 ? '' : 's'} to save`}
+            </span>
+          </div>
+
+          <div style={{ background: 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+            Saving is all or nothing — if one row is wrong, none are saved and that row is marked. Blank rows are ignored, so spare ones at the bottom cost nothing.
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 2 }}>
+            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="md" onClick={save}
+              style={busy || !ready ? { opacity: .5, pointerEvents: 'none' } : null}>
+              {busy ? 'Saving…' : `Save ${filled.length || ''} row${filled.length === 1 ? '' : 's'}`.replace('  ', ' ')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>;
     }
 
     function TextRuleDialog({ open, rule, entities, suppliers, fields, operators, onClose, onSaved, onToast }) {

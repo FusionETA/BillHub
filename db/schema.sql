@@ -481,55 +481,49 @@ CREATE TABLE IF NOT EXISTS recharge_settings (
 
 -- ── Address rules ───────────────────────────────────────────────────────────
 --
--- "A bill for this premises belongs to that entity."
+-- The premises register: one row per utility account at one building.
 --
--- The rule names a place, not a payer. Whoever Xero has on the bill header
--- pays the supplier; the address says whose cost it actually is. When the two
--- are the same entity nothing happens, and when they differ the whole amount
--- is recharged to the address owner.
+--   TNB          Lot 9, Jalan Perusahaan Empat   ABM pays   "TNB - Lot 9"   → ABKJ
+--   Indah Water  Lot 9, Jalan Perusahaan Empat   ABM pays   "IWK - Lot 9"   → ABKJ
 --
--- Checked before the text rules below, because an address is a statement
--- about the real world and a supplier name is a guess from a string.
+-- What matches a bill is the **Xero contact**, because that is the only one
+-- of these five things a Xero bill actually carries. The utility and the
+-- address are what make a row of forty readable by the person maintaining
+-- it, and what they fill in from the paper bill — not what the engine tests.
+-- Matching on the address itself was tried and removed: it needed a Xero
+-- call per bill, two spellings of every Malaysian address, and still missed
+-- on "Jln" against "Jalan".
+--
+-- Checked before recharge rules. This table is the specific statement — this
+-- account, at this building — and a recharge rule written across a whole
+-- supplier family must not quietly outrank it.
 CREATE TABLE IF NOT EXISTS recharge_rules (
-  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  account_id        BIGINT UNSIGNED NOT NULL,
-  -- As printed on the supplier bill. Kept verbatim so the rule can be read
-  -- against a paper bill; matching uses the key below.
-  premises_address  VARCHAR(512) NULL,
-  -- premises_address with every separator stripped — see lib/premises.js.
-  -- Matching on this is what makes spaces, commas and letter case irrelevant.
-  address_key       VARCHAR(512) NULL,
-  -- Optional. Narrows the rule to bills whose reference carries this text,
-  -- for a landlord who bills several premises under one contact.
-  reference_contains VARCHAR(255) NULL,
-  -- The entity that premises belongs to, and so the entity the cost is
-  -- recharged to.
-  owner_tenant_id   VARCHAR(64) NULL,
-  -- sha256 of the address key, the reference and every supplier named. Two
-  -- rules with the same key describe exactly the same bills, and the second
-  -- says nothing the first does not.
-  rule_key          CHAR(64) NULL,
-  enabled           TINYINT(1) NOT NULL DEFAULT 1,
-  position          INT DEFAULT 0,
-  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id       BIGINT UNSIGNED NOT NULL,
+  -- Which utility, as somebody would say it out loud: TNB, Indah Water,
+  -- Air Selangor. A label for reading and filtering, not for matching.
+  utility          VARCHAR(64) NULL,
+  -- The premises this account is for, as the bill prints it. Also a label:
+  -- see the note above.
+  premises_address VARCHAR(512) NULL,
+  -- The entity that settles the supplier. NULL = whichever entity is on the
+  -- bill header, which is the common case.
+  payer_tenant_id  VARCHAR(64) NULL,
+  -- The Xero contact the bill arrives under. This is the one that decides.
+  contact_name     VARCHAR(255) NOT NULL,
+  -- contact_name with every separator stripped — see lib/premises.normalise.
+  contact_key      VARCHAR(255) NOT NULL,
+  -- The entity the cost belongs to, and so the entity it is recharged to.
+  owner_tenant_id  VARCHAR(64) NOT NULL,
+  -- sha256 of the contact key, the payer and the owner. Two rows with the
+  -- same key say the same thing twice.
+  rule_key         CHAR(64) NULL,
+  enabled          TINYINT(1) NOT NULL DEFAULT 1,
+  position         INT DEFAULT 0,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_rule_premises (account_id, rule_key),
-  INDEX idx_rule_lookup (account_id, enabled),
-  CONSTRAINT fk_rule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- Which suppliers an address rule covers. No rows at all means every
--- supplier: "whatever arrives for this building belongs to that entity",
--- which is the right rule for a premises one company occupies outright.
-CREATE TABLE IF NOT EXISTS recharge_rule_suppliers (
-  id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  rule_id       BIGINT UNSIGNED NOT NULL,
-  supplier_name VARCHAR(255) NOT NULL,
-  -- Normalised, so a supplier re-typed with different punctuation still
-  -- matches the Xero contact.
-  supplier_key  VARCHAR(255) NOT NULL,
-  UNIQUE KEY uq_rule_supplier (rule_id, supplier_key),
-  INDEX idx_supplier_key (supplier_key),
-  CONSTRAINT fk_rs_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE CASCADE
+  INDEX idx_rule_contact (account_id, contact_key),
+  CONSTRAINT fk_rrule_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Recharge rules ──────────────────────────────────────────────────────────
