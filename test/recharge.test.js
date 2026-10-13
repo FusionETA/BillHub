@@ -390,6 +390,40 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('rent is offered even though no supplier name can reveal it',
     offered.includes('Rent'), offered);
 
+  // The foot-gun the real account showed: 1,834 TNB bills across 30
+  // companies sit on one generic contact name, and the register matches on
+  // the NAME — so a row naming it claims all thirty unless it names the
+  // payer. The row has to say so before somebody finds out from the runs.
+  const broadBill1 = await makeBill(abm.tenantId, {
+    ref: 'GEN-TNB-0826', supplier: 'Tenaga Nasional Berhad', total: 500.00 });
+  const broadBill2 = await makeBill(kk.tenantId, {
+    ref: 'GEN-TNB-0926', supplier: 'Tenaga Nasional Berhad', total: 600.00 });
+  await register([{ utility: 'TNB', contactName: 'Tenaga Nasional Berhad', ownerTenantId: kj.tenantId }]);
+  const registerRows = (await req('GET', '/api/recharge/address-rules', { cookie })).body.rules;
+  const generic = registerRows.find((r) => r.contactName === 'Tenaga Nasional Berhad');
+  check('a row says how many bills and organisations it covers',
+    generic && generic.bills >= 2 && generic.orgs >= 2, generic);
+  check('and a row with no payer over several organisations is marked as broad',
+    generic.broad === true, generic);
+
+  const narrowed2 = await register([{ utility: 'TNB', contactName: 'Tenaga Nasional Berhad',
+    payerTenantId: abm.tenantId, ownerTenantId: kk.tenantId }]);
+  check('naming the payer is what narrows it', narrowed2.status === 201,
+    narrowed2.body);
+  check('and that row is not marked broad',
+    narrowed2.body.rules.find((r) => r.payerTenantId === abm.tenantId).broad === false,
+    narrowed2.body.rules.find((r) => r.payerTenantId === abm.tenantId));
+
+  // Taken out again: a row on the generic contact claims every TNB bill in
+  // the account, which is the point being made here and would otherwise
+  // decide every section below this one.
+  for (const r of narrowed2.body.rules.filter((x) => x.contactName === 'Tenaga Nasional Berhad')) {
+    await req('DELETE', '/api/recharge/address-rules/' + r.id, { cookie });
+  }
+  check('and removing them leaves the generic TNB bills to the rules below',
+    !(await req('GET', '/api/recharge/address-rules', { cookie })).body.rules
+      .some((r) => r.contactName === 'Tenaga Nasional Berhad'));
+
   console.log('\nThe register decides before a recharge rule does');
   const wismaBill = await makeBill(abm.tenantId, {
     ref: 'TNB-WISMA-0826', supplier: 'Tenaga Nasional Berhad - Wisma', total: 880.00

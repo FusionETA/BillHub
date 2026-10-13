@@ -478,6 +478,16 @@ function addressRuleRow(r) {
     ownerCode: r.owner_code || '—',
     ownerShort: r.owner_short || '—',
     on: Boolean(r.enabled),
+    bills: Number(r.bills || 0),
+    orgs: Number(r.orgs || 0),
+    // A contact name is per-organisation in Xero, and the register matches
+    // on the name — so a row naming a contact that exists in many companies
+    // claims all of them unless it names the payer. Said on the row,
+    // because the alternative is finding out from the runs table.
+    broad: Number(r.orgs || 0) > 1 && !r.payer_tenant_id,
+    coverLabel: Number(r.bills || 0)
+      ? `${r.bills} bill${Number(r.bills) === 1 ? '' : 's'} · ${r.orgs} org${Number(r.orgs) === 1 ? '' : 's'}`
+      : 'no bills yet',
     // The contact is the only field that matches a bill; a row without one
     // decides nothing. Only reachable from a hand-edited database, but a
     // row that looks configured and never fires is worth saying out loud.

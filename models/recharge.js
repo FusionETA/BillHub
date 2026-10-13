@@ -93,8 +93,34 @@ function addressRuleKey(contactName, payerTenantId, ownerTenantId) {
     .digest('hex');
 }
 
+// How much each row actually covers. A contact name is per-organisation in
+// Xero — "Tenaga Nasional Berhad" in one company is a different contact from
+// the same name in another — and the register matches on the NAME, so a row
+// naming a generic contact claims every organisation's bills from it.
+//
+// On a real account that is 1,834 bills across 30 companies behind one name.
+// Naming the payer narrows it to one; leaving it blank does not, and the
+// difference has to be visible on the row rather than discovered afterwards.
+async function addressRuleBreadth(accountId) {
+  const rows = await db.query(
+    `SELECT contact_name AS name, COUNT(*) AS bills,
+            COUNT(DISTINCT xero_tenant_id) AS orgs
+       FROM bills
+      WHERE account_id = ? AND contact_name IS NOT NULL AND contact_name <> ''
+      GROUP BY contact_name`, [accountId]);
+  const byKey = new Map();
+  for (const r of rows) {
+    const key = premises.normalise(r.name);
+    if (!key) continue;
+    const at = byKey.get(key) || { bills: 0, orgs: 0 };
+    byKey.set(key, { bills: at.bills + Number(r.bills), orgs: Math.max(at.orgs, Number(r.orgs)) });
+  }
+  return byKey;
+}
+
 async function listAddressRules(accountId) {
-  return db.query(
+  const breadth = await addressRuleBreadth(accountId);
+  const rules = await db.query(
     `SELECT r.*,
             o.code AS owner_code, o.short_name AS owner_short,
             p.code AS payer_code, p.short_name AS payer_short
@@ -105,6 +131,7 @@ async function listAddressRules(accountId) {
       ORDER BY r.utility, r.premises_address, r.id`,
     [accountId]
   );
+  return rules.map((r) => ({ ...r, ...(breadth.get(r.contact_key) || { bills: 0, orgs: 0 }) }));
 }
 
 async function getAddressRule(accountId, id) {

@@ -1677,9 +1677,18 @@
                           ? <Code>{r.payerLabel}</Code>
                           : <span style={{ color: 'var(--text-muted)' }}>{r.payerLabel}</span>}
                       </div>
-                      <div style={{ minWidth: 0, color: r.incomplete ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }}
-                        title={r.contactName}>
-                        {r.contactName || 'No contact — this row matches nothing'}
+                      <div style={{ minWidth: 0 }} title={r.contactName}>
+                        <div style={{ color: r.incomplete ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }}>
+                          {r.contactName || 'No contact — this row matches nothing'}
+                        </div>
+                        {/* A generic contact exists in every organisation
+                            that buys from it, and the row matches on the
+                            name — so without a payer it claims all of them. */}
+                        <div style={{ fontSize: 11.5, color: r.broad ? 'var(--color-danger)' : 'var(--text-subtle)' }}>
+                          {r.broad
+                            ? `${r.coverLabel} — every one of those is recharged to ${r.ownerCode}`
+                            : r.coverLabel}
+                        </div>
                       </div>
                       <div style={{ minWidth: 0 }}><Code>{r.ownerCode}</Code></div>
                       <div><Switch checked={r.on} onChange={v => toggleAddressRule(r, v)} /></div>

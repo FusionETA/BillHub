@@ -577,8 +577,14 @@ in a recharge rule — and the contacts-per-utility count says which utilities
 can use the register at all: one contact per premises is a row each, one
 contact across many premises needs a recharge rule on the reference instead.
 
-*Paid first by* narrows a row to one paying company, for a contact two of
-them settle. Where two rows name one contact, the one that also names the
+*Paid first by* narrows a row to one paying company, and on a real account
+it is not optional decoration. A contact name is **per-organisation** in
+Xero — `Tenaga Nasional Berhad` in one company is a different contact from
+the same name in another — and the register matches on the name. Ayu
+Borneo's generic TNB contact carries **1,834 bills across 30 companies**, so
+a row naming it with no payer recharges all thirty to one entity. Each row
+therefore shows what it covers (`1,834 bills · 30 orgs`) and is marked when
+it is broad and unnarrowed. Where two rows name one contact, the one that also names the
 payer wins; otherwise the answer would be whichever row came back first.
 
 The dialog is a **table, not a form**: rows are added underneath and the whole
