@@ -5,7 +5,8 @@
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
-//   GET    /api/recharge/premises?address=…&supplier=…   WazzOCR: where does this bill go?
+//   GET    /api/recharge/premises?address=…&address=…&supplier=…
+//                                          WazzOCR: where does this bill go?
 //   GET    /api/recharge/accounts/:tenantId  one organisation's chart of accounts
 //   GET/POST/PATCH/DELETE /api/recharge/address-rules[/:id]   the premises register
 //   POST   /api/recharge/plan               dry-run a recharge
@@ -210,8 +211,12 @@ router.get('/accounts/:tenantId', async (req, res) => {
 // a real answer and means "nobody has mapped this premises".
 router.get('/premises', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
+  // Repeat ?address= for each candidate block of text; the register says
+  // which one it recognises.
   const address = req.query.address;
-  if (!address) return res.status(400).json({ error: 'address is required.' });
+  if (!address || (Array.isArray(address) && !address.length)) {
+    return res.status(400).json({ error: 'address is required (repeat it for each candidate).' });
+  }
   try {
     const hit = await model.lookupPremises(accountId, { address, supplier: req.query.supplier || null });
     if (!hit) return res.status(404).json({ error: 'No premises in the register matches that address.' });

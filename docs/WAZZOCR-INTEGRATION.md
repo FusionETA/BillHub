@@ -49,8 +49,15 @@ Bills Hub holds that mapping, maintained by the finance team on
 ### The endpoint, which already exists and works
 
 ```
-GET {BILLHUB_URL}/api/recharge/premises?address=<urlencoded>&supplier=<urlencoded>
+GET {BILLHUB_URL}/api/recharge/premises?address=<A>&address=<B>&address=<C>&supplier=<name>
 ```
+
+**Repeat `address` for every block of text that could be the premises.** A
+bill prints the supplier's own office address, a billing address and the
+service address, and they all look alike — picking the right one is the hard
+part of this job, and the register can do it for you. The longest stored
+address appearing in any candidate wins. Verified: given TNB's own Bangsar
+office, the real premises, and a PO box, it returns the premises.
 
 `supplier` is optional but **send it** — it is the supplier name WazzOCR read
 off the bill, and it is what distinguishes two accounts at one building
@@ -87,11 +94,57 @@ Nobody has mapped this premises. This is a real answer, not a fault.
 Send the address **as WazzOCR read it**. Do not normalise, truncate or
 "clean" it first; the endpoint does that, and doing it twice loses words.
 
+### Do not gate this on a list of utility names
+
+The obvious design is "if the supplier is TNB / Air Selangor / Indah Water /
+SAJ / Telekom / Celcom / Maxis / Assessment, then look it up". **Don't.**
+
+- It excludes **every landlord**, and rent is the second-largest recharge
+  case on this account — Impiana 3C, IOI City Mall, ANSA Hotel, and a long
+  tail of individuals. None of them is a utility name.
+- It excludes utilities the list has not caught up with. SESB and Jabatan
+  Air are real on this account; a hand-written list of eight would have
+  missed them for as long as nobody updated it.
+- **The register is already the gate.** A premises nobody mapped returns
+  404. A supplier list is a second gate that can only ever be more wrong
+  than the first, and it is a second thing to maintain.
+
+Look up every bill. One HTTP call per bill photographed into WhatsApp is
+nothing.
+
+Where the utility list *is* useful is the **extraction prompt** — knowing a
+bill is TNB tells the model where on the page the premises usually sits.
+That is a hint about reading, not a decision about routing.
+
+### A starting point for the extraction prompt
+
+```
+From this bill, extract:
+
+  supplier   The company issuing the bill, as printed.
+  addresses  EVERY address-like block on the page, as a list, each verbatim.
+             Include the supplier's own address, the billing address and the
+             service/premises address — do not try to decide which is which,
+             and do not merge or tidy them.
+
+Copy each address exactly as printed, including the postcode and any unit
+or lot number. Do not expand or abbreviate anything: do not turn "Jln" into
+"Jalan" or the reverse. Do not translate. If a line is unclear, include your
+best reading rather than omitting it.
+
+On a Malaysian utility bill the premises is usually the address NOT next to
+the supplier's logo, and is often labelled Alamat Premis, Service Address,
+Alamat Penghantaran or similar.
+```
+
+Then send every address in `addresses` as a repeated `address` parameter.
+Matching ignores case and punctuation but **not** abbreviations, which is why
+the prompt insists on verbatim.
+
 ### Requirements
 
-1. **Every bill creation goes through this** — utility and rental at minimum.
-   Decide explicitly whether non-utility bills skip it or try it and accept
-   the 404; write the decision down in the code.
+1. **Every bill creation goes through this** — no supplier allow-list, for
+   the reasons above.
 2. **No caching of the result.** The finance team adds a row and expects the
    next bill to use it. If you must cache, cache for seconds, not minutes, and
    say so in a comment.

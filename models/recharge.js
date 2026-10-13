@@ -192,9 +192,15 @@ async function createAddressRules(accountId, rows = []) {
 // has always done, so punctuation and case do not matter but a missing word
 // does. The most specific match wins: a longer stored address beats a
 // shorter one, because the shorter is more likely to be a prefix of several.
+// `address` may be one string or several. WazzOCR is reading a photograph
+// and often cannot tell which block of text is the premises — the supplier's
+// own address, the billing address and the service address all look alike.
+// Sending every candidate and letting the register say which one it knows is
+// far more robust than making the OCR guess, and costs one call either way.
 async function lookupPremises(accountId, { address, supplier = null } = {}) {
-  const text = String(address || '');
-  if (!premises.normalise(text)) return null;
+  const texts = (Array.isArray(address) ? address : [address])
+    .map((a) => String(a || '')).filter((a) => premises.normalise(a));
+  if (!texts.length) return null;
   const rows = (await listAddressRules(accountId)).filter((r) => r.enabled);
   let best = null;
   for (const r of rows) {
@@ -207,9 +213,13 @@ async function lookupPremises(accountId, { address, supplier = null } = {}) {
       const b = premises.normalise(r.contact_name);
       if (!a.includes(b) && !b.includes(a)) continue;
     }
-    const m = premises.match(text, r.premises_address);
-    if (!m) continue;
-    if (!best || m.length > best.length) best = { length: m.length, rule: r };
+    // The longest stored address that appears in ANY candidate wins. Longest
+    // because a shorter one is more likely to be a prefix of several.
+    for (const text of texts) {
+      const m = premises.match(text, r.premises_address);
+      if (!m) continue;
+      if (!best || m.length > best.length) best = { length: m.length, rule: r };
+    }
   }
   return best ? best.rule : null;
 }

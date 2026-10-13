@@ -357,6 +357,22 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // is what picks between them.
   check('the supplier on the bill picks between two rows at one address',
     (await ask(WISMA_ADDR, 'Indah Water')).body.contactName === 'Indah Water - Wisma');
+  // WazzOCR cannot tell which block of text on a photographed bill is the
+  // premises — the supplier's own office, the billing address and the
+  // service address all look alike. It sends them all.
+  const many = await req('GET', '/api/recharge/premises'
+    + `?address=${encodeURIComponent('TNB Kawasan Selatan, Jalan Bangsar, 59200 Kuala Lumpur')}`
+    + `&address=${encodeURIComponent(WISMA_ADDR)}`
+    + `&address=${encodeURIComponent('PO Box 1234, 46000 Petaling Jaya')}`
+    + '&supplier=Tenaga', { cookie });
+  check('several candidate addresses resolve to the one it recognises',
+    many.status === 200 && many.body.premisesAddress === WISMA_ADDR, many.body);
+  const noneKnown = await req('GET', '/api/recharge/premises'
+    + `?address=${encodeURIComponent('Somewhere Else, 10000 Penang')}`
+    + `&address=${encodeURIComponent('PO Box 9, 46000 PJ')}`, { cookie });
+  check('and candidates it recognises none of are still a 404',
+    noneKnown.status === 404, noneKnown.body);
+
   const unmapped = await ask('Lot 5, Jalan Nowhere, 12345 Ipoh', 'Tenaga');
   check('a premises nobody has mapped says so, rather than guessing',
     unmapped.status === 404, unmapped.body);
