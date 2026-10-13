@@ -24,7 +24,38 @@ const vm = require('./viewModel');
 const testMode = require('../lib/testMode');
 const { attachUser, requireAuth } = require('../auth/middleware');
 
-router.use(attachUser, requireAuth);
+// WazzOCR is a server, not a browser, so it has no session cookie. A shared
+// token lets it — and only it — reach the premises lookup.
+//
+// Deliberately narrow: accepted on that one GET and nowhere else, read-only,
+// and it never stands in for a user. Everything that changes anything still
+// needs a real session.
+//
+// BILLHUB_SERVICE_TOKEN unset means no service caller is expected and the
+// header is ignored entirely, so a deployment cannot be opened up by
+// forgetting to set something.
+const SERVICE_PATHS = new Set(['/premises']);
+
+function serviceAccountId(req) {
+  if (req.method !== 'GET' || !SERVICE_PATHS.has(req.path)) return null;
+  const expected = String(process.env.BILLHUB_SERVICE_TOKEN || '');
+  if (!expected) return null;
+  const given = String(req.get('X-Billhub-Token') || '');
+  // Same length and constant time, so a wrong token cannot be narrowed down
+  // by how long the comparison takes.
+  if (given.length !== expected.length) return null;
+  if (!require('crypto').timingSafeEqual(Buffer.from(given), Buffer.from(expected))) return null;
+  return Number(process.env.BILLHUB_SERVICE_ACCOUNT_ID || 1);
+}
+
+// A valid service token stands in for the session guard; anything else goes
+// through the normal chain untouched. One middleware rather than two, so
+// there is no order in which a request could slip past both.
+router.use((req, res, next) => {
+  const id = serviceAccountId(req);
+  if (id) { req.serviceAccountId = id; return next(); }
+  attachUser(req, res, (err) => (err ? next(err) : requireAuth(req, res, next)));
+});
 
 function needAccount(req, res) {
   if (!req.user.account_id) { res.status(400).json({ error: 'This user has no account.' }); return null; }
@@ -206,11 +237,12 @@ router.get('/accounts/:tenantId', async (req, res) => {
 // Reference data for WazzOCR. Nothing here decides a recharge.
 
 // The lookup itself: WazzOCR has read an address off a bill and needs to
-// know where the bill goes. Answers with the organisation to create it in,
-// the contact to use and the account code to post it to — or 404, which is
-// a real answer and means "nobody has mapped this premises".
+// know where the bill goes. Answers with the organisation to create it in
+// and the contact to use — or 404, which is a real answer and means
+// "nobody has mapped this premises".
 router.get('/premises', async (req, res) => {
-  const accountId = needAccount(req, res); if (!accountId) return;
+  const accountId = req.serviceAccountId || needAccount(req, res);
+  if (!accountId) return;
   // Repeat ?address= for each candidate block of text; the register says
   // which one it recognises.
   const address = req.query.address;
@@ -447,4 +479,7 @@ router.post('/runs/:id(\\d+)/cancel', async (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
+// Exported for the test: the allow-list is the security boundary, and a
+// boundary nobody checks is a boundary that moves.
 module.exports = router;
+module.exports.serviceAccountId = serviceAccountId;

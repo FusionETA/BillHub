@@ -377,6 +377,45 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('a premises nobody has mapped says so, rather than guessing',
     unmapped.status === 404, unmapped.body);
 
+  // WazzOCR is a server with no session cookie, so a shared token reaches
+  // this one route. It must reach nothing else.
+  console.log('\nThe service token');
+  const { serviceAccountId } = require('../billhub/rechargeRouter');
+  const asReq = (method, path, token) => ({
+    method, path, get: (h) => (h === 'X-Billhub-Token' ? token : undefined)
+  });
+  const TOKEN = 'service-token-for-the-test';
+  const was = process.env.BILLHUB_SERVICE_TOKEN;
+  try {
+    process.env.BILLHUB_SERVICE_TOKEN = TOKEN;
+    check('the right token on the lookup is a service caller',
+      serviceAccountId(asReq('GET', '/premises', TOKEN)) === 1);
+    check('a wrong token of the same length is not',
+      serviceAccountId(asReq('GET', '/premises', 'wrong-token-for-the-tests')) === null);
+    check('nor is a token of a different length',
+      serviceAccountId(asReq('GET', '/premises', 'x')) === null);
+    check('nor is no token at all',
+      serviceAccountId(asReq('GET', '/premises', undefined)) === null);
+    // The whole point of the allow-list: a leaked token must not be a way
+    // in to everything else.
+    check('the token opens no other route',
+      serviceAccountId(asReq('GET', '/address-rules', TOKEN)) === null
+      && serviceAccountId(asReq('GET', '/', TOKEN)) === null,
+      'a read route accepted it');
+    check('and no write, even on the route it does open',
+      serviceAccountId(asReq('POST', '/premises', TOKEN)) === null
+      && serviceAccountId(asReq('DELETE', '/premises', TOKEN)) === null);
+
+    delete process.env.BILLHUB_SERVICE_TOKEN;
+    check('with no token configured the header is ignored entirely',
+      serviceAccountId(asReq('GET', '/premises', TOKEN)) === null
+      && serviceAccountId(asReq('GET', '/premises', '')) === null,
+      'an unconfigured deployment accepted a token');
+  } finally {
+    if (was === undefined) delete process.env.BILLHUB_SERVICE_TOKEN;
+    else process.env.BILLHUB_SERVICE_TOKEN = was;
+  }
+
   console.log('\nSaving a table of them');
   // All or nothing. Saving eight of nine rows leaves somebody rereading the
   // table to work out which eight.
