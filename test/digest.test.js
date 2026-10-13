@@ -295,6 +295,29 @@ const at = (iso) => new Date(iso);
   await db.execute('DELETE FROM digest_runs');
   await db.execute('UPDATE digest_settings SET enabled = 0, last_sent_for = NULL');
 
+  console.log('\nWhat Wazzup refused, said in English');
+  // The one that actually happened: a recipient who had never messaged the
+  // channel. WhatsApp will not let a business open a conversation with free
+  // text, and the reply is a JSON blob inside an HTTP 400 that the error
+  // column cuts off mid-word. What somebody needs is the thing to do.
+  const { explain } = require('../lib/wazzup');
+  const refused = explain(400, JSON.stringify({
+    status: 400, requestId: '71bc27f23a1d653de25b64a062bddc45', error: 'POST_MESSAGE_ERROR',
+    data: [{ code: 'MESSAGES_NOT_TEXT_FIRST', description: "Can't write by first message with text" }]
+  }));
+  check('a refusal to open a conversation says what to do about it',
+    /send anything at all to the channel number/i.test(refused), refused);
+  check('and still names the code, so it can be looked up',
+    /MESSAGES_NOT_TEXT_FIRST/.test(refused), refused);
+  // digest_runs.error is VARCHAR(512). An explanation cut off mid-sentence
+  // is the problem this replaces, not a smaller version of it.
+  check('and fits the column it is stored in', refused.length < 512, refused.length);
+
+  check('a code nobody has met yet is still readable',
+    /kaboom/.test(explain(500, '{"error":"SOMETHING_NEW","description":"kaboom"}')));
+  check('and a reply that is not JSON at all does not crash it',
+    typeof explain(502, '<html>Bad Gateway</html>') === 'string');
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
   await db.close();
