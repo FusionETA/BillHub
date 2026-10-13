@@ -59,6 +59,12 @@ async function main() {
     return;
   }
 
+  // A bill with no supplier cannot be matched by anything — not by the
+  // register, which keys on the contact, and not by a recharge rule with a
+  // supplier condition. Worth its own line rather than sitting in the
+  // unmatched list looking like a supplier called "No Contact".
+  const nameless = rows.find((r) => /^no contact$/i.test(String(r.name).trim()));
+
   if (process.argv.includes('--unmatched')) {
     // Only the ones that recur: a supplier with one bill is not a utility
     // account, and listing nine hundred of them hides the handful that are.
@@ -93,9 +99,19 @@ async function main() {
       + `${String(u.paidHere).padStart(18)}  ${u.name}`);
   }
 
+  if (nameless) {
+    console.log(`\n  ${nameless.bills} bill(s) across ${nameless.orgs} organisation(s) have NO supplier contact.`);
+    console.log('  Nothing can match those — not the register, which keys on the contact,');
+    console.log('  and not a recharge rule with a supplier condition. They need a contact');
+    console.log('  in Xero before any rule can reach them.');
+  }
+
   console.log('\nContacts per utility tells you which ones can use the register as it');
   console.log('stands: one contact per premises is a row each, and one contact across');
   console.log('many premises needs a recharge rule on the reference instead.');
+  console.log('\nAs a rough test: bills divided by contacts. Close to the number of');
+  console.log('months you have been running means one account per premises, and the');
+  console.log('register fits. Several times that means one contact covering many.');
   console.log('\nThen:  node scripts/utilities.js --unmatched');
   console.log('       node scripts/utilities.js --utility TNB\n');
 }

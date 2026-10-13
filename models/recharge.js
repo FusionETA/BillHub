@@ -83,7 +83,8 @@ async function utilityOptions(accountId) {
   ]);
   const seen = utilities.fromContacts(contacts.map((c) => c.contact_name));
   const typed = used.map((u) => u.utility).filter(Boolean);
-  return [...new Set([...typed, ...seen])].sort((a, b) => a.localeCompare(b));
+  return [...new Set([...typed, ...seen, ...utilities.ALWAYS_OFFERED])]
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function addressRuleKey(contactName, payerTenantId, ownerTenantId) {

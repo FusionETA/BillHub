@@ -380,9 +380,15 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const detected = new Set(require('../lib/utilities').fromContacts(contacts));
   const typedIn = new Set((await db.query(
     'SELECT DISTINCT utility AS u FROM recharge_rules WHERE account_id = 1')).map((r) => r.u));
-  check('and nothing is offered that came from neither',
-    offered.every((u) => detected.has(u) || typedIn.has(u)),
-    offered.filter((u) => !detected.has(u) && !typedIn.has(u)));
+  const { ALWAYS_OFFERED } = require('../lib/utilities');
+  check('and nothing is offered that came from none of those',
+    offered.every((u) => detected.has(u) || typedIn.has(u) || ALWAYS_OFFERED.includes(u)),
+    offered.filter((u) => !detected.has(u) && !typedIn.has(u) && !ALWAYS_OFFERED.includes(u)));
+  // Rent is the exception the list has to carry: a landlord is called
+  // whatever they are called, so no pattern finds one, and on a real
+  // account rent is the second-largest recharge case after utilities.
+  check('rent is offered even though no supplier name can reveal it',
+    offered.includes('Rent'), offered);
 
   console.log('\nThe register decides before a recharge rule does');
   const wismaBill = await makeBill(abm.tenantId, {
