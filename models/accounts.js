@@ -27,6 +27,18 @@ async function wazzocrIdFor(accountId) {
 
 function forgetWazzocrId(accountId) { _wazzocrIds.delete(accountId); }
 
+// The Bills Hub account linked to a WazzOCR one. The inverse of
+// wazzocrIdFor, and what turns a borrowed user into an account here: a
+// WazzOCR user's account_id numbers WazzOCR's accounts, which have nothing
+// to do with this database's.
+//
+// Not cached. A link set while the server is running has to take effect
+// without a restart, and this runs once per request at most.
+async function byWazzocrAccountId(wazzocrAccountId) {
+  if (wazzocrAccountId == null) return null;
+  return db.getOne('SELECT * FROM accounts WHERE wazzocr_account_id = ?', [wazzocrAccountId]);
+}
+
 function getById(id) {
   return db.getOne('SELECT * FROM accounts WHERE id = ?', [id]);
 }
@@ -59,4 +71,4 @@ async function update(id, fields = {}) {
   return res.affectedRows;
 }
 
-module.exports = { create, getById, list, update, wazzocrIdFor, forgetWazzocrId };
+module.exports = { create, getById, list, update, wazzocrIdFor, forgetWazzocrId, byWazzocrAccountId };

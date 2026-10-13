@@ -35,6 +35,8 @@ app.use(cookieParser());
 // so the log knows who; it is harmless on routes that do their own.
 app.use('/api', require('./auth/middleware').attachUser, require('./auth/activity').middleware);
 
+require('./auth/authSource').announce();
+
 app.use('/api/auth', require('./auth/router'));
 app.use('/api/activity', require('./billhub/activityRouter'));
 app.use('/api/xero', require('./billhub/xeroRouter'));

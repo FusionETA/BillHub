@@ -9,6 +9,7 @@ const users = require('../models/users');
 const sessions = require('./sessions');
 const { verifyPassword } = require('./passwords');
 const activity = require('../models/activity');
+const authSource = require('./authSource');
 const { attachUser, requireAuth, setSessionCookie, clearSessionCookie, AUTH_DISABLED } = require('./middleware');
 
 // Sign-in records itself rather than leaving it to the middleware: only here
@@ -21,6 +22,15 @@ router.post('/login', async (req, res) => {
   // Signing in while sign-in is switched off would hand back a session the app
   // ignores; say so rather than appearing to work.
   if (AUTH_DISABLED) return res.status(409).json({ error: 'Sign-in is disabled on this deployment.' });
+  // Identity comes from WazzOCR, so there is no password here to be right.
+  // Named rather than refused blankly: somebody at this form needs to know
+  // where to go, not that they got it wrong.
+  if (authSource.BORROWED) {
+    return res.status(409).json({
+      error: 'Bills Hub does not have its own sign-in. Sign in to WazzOCR and open Bills Hub from there.',
+      signInAt: process.env.WAZZOCR_URL || null
+    });
+  }
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
   try {
@@ -58,6 +68,15 @@ router.post('/login', async (req, res) => {
 
 router.post('/logout', attachUser, async (req, res) => {
   if (AUTH_DISABLED) return res.status(409).json({ error: 'Sign-in is disabled on this deployment.' });
+  // The session belongs to WazzOCR. Deleting its row from here would sign
+  // somebody out of the app they are actually using, which is not Bills
+  // Hub's to decide — so it says where to do it instead of half-doing it.
+  if (authSource.BORROWED) {
+    return res.status(409).json({
+      error: 'Signing out happens in WazzOCR — Bills Hub uses its session.',
+      signOutAt: process.env.WAZZOCR_URL || null
+    });
+  }
   try { await sessions.destroy(req.sessionToken); } catch { /* already gone */ }
   clearSessionCookie(res);
   res.json({ ok: true });
@@ -67,6 +86,9 @@ router.get('/me', attachUser, requireAuth, (req, res) => {
   res.json({
     // The UI shows a permanent banner while this is true.
     authDisabled: AUTH_DISABLED,
+    // Where identity comes from, so the UI can stop offering a sign-out it
+    // cannot perform and a login that will be refused.
+    authSource: authSource.MODE,
     user: {
       id: req.user.id,
       email: req.user.email,

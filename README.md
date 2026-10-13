@@ -779,6 +779,33 @@ against the two documents themselves. Bills Hub keeps no second record of it —
 a settled flag here could only ever disagree with the ledger that actually
 holds the answer. A run is `draft`, `posted` or `cancelled`, and nothing else.
 
+### One login, shared with WazzOCR
+
+`AUTH_SOURCE=own|wazzocr`, the same shape as `XERO_GRANT_SOURCE`. Under
+`wazzocr` Bills Hub has no sign-in: it reads **WazzOCR's** session cookie
+and **WazzOCR's** users table, so whoever is signed into WazzOCR is signed
+into Bills Hub, and no second password exists to forget, leak or rotate.
+
+It works because the two apps share a MySQL server and
+`WazzOCR/auth/sessions.js` is the same file as this one — same `wz_session`
+cookie, same SHA-256-of-the-token scheme, Bills Hub having been derived
+from WazzOCR. A token minted there resolves here unchanged.
+
+It needs both apps on one registrable domain, and WazzOCR setting
+`SESSION_COOKIE_DOMAIN=.fusioneta.com.my` so the browser sends the cookie to
+both. Without that the cookie never arrives and every request looks signed
+out.
+
+| | |
+| --- | --- |
+| The account | A WazzOCR user's `account_id` numbers **WazzOCR's** accounts. The Bills Hub account is the one whose `wazzocr_account_id` matches. A user with no counterpart here is signed in with no account, and says so, rather than falling through to somebody else's. |
+| Permission | `is_super_admin` comes from WazzOCR's users row. Switching mode therefore moves who can read the Activity log — grant it there. |
+| Signing in | Refused, naming WazzOCR. |
+| Signing out | Refused, naming WazzOCR. Deleting a row from WazzOCR's table would sign somebody out of the app they are actually using, which is not Bills Hub's to decide. |
+
+`sessions.create` and `sessions.destroy` both refuse outright in this mode,
+so no code path can write into WazzOCR's tables by accident.
+
 ### Who did what
 
 Every request that **changed** something, plus every sign-in and every

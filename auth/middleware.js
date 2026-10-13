@@ -8,6 +8,7 @@
 // warning on boot and the UI carries a permanent banner.
 const db = require('../db');
 const sessions = require('./sessions');
+const authSource = require('./authSource');
 const accountsModel = require('../models/accounts');
 
 const AUTH_DISABLED = String(process.env.AUTH_DISABLED || '').toLowerCase() === 'true';
@@ -71,9 +72,20 @@ async function attachUser(req, res, next) {
     if (raw) {
       const user = await sessions.resolveUser(raw);
       if (user) {
-        req.user = user;
         req.sessionToken = raw;
-        if (user.account_id) req.account = await accountsModel.getById(user.account_id);
+        if (authSource.BORROWED) {
+          // user.account_id numbers WAZZOCR's accounts. The Bills Hub
+          // account is whichever one is linked to it — and a user whose
+          // WazzOCR account has no Bills Hub counterpart is signed in but
+          // has nothing here, which requireAuth's caller reports as such
+          // rather than silently running as somebody else's account.
+          const account = await accountsModel.byWazzocrAccountId(user.account_id);
+          req.user = { ...user, account_id: account ? account.id : null };
+          req.account = account || null;
+        } else {
+          req.user = user;
+          if (user.account_id) req.account = await accountsModel.getById(user.account_id);
+        }
       }
     }
   } catch (err) {
