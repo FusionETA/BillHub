@@ -5,7 +5,7 @@
 //   GET    /api/recharge/bills/:id/decide   what would happen to one bill, and why
 //   PATCH  /api/recharge/settings           tax type, reference prefix, due days,
 //                                          and optional account-code overrides
-//   GET    /api/recharge/premises?address=…   WazzOCR: where does this bill go?
+//   GET    /api/recharge/premises?address=…&supplier=…   WazzOCR: where does this bill go?
 //   GET    /api/recharge/accounts/:tenantId  one organisation's chart of accounts
 //   GET/POST/PATCH/DELETE /api/recharge/address-rules[/:id]   the premises register
 //   POST   /api/recharge/plan               dry-run a recharge
@@ -80,9 +80,6 @@ router.get('/', async (req, res) => {
       ],
       runRows: runs.map((r) => vm.rechargeRunRow(r, { currency, shortCodes: codes })),
       addressRuleRows: addressRules.map(vm.addressRuleRow),
-      // Read off this account's own contacts, so the list is the utilities
-      // they actually bill rather than ones somebody guessed.
-      utilities: await model.utilityOptions(accountId),
       textRuleCards: textRules.map((r) => vm.rechargeTextRuleCard(r, waiting.get(r.id) || 0)),
       settings: vm.rechargeSettings(settings),
       suggestions: pending.map((p) => vm.rechargeSuggestion(p, currency)),
@@ -216,14 +213,12 @@ router.get('/premises', async (req, res) => {
   const address = req.query.address;
   if (!address) return res.status(400).json({ error: 'address is required.' });
   try {
-    const hit = await model.lookupPremises(accountId, { address, utility: req.query.utility || null });
+    const hit = await model.lookupPremises(accountId, { address, supplier: req.query.supplier || null });
     if (!hit) return res.status(404).json({ error: 'No premises in the register matches that address.' });
     res.json({
-      utility: hit.utility,
       premisesAddress: hit.premises_address,
-      createBillIn: { tenantId: hit.payer_tenant_id, code: hit.payer_code || null },
+      paidBy: { tenantId: hit.payer_tenant_id, code: hit.payer_code || null },
       contactName: hit.contact_name,
-      accountCode: hit.account_code,
       // A note, for anybody reading the answer. Bills Hub recharges from
       // its own rules once the bill is paid, not from this.
       rechargeTo: hit.owner_tenant_id ? { tenantId: hit.owner_tenant_id, code: hit.owner_code || null } : null

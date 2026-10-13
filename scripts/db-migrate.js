@@ -128,7 +128,7 @@ const ADJUSTMENTS = [
     check: `SELECT
               (SELECT COUNT(*) FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rules'
-                  AND COLUMN_NAME = 'account_code') AS shaped,
+                  AND COLUMN_NAME = 'address_key') AS shaped,
               (SELECT COUNT(*) FROM recharge_rules) AS rows_held`,
     needed: (row) => Number(row.shaped) === 0 && Number(row.rows_held) === 0,
     // recharge_runs.rule_id points here, so the constraint comes off first
@@ -141,13 +141,11 @@ const ADJUSTMENTS = [
           CREATE TABLE recharge_rules (
             id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             account_id       BIGINT UNSIGNED NOT NULL,
-            utility          VARCHAR(64) NULL,
             premises_address VARCHAR(512) NOT NULL,
             address_key      VARCHAR(512) NOT NULL,
             payer_tenant_id  VARCHAR(64) NULL,
             contact_name     VARCHAR(255) NOT NULL,
             contact_key      VARCHAR(255) NOT NULL,
-            account_code     VARCHAR(32) NULL,
             owner_tenant_id  VARCHAR(64) NULL,
             rule_key         CHAR(64) NULL,
             enabled          TINYINT(1) NOT NULL DEFAULT 1,
@@ -167,12 +165,24 @@ const ADJUSTMENTS = [
     // change has some of these and not others, and the rebuild steps over
     // it — so each is also ensured on its own.
     why: 'recharge_rules — the columns WazzOCR needs, on a half-reshaped table',
-    check: hasColumn('recharge_rules', 'account_code'),
+    check: hasColumn('recharge_rules', 'address_key'),
     needed: (row) => Number(row.n) === 0,
     sql: [
       ensureColumn('recharge_rules', 'payer_tenant_id', 'VARCHAR(64) NULL'),
-      ensureColumn('recharge_rules', 'account_code', 'VARCHAR(32) NULL'),
       ensureColumn('recharge_rules', 'address_key', 'VARCHAR(512) NULL')
+    ].join(';\n')
+  },
+  {
+    // utility and account_code were on the register for part of this work
+    // and came off: the Xero contact already says which utility it is, and
+    // the account code is WazzOCR's to choose. Dropped only where no row is
+    // carrying one.
+    why: 'recharge_rules — retire utility and account_code',
+    check: deadColumn('recharge_rules', 'utility'),
+    needed: (row) => Number(row.present) === 1 && Number(row.rows_held) === 0,
+    sql: [
+      dropColumnIfPresent('recharge_rules', 'utility'),
+      dropColumnIfPresent('recharge_rules', 'account_code')
     ].join(';\n')
   },
   {

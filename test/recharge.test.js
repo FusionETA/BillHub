@@ -313,47 +313,51 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const WISMA_ADDR = 'Wisma Ayu Borneo, Jalan Lintas, 88300 Kota Kinabalu';
 
   const made = await register([
-    { utility: 'TNB', premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
-      contactName: 'Tenaga Nasional Berhad - Wisma', accountCode: '445', ownerTenantId: kk.tenantId },
-    { utility: 'Indah Water', premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
+    { premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
+      contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId },
+    { premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
       contactName: 'Indah Water - Wisma', ownerTenantId: kk.tenantId }
   ]);
   check('several rows are added in one go', made.status === 201 && made.body.created === 2, made.body);
-  check('and each reads back as the columns the table shows',
-    made.body.rules.some((r) => r.utility === 'TNB' && r.payerLabel === 'ABM'
-      && r.accountCode === '445' && r.ownerCode === 'ABKK'), made.body.rules);
-  check('two utilities at one building are two rows, not a clash',
+  check('and each reads back as the four columns the table shows',
+    made.body.rules.some((r) => r.payerLabel === 'ABM' && r.address === WISMA_ADDR
+      && r.contactName === 'Tenaga Nasional Berhad - Wisma' && r.ownerCode === 'ABKK'),
+    made.body.rules);
+  // A building has electricity and water. Keyed on the address alone, only
+  // one of them could exist.
+  check('two accounts at one building are two rows, not a clash',
     made.body.rules.filter((r) => r.address === WISMA_ADDR).length === 2, made.body.rules);
 
   console.log('\nWhat WazzOCR asks it');
-  const ask = (address, utility) =>
+  const ask = (address, supplier) =>
     req('GET', `/api/recharge/premises?address=${encodeURIComponent(address)}`
-      + (utility ? `&utility=${encodeURIComponent(utility)}` : ''), { cookie });
+      + (supplier ? `&supplier=${encodeURIComponent(supplier)}` : ''), { cookie });
 
-  const found = await ask(WISMA_ADDR, 'TNB');
+  const found = await ask(WISMA_ADDR, 'Tenaga Nasional');
   check('an address comes back with where the bill goes',
-    found.status === 200 && found.body.createBillIn.code === 'ABM'
-    && found.body.contactName === 'Tenaga Nasional Berhad - Wisma'
-    && found.body.accountCode === '445', found.body);
+    found.status === 200 && found.body.paidBy.code === 'ABM'
+    && found.body.contactName === 'Tenaga Nasional Berhad - Wisma', found.body);
   check('and with where it will end up, as a note',
     found.body.rechargeTo && found.body.rechargeTo.code === 'ABKK', found.body.rechargeTo);
 
   // WazzOCR reads an address off a photograph. Punctuation and case will
   // not survive that; a missing word should not be forgiven.
-  const messy = await ask('WISMA AYU BORNEO  JALAN LINTAS  88300 KOTA KINABALU', 'TNB');
+  const messy = await ask('WISMA AYU BORNEO  JALAN LINTAS  88300 KOTA KINABALU', 'Tenaga');
   check('punctuation and case do not matter', messy.status === 200, messy.body);
-  const abbreviated = await ask('Wisma Ayu Borneo, Jln Lintas, 88300 Kota Kinabalu', 'TNB');
+  const abbreviated = await ask('Wisma Ayu Borneo, Jln Lintas, 88300 Kota Kinabalu', 'Tenaga');
   check('but an abbreviation is not guessed at — that is how a bill lands on the wrong company',
     abbreviated.status === 404, abbreviated.body);
 
   // The address stored can be the distinctive part; a longer one printed on
   // the bill still finds it.
-  const longer = await ask(`Aras 12, ${WISMA_ADDR}, Sabah, Malaysia`, 'TNB');
+  const longer = await ask(`Aras 12, ${WISMA_ADDR}, Sabah, Malaysia`, 'Tenaga');
   check('a longer address on the bill still finds the row', longer.status === 200, longer.body);
 
-  check('the utility picks between two rows at one address',
+  // Two rows share this address, so the supplier WazzOCR read off the bill
+  // is what picks between them.
+  check('the supplier on the bill picks between two rows at one address',
     (await ask(WISMA_ADDR, 'Indah Water')).body.contactName === 'Indah Water - Wisma');
-  const unmapped = await ask('Lot 5, Jalan Nowhere, 12345 Ipoh', 'TNB');
+  const unmapped = await ask('Lot 5, Jalan Nowhere, 12345 Ipoh', 'Tenaga');
   check('a premises nobody has mapped says so, rather than guessing',
     unmapped.status === 404, unmapped.body);
 
@@ -362,9 +366,9 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // table to work out which eight.
   const countBefore = (await req('GET', '/api/recharge/address-rules', { cookie })).body.rules.length;
   const partly = await register([
-    { utility: 'Syabas', premisesAddress: 'Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves',
+    { premisesAddress: 'Lot 9, Jalan Perusahaan Empat, 68100 Batu Caves',
       payerTenantId: abm.tenantId, contactName: 'Syabas - Lot 9', ownerTenantId: kk.tenantId },
-    { utility: 'Gas', premisesAddress: '', payerTenantId: abm.tenantId,
+    { premisesAddress: '', payerTenantId: abm.tenantId,
       contactName: 'Gas - Lot 9', ownerTenantId: kk.tenantId }
   ]);
   check('one bad row saves none of them', partly.status === 400, partly.body);
@@ -375,29 +379,29 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     { countBefore, countAfter });
 
   const noAddress = await register([
-    { utility: 'TNB', payerTenantId: abm.tenantId, contactName: 'X', ownerTenantId: kk.tenantId }]);
+    { payerTenantId: abm.tenantId, contactName: 'X', ownerTenantId: kk.tenantId }]);
   check('a row with no address is refused — WazzOCR would never find it',
     noAddress.status === 400 && /premises address/i.test(noAddress.body.error), noAddress.body.error);
 
   const noPayer = await register([
-    { utility: 'TNB', premisesAddress: 'Lot 77, Jalan Lain, 40000 Shah Alam',
+    { premisesAddress: 'Lot 77, Jalan Lain, 40000 Shah Alam',
       contactName: 'X', ownerTenantId: kk.tenantId }]);
-  check('and one with nowhere to create the bill is refused too',
+  check('and one with nobody paying it is refused too',
     noPayer.status === 400 && /create the bill in/i.test(noPayer.body.error), noPayer.body.error);
 
   const dupBatch = await register([
-    { utility: 'TNB', premisesAddress: 'Lot 3, Jalan Dua, 50000 KL',
+    { premisesAddress: 'Lot 3, Jalan Dua, 50000 KL',
       payerTenantId: abm.tenantId, contactName: 'A', ownerTenantId: kk.tenantId },
-    { utility: 'TNB', premisesAddress: 'LOT 3 JALAN DUA 50000 KL',
-      payerTenantId: abm.tenantId, contactName: 'B', ownerTenantId: kj.tenantId }
+    { premisesAddress: 'LOT 3 JALAN DUA 50000 KL',
+      payerTenantId: abm.tenantId, contactName: 'A', ownerTenantId: kj.tenantId }
   ]);
-  check('one utility twice at one address is caught before the database sees it',
+  check('one contact twice at one address is caught before the database sees it',
     dupBatch.status === 400 && dupBatch.body.problems.length === 1
     && dupBatch.body.problems[0].at === 2, dupBatch.body.problems);
 
   const repeat = await register([
-    { utility: 'TNB', premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
-      contactName: 'Someone Else', ownerTenantId: kk.tenantId }]);
+    { premisesAddress: WISMA_ADDR, payerTenantId: abm.tenantId,
+      contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId }]);
   check('and so is one that repeats a row already saved', repeat.status === 409, repeat.body);
 
   console.log('\nIt decides nothing about recharging');
@@ -427,7 +431,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   const offRow = made.body.rules.find((r) => r.contactName === 'Tenaga Nasional Berhad - Wisma');
   await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: false } });
   check('a row switched off is not returned by a lookup',
-    (await ask(WISMA_ADDR, 'TNB')).status === 404);
+    (await ask(WISMA_ADDR, 'Tenaga')).status === 404);
   await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: true } });
 
   console.log('\nThe chart of accounts a rule chooses from');

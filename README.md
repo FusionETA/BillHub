@@ -546,22 +546,27 @@ from "none could be read".
 **WazzOCR**, not for the recharge engine.
 
 Somebody photographs a utility bill into WazzOCR's WhatsApp. WazzOCR reads
-the premises address off it, looks it up here, and learns the three things
-the paper cannot tell it:
+the premises address off it, looks it up here, and learns the two things the
+paper cannot tell it:
 
-| Utility | Address on the bill | Create bill in | Xero contact | Account | Recharge to |
-| --- | --- | --- | --- | --- | --- |
-| TNB | Lot 9, Jalan Perusahaan Empat | ABM | TNB - Lot 9 | 445 | *ABKJ* |
+| Paid by | Address on the bill | Xero contact | Recharge to |
+| --- | --- | --- | --- |
+| ABM | Lot 9, Jalan Perusahaan Empat | TNB - Lot 9 | *ABKJ* |
+| ABM | Lot 9, Jalan Perusahaan Empat | IWK - Lot 9 | *ABKJ* |
 
-`GET /api/recharge/premises?address=…&utility=…` is the lookup. The
+`GET /api/recharge/premises?address=…&supplier=…` is the lookup. The
 **address is the key**, because the address is what is printed on the bill —
 the opposite way round from a recharge rule, which matches on what a Xero
 bill already carries. Matching is containment on a stripped key, so
 punctuation and case do not matter and a longer address on the bill still
 finds a row holding the distinctive part. An abbreviation is not forgiven:
 `Jln` does not find `Jalan`, because guessing is how a bill lands on the
-wrong company. Unique per utility at an address, or WazzOCR would have two
-answers and no way to choose.
+wrong company.
+
+Keyed on the address **and the contact**, as the two rows above show: one
+building has an electricity account and a water account, and the address
+alone would let only one of them exist. Where two rows share an address, the
+supplier WazzOCR read off the bill picks between them.
 
 **Nothing on this tab decides a recharge.** By the time a bill reaches Bills
 Hub, which organisation it sits in has already been settled; a second

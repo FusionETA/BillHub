@@ -467,14 +467,12 @@ function addressRuleRow(r) {
   if (!r) return null;
   return {
     id: r.id,
-    utility: r.utility || '',
     address: r.premises_address || '',
     // NULL means "whoever is on the bill header", which is the common case
     // and has to read as a decision rather than as a blank cell.
     payerTenantId: r.payer_tenant_id || '',
     payerLabel: r.payer_tenant_id ? (r.payer_code || '—') : 'Not set',
     contactName: r.contact_name || '',
-    accountCode: r.account_code || '',
     // A note on the row, not something this table does: the recharge comes
     // from a recharge rule.
     ownerTenantId: r.owner_tenant_id || '',
