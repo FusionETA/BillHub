@@ -1,8 +1,23 @@
 # Paste-ready prompts
 
-Two jobs, one session each. Everything the assistant needs is inside the
-prompt — it does not need this file, the Bills Hub repo, or the conversation
-these came from.
+**Three prompts, and they go to three different places. Do not mix them up.**
+
+| | Where it goes | What it is |
+| --- | --- | --- |
+| **1** | A Claude session with the **WazzOCR repo** open | Build the lookup |
+| **2** | A Claude session with **both repos** open | Build the single sign-on |
+| **3** | WazzOCR's **AI prompt** field, in its admin UI | What the bill reader extracts |
+
+1 and 2 are instructions to a developer-assistant — "write this code". They
+are no use pasted into WazzOCR's AI prompt field, which drives the model
+that reads bills.
+
+3 is the opposite: it belongs in that field, and is no use to a developer
+on its own.
+
+**3 does nothing until 1 is built.** A prompt cannot make an HTTP call. The
+prompt changes what the reader extracts; the code change makes WazzOCR ask
+Bills Hub about it. Do 1 first, then put 3 in place.
 
 Replace `BILLHUB_URL` with `https://billhub.fusioneta.com.my` before pasting
 if you want it concrete.
@@ -231,5 +246,58 @@ DONE WHEN
 - Signing out of WazzOCR means Bills Hub no longer recognises him.
 - A user who is not a super admin gets 403 from Bills Hub's /api/activity —
   check the route, not just that the tab is hidden.
+
+─────────────────────── COPY TO HERE ───────────────────────
+
+---
+
+## Prompt 3 — WazzOCR's AI prompt field
+
+For the **AI prompt** in WazzOCR's admin UI. Whether it goes in the general
+prompt or an account add-on is a question for whoever builds Prompt 1: the
+behaviour is generic, so the general prompt is the likelier home, but if
+only Ayu Borneo uses Bills Hub an add-on is reasonable to start with.
+
+**It has no effect until Prompt 1 is built.** On its own it changes what the
+reader extracts and nothing acts on it.
+
+────────────────────── COPY FROM HERE ──────────────────────
+
+When reading a supplier bill, also extract:
+
+  supplier   The company issuing the bill, exactly as printed.
+  addresses  EVERY address-like block on the page, as a list, each one
+             verbatim. Include the supplier's own address, the billing
+             address and the service/premises address. Do not decide which
+             is which. Do not merge them, and do not tidy them.
+
+Copy each address exactly as printed, including the postcode and any unit or
+lot number. Do not expand or abbreviate: do not turn "Jln" into "Jalan", or
+the reverse. Do not translate. If a line is unclear, give your best reading
+rather than leaving it out.
+
+Getting this verbatim matters more than making it look right. The addresses
+are matched against a register of premises, and that match forgives case and
+punctuation but not a changed or missing word.
+
+On a Malaysian utility bill the premises is usually the address NOT beside
+the supplier's logo, and is often labelled Alamat Premis, Service Address or
+Alamat Penghantaran. You do not have to identify it — send them all.
+
+Suppliers you will see most, to help you read the letterhead. This is a hint
+for reading, NOT a filter: extract addresses from every bill, whoever sent
+it, including bills from landlords and individuals.
+
+  Electricity  TNB / Tenaga Nasional, SESB / Sabah Electricity,
+               Sarawak Energy
+  Water        Air Selangor, Syabas, SAJ, Jabatan Air, LAKU, Kuching Water,
+               Air Kelantan, PBA
+  Sewerage     Indah Water / IWK, Alam Flora, SWCorp
+  Gas          Gas Malaysia, Petronas Gas
+  Telecoms     Telekom Malaysia / unifi / TM Technology Services, Maxis,
+               Celcom, Digi, U Mobile, Time, Astro
+  Council      Majlis Bandaraya / Perbandaran / Daerah, DBKL,
+               cukai taksiran, cukai tanah
+  Rent         A landlord, who is called whatever they are called.
 
 ─────────────────────── COPY TO HERE ───────────────────────
