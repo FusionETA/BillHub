@@ -352,6 +352,38 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   ]);
   check('and so is a row that repeats one already saved', repeat.status === 409, repeat.body);
 
+  // The dropdown has to be this account's utilities, not a list written
+  // somewhere else — otherwise it offers a water company in the wrong state
+  // and leaves out the one they actually bill.
+  const { detect } = require('../lib/utilities');
+  check('a contact is recognised as the utility it is',
+    detect('Tenaga Nasional Berhad - Lot 9') === 'TNB'
+    && detect('Pengurusan Air Selangor Sdn Bhd') === 'Air Selangor'
+    && detect('Jabatan Air Negeri Sabah') === 'Jabatan Air',
+    [detect('Tenaga Nasional Berhad - Lot 9'), detect('Pengurusan Air Selangor Sdn Bhd')]);
+  check('and one that is not a utility is left alone rather than guessed at',
+    detect('Swanston Security') === null && detect('KWSP (EPF)') === null,
+    [detect('Swanston Security'), detect('KWSP (EPF)')]);
+
+  const offered = (await req('GET', '/api/recharge', { cookie })).body.utilities || [];
+  check('the dropdown offers a utility this account actually bills',
+    offered.includes('TNB'), offered);
+  check('and not one it has never seen',
+    !offered.includes('Gas Malaysia') && !offered.includes('Syabas'), offered);
+  check('a utility already typed into the register stays on the list',
+    offered.includes('Indah Water'), offered);
+  // The contract, rather than a list of names that moves with the seed:
+  // everything offered is either detected on a contact here or already
+  // typed into a row. Nothing arrives from somewhere else.
+  const contacts = (await db.query(
+    'SELECT DISTINCT contact_name AS n FROM bills WHERE account_id = 1')).map((r) => r.n);
+  const detected = new Set(require('../lib/utilities').fromContacts(contacts));
+  const typedIn = new Set((await db.query(
+    'SELECT DISTINCT utility AS u FROM recharge_rules WHERE account_id = 1')).map((r) => r.u));
+  check('and nothing is offered that came from neither',
+    offered.every((u) => detected.has(u) || typedIn.has(u)),
+    offered.filter((u) => !detected.has(u) && !typedIn.has(u)));
+
   console.log('\nThe register decides before a recharge rule does');
   const wismaBill = await makeBill(abm.tenantId, {
     ref: 'TNB-WISMA-0826', supplier: 'Tenaga Nasional Berhad - Wisma', total: 880.00

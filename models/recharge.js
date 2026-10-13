@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const db = require('../db');
 const premises = require('../lib/premises');
+const utilities = require('../lib/utilities');
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
@@ -64,10 +65,26 @@ function bad(message) {
 // utility and the address are there to make forty rows readable by whoever
 // maintains them, and are what they copy off the paper bill.
 
-const UTILITIES = [
-  'TNB', 'Indah Water', 'Air Selangor', 'Syabas', 'Gas Malaysia',
-  'Telekom Malaysia', 'Sewerage', 'Assessment', 'Quit rent'
-];
+// What the Utility column offers. Built from the account's OWN contacts,
+// not from a list written somewhere else: offering Syabas to a group that
+// bills only in Sabah is a dropdown nobody reads, and leaving out the one
+// they do use is worse. Utilities already typed into the register come
+// first, because those are the names this account has settled on.
+//
+// The field is free text underneath, so a utility the patterns in
+// lib/utilities.js do not recognise can still be typed — and
+// scripts/utilities.js --unmatched is how one gets noticed.
+async function utilityOptions(accountId) {
+  const [used, contacts] = await Promise.all([
+    db.query('SELECT DISTINCT utility FROM recharge_rules WHERE account_id = ? AND utility IS NOT NULL', [accountId]),
+    db.query(
+      `SELECT DISTINCT contact_name FROM bills
+        WHERE account_id = ? AND contact_name IS NOT NULL AND contact_name <> ''`, [accountId])
+  ]);
+  const seen = utilities.fromContacts(contacts.map((c) => c.contact_name));
+  const typed = used.map((u) => u.utility).filter(Boolean);
+  return [...new Set([...typed, ...seen])].sort((a, b) => a.localeCompare(b));
+}
 
 function addressRuleKey(contactName, payerTenantId, ownerTenantId) {
   return crypto.createHash('sha256')
@@ -576,7 +593,7 @@ async function summary(accountId, { includeTest = false } = {}) {
 
 module.exports = {
   getSettings, updateSettings,
-  UTILITIES,
+  utilityOptions,
   listAddressRules, getAddressRule, createAddressRules, updateAddressRule, deleteAddressRule,
   listTextRules, getTextRule, createTextRule, updateTextRule, deleteTextRule, markTextRuleRun,
   FIELDS, OPERATORS, fieldLabel, operatorLabel, fieldNeedsXero,

@@ -557,6 +557,26 @@ nothing is tested against them. Matching the address itself was built and
 removed: a Xero call per bill, two spellings of every Malaysian address held
 at once, and still a miss on `Jln` against `Jalan`.
 
+The **Utility** column offers what this account actually bills, not a list
+written somewhere else: `lib/utilities.js` recognises a contact name as TNB,
+SESB, Air Selangor, Indah Water, Jabatan Air and the rest, and the dropdown
+is built from the contacts on the account's own bills plus any utility
+already typed into a row. Offering Syabas to a group billing only in Sabah
+is a list nobody reads; leaving out the one they do use is worse. The field
+is free text underneath, so a utility the patterns miss can still be typed.
+
+```bash
+npm run utilities                 # which utilities, how many bills, how many contacts
+npm run utilities -- --unmatched  # recurring suppliers the patterns did not recognise
+npm run utilities -- --utility TNB
+```
+
+The second of those matters most. Anything recurring that went unrecognised
+is either a utility `lib/utilities.js` is missing or a supplier that belongs
+in a recharge rule — and the contacts-per-utility count says which utilities
+can use the register at all: one contact per premises is a row each, one
+contact across many premises needs a recharge rule on the reference instead.
+
 *Paid first by* narrows a row to one paying company, for a contact two of
 them settle. Where two rows name one contact, the one that also names the
 payer wins; otherwise the answer would be whichever row came back first.

@@ -79,9 +79,9 @@ router.get('/', async (req, res) => {
       ],
       runRows: runs.map((r) => vm.rechargeRunRow(r, { currency, shortCodes: codes })),
       addressRuleRows: addressRules.map(vm.addressRuleRow),
-      // Offered rather than hardcoded in the browser, so the list can grow
-      // without a deploy of the page.
-      utilities: model.UTILITIES,
+      // Read off this account's own contacts, so the list is the utilities
+      // they actually bill rather than ones somebody guessed.
+      utilities: await model.utilityOptions(accountId),
       textRuleCards: textRules.map((r) => vm.rechargeTextRuleCard(r, waiting.get(r.id) || 0)),
       settings: vm.rechargeSettings(settings),
       suggestions: pending.map((p) => vm.rechargeSuggestion(p, currency)),
