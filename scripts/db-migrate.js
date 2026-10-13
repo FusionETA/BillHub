@@ -125,12 +125,19 @@ const ADJUSTMENTS = [
     // address-rule queries fail loudly on first use, which is the outcome
     // that gets looked at rather than the one that gets lived with.
     why: 'recharge_rules — rebuilt as the premises register',
+    // Counts EVERY column the register needs, not one of them. Guarding on a
+    // single column is what let a half-shaped table through twice: an older
+    // adjustment further down adds address_key on its own, which made a
+    // guard that checked address_key believe the whole reshape had happened
+    // and skip payer_tenant_id — and the Recharge tab then failed with
+    // "Unknown column 'r.payer_tenant_id' in 'on clause'".
     check: `SELECT
               (SELECT COUNT(*) FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rules'
-                  AND COLUMN_NAME = 'address_key') AS shaped,
+                  AND COLUMN_NAME IN ('premises_address','address_key','payer_tenant_id',
+                                      'contact_name','contact_key','owner_tenant_id')) AS present,
               (SELECT COUNT(*) FROM recharge_rules) AS rows_held`,
-    needed: (row) => Number(row.shaped) === 0 && Number(row.rows_held) === 0,
+    needed: (row) => Number(row.present) < 6 && Number(row.rows_held) === 0,
     // recharge_runs.rule_id points here, so the constraint comes off first
     // and goes back on after — a run keeps its rule_id either way, and the
     // ON DELETE SET NULL it carries is why a posted run survives its rule
@@ -164,12 +171,24 @@ const ADJUSTMENTS = [
     // not been reshaped at all. A database that caught the middle of this
     // change has some of these and not others, and the rebuild steps over
     // it — so each is also ensured on its own.
-    why: 'recharge_rules — the columns WazzOCR needs, on a half-reshaped table',
-    check: hasColumn('recharge_rules', 'address_key'),
-    needed: (row) => Number(row.n) === 0,
+    // The same six, for a table the rebuild above stepped over because it
+    // holds rows. Each is ensured on its own, so a table missing any
+    // combination of them ends up with all six. Nullable: a NOT NULL column
+    // cannot be added to a table that already has rows, and a register row
+    // that predates these columns has nothing to put in them.
+    why: 'recharge_rules — restore any register column a half-finished upgrade left out',
+    check: `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_rules'
+               AND COLUMN_NAME IN ('premises_address','address_key','payer_tenant_id',
+                                   'contact_name','contact_key','owner_tenant_id')`,
+    needed: (row) => Number(row.n) < 6,
     sql: [
+      ensureColumn('recharge_rules', 'premises_address', 'VARCHAR(512) NULL'),
+      ensureColumn('recharge_rules', 'address_key', 'VARCHAR(512) NULL'),
       ensureColumn('recharge_rules', 'payer_tenant_id', 'VARCHAR(64) NULL'),
-      ensureColumn('recharge_rules', 'address_key', 'VARCHAR(512) NULL')
+      ensureColumn('recharge_rules', 'contact_name', 'VARCHAR(255) NULL'),
+      ensureColumn('recharge_rules', 'contact_key', 'VARCHAR(255) NULL'),
+      ensureColumn('recharge_rules', 'owner_tenant_id', 'VARCHAR(64) NULL')
     ].join(';\n')
   },
   {
@@ -218,12 +237,18 @@ const ADJUSTMENTS = [
     // the sales invoice in the paying company's, the bill in the receiving
     // company's. Both NULL keeps today's behaviour — post to whatever the
     // original bill was booked to.
+    // Both counted, and each added on its own. A check naming one of a pair
+    // takes a table holding only the other for finished — and the plain
+    // two-column ALTER then fails outright on the one it already has.
     why: 'recharge_text_rules.ar_account_code / ap_account_code — per-rule accounts',
-    check: hasColumn('recharge_text_rules', 'ar_account_code'),
-    needed: (row) => Number(row.n) === 0,
-    sql: `ALTER TABLE recharge_text_rules
-            ADD COLUMN ar_account_code VARCHAR(32) NULL,
-            ADD COLUMN ap_account_code VARCHAR(32) NULL`
+    check: `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_text_rules'
+               AND COLUMN_NAME IN ('ar_account_code','ap_account_code')`,
+    needed: (row) => Number(row.n) < 2,
+    sql: [
+      ensureColumn('recharge_text_rules', 'ar_account_code', 'VARCHAR(32) NULL'),
+      ensureColumn('recharge_text_rules', 'ap_account_code', 'VARCHAR(32) NULL')
+    ].join(';\n')
   },
   {
     // Default 1: this is how the module works now, and an existing

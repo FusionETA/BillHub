@@ -129,6 +129,49 @@ function migrate(dbName) {
     const second = migrate(OLD_DB);
     const stillDoing = (second.match(/altering:.*/g) || []);
     check('running it a second time does nothing', stillDoing.length === 0, stillDoing);
+
+    // The shape the two previous releases actually broke on, and which
+    // neither of the checks above can see: a table carrying SOME of the
+    // columns an adjustment adds.
+    //
+    // Both times the cause was the same — an adjustment whose check named
+    // one column while its SQL added several, so a database that had
+    // picked that one column up from somewhere else was taken for finished
+    // and the rest never arrived. The result on the day was the Recharge
+    // tab answering "Unknown column 'r.payer_tenant_id' in 'on clause'".
+    //
+    // Dropping a column by hand and running the migration again is the
+    // cheapest way to ask "is this guard per-column?" of every adjustment
+    // at once.
+    console.log('\nHalf-applied columns come back');
+    const PATCHABLE = [
+      ['recharge_rules', 'payer_tenant_id'],
+      ['recharge_rules', 'address_key'],
+      ['recharge_rules', 'contact_key'],
+      ['recharge_text_rules', 'ar_account_code'],
+      ['recharge_settings', 'auto_post'],
+      ['bills', 'marked_paid_at']
+    ];
+    for (const [table, column] of PATCHABLE) {
+      await admin.query(`USE \`${OLD_DB}\``);
+      const [[before]] = await admin.query(
+        `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [OLD_DB, table, column]);
+      if (!Number(before.n)) { check(`${table}.${column} exists to test`, false, 'not on the upgraded schema'); continue; }
+
+      await admin.query(`ALTER TABLE \`${OLD_DB}\`.\`${table}\` DROP COLUMN \`${column}\``);
+      try { migrate(OLD_DB); } catch (e) {
+        check(`${table}.${column} comes back`, false, `the migration failed: ${(e.stdout || '') + (e.stderr || '')}`.slice(0, 200));
+        continue;
+      }
+      const [[after]] = await admin.query(
+        `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [OLD_DB, table, column]);
+      check(`${table}.${column} comes back when it alone is missing`,
+        Number(after.n) === 1, 'the guard above it checks a different column');
+    }
   } finally {
     await admin.query(`DROP DATABASE IF EXISTS \`${OLD_DB}\``);
     await admin.query(`DROP DATABASE IF EXISTS \`${NEW_DB}\``);
