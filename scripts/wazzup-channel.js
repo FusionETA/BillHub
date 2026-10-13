@@ -3,6 +3,7 @@
 //   node scripts/wazzup-channel.js                   what is set now
 //   node scripts/wazzup-channel.js --write           apply what .env holds
 //   node scripts/wazzup-channel.js --test +60123456789
+//   node scripts/wazzup-channel.js --recipients     who it sends to, and why one failed
 //
 // Reads the new values from .env — WAZZUP_CHANNEL_ID, WAZZUP_API_KEY,
 // WAZZUP_SENDER_PHONE — rather than from the command line, so an API key
@@ -50,6 +51,32 @@ async function main() {
   for (const f of ['channelId', 'apiKey', 'senderPhone']) {
     const same = now[f] && env[f] && now[f] === env[f];
     console.log(`  ${f.padEnd(14)}  ${mask(now[f]).padEnd(26)}  ${mask(env[f])}${same ? '   same' : ''}`);
+  }
+
+  if (process.argv.includes('--recipients')) {
+    const people = await model.listRecipients(ACCOUNT_ID);
+    const fails = await db.query(
+      `SELECT r1.* FROM digest_runs r1
+        WHERE r1.account_id = ? AND r1.status = 'failed'
+          AND r1.id = (SELECT MAX(r2.id) FROM digest_runs r2
+                        WHERE r2.account_id = r1.account_id AND r2.phone = r1.phone
+                          AND r2.status = 'failed')`, [ACCOUNT_ID]);
+    const lastFail = new Map(fails.map((f) => [wazzup.normalisePhone(f.phone), f]));
+
+    console.log(`\n${people.length} recipient(s):\n`);
+    for (const p of people) {
+      const num = wazzup.normalisePhone(p.phone);
+      const self = num && num === wazzup.normalisePhone(now.senderPhone);
+      console.log(`  ${p.enabled ? '●' : '○'}  ${String(p.name || '(no name)').padEnd(18)} ${wazzup.formatPhone(p.phone)}`);
+      if (self) {
+        console.log("       ^ this is the channel's own number. A channel cannot message itself,");
+        console.log('         which Wazzup answers with HTTP 400.');
+      }
+      const f = lastFail.get(num);
+      if (f) console.log(`       last failure: ${f.error}`);
+    }
+    console.log('');
+    return;
   }
 
   const phone = arg('test');
