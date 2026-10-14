@@ -44,7 +44,8 @@
     "super-admin": "node scripts/super-admin.js",
     "utilities": "node scripts/utilities.js",
     "wazzup-channel": "node scripts/wazzup-channel.js",
-    "auth-preflight": "node scripts/auth-preflight.js"
+    "auth-preflight": "node scripts/auth-preflight.js",
+    "demo:wazzocr": "node scripts/demo-wazzocr-bill.js"
   },
   "engines": {
     "node": ">=18"
