@@ -113,7 +113,7 @@ async function getAddressRule(accountId, id) {
 // has to be able to say which of nine rows is wrong, and saving the other
 // eight while reporting the ninth is worse than saving none — half a
 // register is harder to finish than an empty one.
-function checkAddressRule({ premisesAddress, contactName, payerTenantId }) {
+function checkAddressRule({ premisesAddress, contactName, payerTenantId, ownerTenantId }) {
   // The address is what WazzOCR has in its hand, so a row without one can
   // never be found.
   if (!premisesAddress || !String(premisesAddress).trim()) {
@@ -126,6 +126,15 @@ function checkAddressRule({ premisesAddress, contactName, payerTenantId }) {
     return 'Choose the Xero contact WazzOCR should put the bill under.';
   }
   if (!payerTenantId) return 'Choose the entity WazzOCR should create the bill in.';
+  // Required, and always was — owner_tenant_id is NOT NULL, so a blank one
+  // reached MySQL and came back as "Column 'owner_tenant_id' cannot be
+  // null". Now that paying the bill recharges it, the field is the second
+  // half of what the row says, and it can say so in words.
+  if (!ownerTenantId) {
+    return 'Choose the entity to recharge to. Paying one of this premises\' bills raises the '
+         + 'invoice and the draft bill against it. If the paying entity carries this cost '
+         + 'itself, name it on both sides and nothing is recharged.';
+  }
   return null;
 }
 

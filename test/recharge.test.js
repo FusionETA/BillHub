@@ -459,25 +459,73 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
       contactName: 'Tenaga Nasional Berhad - Wisma', ownerTenantId: kk.tenantId }]);
   check('and so is one that repeats a row already saved', repeat.status === 409, repeat.body);
 
-  console.log('\nIt decides nothing about recharging');
-  // The point of the clarification this was built from: by the time a bill
-  // is in Bills Hub, which organisation it sits in has already been
-  // decided. A second opinion here would be a rule nobody wrote.
+  console.log('\nOne row, both jobs: WazzOCR files the bill, paying it recharges');
+  // A register row carries "Recharge to". Filling it in is what opts the row
+  // into recharging, so one row does both jobs and nobody writes the same
+  // premises down twice.
+  //
+  // Matched on the ADDRESS, never the contact — on this account one contact
+  // carries 1,834 bills across 29 organisations, and matching that would
+  // hand all of them to whichever premises was written first.
   const wismaBill = await makeBill(abm.tenantId, {
     ref: 'TNB-WISMA-0826', supplier: 'Tenaga Nasional Berhad - Wisma', total: 880.00
   });
-  const noRule = await verdict(wismaBill);
-  check('a bill whose contact is in the register is NOT recharged by it',
-    noRule.outcome === 'no-rule', noRule);
+  const contactOnly = await verdict(wismaBill);
+  check('the contact alone does not recharge a bill — the address does',
+    contactOnly.outcome === 'no-rule', contactOnly);
 
-  // …and a recharge rule for the same contact is what does decide it.
+  // The same contact, the same row, but this bill carries the premises
+  // WazzOCR read off the document.
+  const wismaOcr = await makeBill(abm.tenantId, {
+    ref: 'TNB-WISMA-0926', supplier: 'Tenaga Nasional Berhad - Wisma', total: 910.00,
+    address: WISMA_ADDR
+  });
+  const byAddress = await verdict(wismaOcr);
+  check('a bill carrying the premises IS recharged by its register row',
+    byAddress.outcome === 'recharge' && byAddress.ownerCode === 'ABKK', byAddress);
+  check('and it names the premises rather than a rule nobody named',
+    /address rule/.test(byAddress.reason), byAddress.reason);
+
+  // The cost that retired address matching the first time. The address is on
+  // the local row, so deciding reads nothing back out of Xero.
+  calls.length = 0;
+  await verdict(wismaOcr);
+  check('deciding it by address still costs Xero nothing',
+    calls.length === 0, calls.map((c) => c.path));
+
+  // "Recharge to" is required, and always was: owner_tenant_id is NOT NULL,
+  // so a blank one used to reach MySQL and come back as a column error.
+  const padiRow = await register([
+    { premisesAddress: 'Blok C, Jalan Padi Emas, 81200 Johor Bahru',
+      payerTenantId: abm.tenantId, contactName: 'Tenaga Nasional Berhad - Padi' }]);
+  check('a row without "Recharge to" is refused in words, not by MySQL',
+    padiRow.status === 400 && /recharge to/i.test(padiRow.body.problems[0].error),
+    padiRow.body);
+
+  // Naming the payer on both sides is how a premises whose cost the payer
+  // genuinely carries is written down — it reads as a decision, where a
+  // blank read as an unfinished row.
+  const ownRow = await register([
+    { premisesAddress: 'Blok C, Jalan Padi Emas, 81200 Johor Bahru',
+      payerTenantId: abm.tenantId, contactName: 'Tenaga Nasional Berhad - Padi',
+      ownerTenantId: abm.tenantId }]);
+  check('naming the payer on both sides is allowed', ownRow.status === 201, ownRow.body);
+  const padiBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-PADI-0826', supplier: 'Tenaga Nasional Berhad - Padi', total: 420.00,
+    address: 'Blok C, Jalan Padi Emas, 81200 Johor Bahru'
+  });
+  const own = await verdict(padiBill);
+  check('and it recharges nothing, because the payer owns the cost',
+    own.outcome === 'own', own);
+
+  // A recharge rule still covers the bills no address can be read from.
   const viaRule = await req('POST', '/api/recharge/text-rules', {
     cookie,
     body: { name: 'Wisma TNB', matchMode: 'all',
       conditions: [{ field: 'supplier', operator: 'is', value: 'Tenaga Nasional Berhad - Wisma' }],
       ownerTenantId: kk.tenantId }
   });
-  check('a recharge rule for the same contact is what recharges it',
+  check('a recharge rule still covers a bill with no address on it',
     (await verdict(wismaBill)).ownerCode === 'ABKK', viaRule.body);
   await req('DELETE', '/api/recharge/text-rules/' + viaRule.body.rule.id, { cookie });
 

@@ -335,7 +335,15 @@ function isPaid(bill) {
 // be a rule nobody wrote claiming bills a recharge rule was meant to.
 async function loadRules(accountId) {
   const text = await model.listTextRules(accountId);
-  return { text: text.filter((r) => r.enabled && r.owner_tenant_id) };
+  const address = await model.listAddressRules(accountId);
+  return {
+    // An address rule only recharges once somebody fills in "Recharge to".
+    // Without it the row is still doing its other job — telling WazzOCR
+    // where to create the bill — and that job is the reason most rows
+    // exist, so a blank there is a choice rather than an unfinished row.
+    address: address.filter((r) => r.enabled && r.owner_tenant_id && r.premises_address),
+    text: text.filter((r) => r.enabled && r.owner_tenant_id)
+  };
 }
 
 // The first recharge rule whose conditions the bill satisfies. Ordered by
@@ -350,13 +358,59 @@ async function matchTextRule(accountId, bill, rules, { fetch = true, assumePaid 
   return null;
 }
 
+// The address rule whose premises this bill carries.
+//
+// Matched on the ADDRESS, never on the contact. The contact is what WazzOCR
+// files the bill under, and on this account one contact carries 1,834 bills
+// across 29 organisations — matching on it would hand every one of them to
+// whichever premises happened to be written first. The address is the thing
+// that names a single building.
+//
+// Read from the local row ONLY — bills.premises_address, which is where
+// WazzOCR puts what it read off the document, plus the reference and
+// invoice number a bookkeeper can type it into.
+//
+// Deliberately not premisesText(), which also reaches for the contact's
+// address and the line items. Those cost a Xero call per contact and per
+// bill, and this runs over every paid bill on an account with 2,250 of
+// them: that cost is what retired address matching the first time. The
+// trade is honest and matches what the tab is for — an address rule fires
+// for the bills WazzOCR recognised, because those are the ones carrying an
+// address locally. Anything else is a recharge rule's job.
+function matchAddressRule(bill, rules, { assumePaid = false } = {}) {
+  const usable = rules.filter((r) =>
+    (!r.payer_tenant_id || r.payer_tenant_id === bill.xero_tenant_id)
+    && withinStart(bill, r, { assumePaid }));
+  if (!usable.length) return null;
+
+  const f = localFields(bill);
+  const text = [f.premises, f.reference, f.invoice_number].filter(Boolean).join(' ');
+  if (!text) return null;
+  // best() settles the case of one address sitting inside another — a block
+  // and a unit within it — on length, so the more specific row wins rather
+  // than whichever the database returned first.
+  const hit = premisesLib.best(text, usable);
+  return hit ? { rule: hit.rule } : null;
+}
+
+// What to call a rule in a sentence. Address rules have no name of their
+// own; the premises is the only thing that identifies one, and it is also
+// the thing somebody would look for on the tab.
+function ruleLabel(rule, kind) {
+  return kind === 'address'
+    ? `the address rule for ${rule.premises_address}`
+    : `"${rule.name}"`;
+}
+
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 function verdictFor(rule, bill, { address = null, kind }) {
   const owner = rule.owner_short || rule.owner_code;
-  const what = `"${rule.name}"`;
+  const what = ruleLabel(rule, kind);
   if (rule.owner_tenant_id === bill.xero_tenant_id) {
     return {
       outcome: 'own', rule, kind, address: address || rule.premises_address || null,
-      reason: `${what} recharges to ${owner}, which is the entity on the bill header. Nothing is recharged.`
+      reason: `${cap(what)} recharges to ${owner}, which is the entity on the bill header. Nothing is recharged.`
     };
   }
   return {
@@ -368,7 +422,7 @@ function verdictFor(rule, bill, { address = null, kind }) {
     // Two forms of the same sentence. `reason` stands alone; `consequence` is
     // for a view that has already named the supplier and would otherwise
     // name it twice.
-    reason: `${what} matches this bill, so the full amount is recharged to ${owner}.`,
+    reason: `${cap(what)} matches this bill, so the full amount is recharged to ${owner}.`,
     consequence: `Matches ${what} — the full amount is recharged to ${owner}.`
   };
 }
@@ -391,12 +445,39 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
     };
   }
 
+  // Asked before the recharge rules, because an address rule is the more
+  // specific statement: it names one building, where a recharge rule names
+  // a pattern that can cover a supplier's whole account. Most specific wins
+  // is also what makes the two tabs divide the work the way they read —
+  // address rules for bills WazzOCR recognised, recharge rules for the rest.
+  const addr = matchAddressRule(bill, all.address, { assumePaid });
+  if (addr) return verdictFor(addr.rule, bill, { kind: 'address', address: addr.rule.premises_address });
+
   const text = await matchTextRule(accountId, bill, all.text, { fetch, assumePaid });
   if (text) return verdictFor(text, bill, { kind: 'text' });
 
   // Separated from "no rule", because the two call for opposite actions. A
   // rule does cover this bill; it was paid before the rule's start date, and
   // the fix is to move that date back, not to write another rule.
+  // An address rule somebody has just filled "Recharge to" in on would
+  // otherwise match every bill that premises has ever had, back years. It
+  // acts from when it was written, like a recharge rule — and saying so is
+  // better than "no rule covers this supplier", which would send somebody
+  // off to write a second rule that also would not fire.
+  const staleAddr = matchAddressRule(bill, all.address.filter(
+    (r) => !withinStart(bill, r, { assumePaid })), { assumePaid: true });
+  if (staleAddr) {
+    return {
+      outcome: 'out-of-scope',
+      rule: staleAddr.rule,
+      kind: 'address',
+      reason: `${cap(ruleLabel(staleAddr.rule, 'address'))} matches this bill, but the bill was marked `
+            + `paid on ${asDate(bill.marked_paid_at)}, before that row was written on `
+            + `${asDate(staleAddr.rule.created_at)}. A rule only ever acts on bills marked paid after `
+            + 'it was written, so this one is outside it. Nothing will happen to it.'
+    };
+  }
+
   for (const rule of all.text) {
     if (rule.payer_tenant_id && rule.payer_tenant_id !== bill.xero_tenant_id) continue;
     if (withinStart(bill, rule, { assumePaid })) continue;
@@ -419,7 +500,7 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
 
 // Validates a proposed recharge. One supplier, one owner, the whole amount —
 // there is no split to work out, because a rule names a single entity.
-async function planRun(accountId, { billId, ownerTenantId = null, textRuleId = null }) {
+async function planRun(accountId, { billId, ownerTenantId = null, textRuleId = null, ruleId = null }) {
   const settings = await model.getSettings(accountId);
   const [bill] = await bills.getManyByIds(accountId, [Number(billId)]);
   if (!bill) throw err('Bill not found.', 404);
@@ -473,6 +554,10 @@ async function planRun(accountId, { billId, ownerTenantId = null, textRuleId = n
   } else if (textRuleId) {
     rule = await model.getTextRule(accountId, textRuleId);
     kind = rule ? 'text' : null;
+  } else if (ruleId) {
+    rule = await model.getAddressRule(accountId, ruleId);
+    kind = rule ? 'address' : null;
+    address = rule ? rule.premises_address : null;
   }
 
   if (!byTenant.has(owner)) throw err(`"${owner}" is not a connected Xero organisation.`);
@@ -504,10 +589,9 @@ async function planRun(accountId, { billId, ownerTenantId = null, textRuleId = n
     lines,
     address,
     total: Number(bill.total),
-    // rule_id on a run is the retired address rule, kept for the handful of
-    // runs raised before the register stopped deciding anything. Nothing
-    // sets it now.
-    ruleId: null,
+    // Which of the two kinds decided it, so the run can say so afterwards
+    // and so a rule can be told what it has already acted on.
+    ruleId: kind === 'address' && rule ? rule.id : null,
     textRuleId: kind === 'text' && rule ? rule.id : null
   };
 }
@@ -907,7 +991,11 @@ async function suggestions(accountId, { limit = 50 } = {}) {
       rule: verdict.rule,
       address: verdict.address || null,
       reason: verdict.reason,
-      ruleName: verdict.kind === 'text' ? verdict.rule.name : null,
+      // An address rule has no name; the premises is what identifies it, and
+      // it is also what somebody would look for on the tab.
+      ruleName: verdict.kind === 'text'
+        ? verdict.rule.name
+        : verdict.rule.premises_address || null,
       lines: [{
         tenantId: verdict.ownerTenantId,
         code: verdict.ownerCode,
@@ -971,7 +1059,7 @@ async function sweep(accountId, { limit = 50 } = {}) {
       try {
         const run = await createRun(id, {
           billId: p.bill.id,
-          ruleId: null,
+          ruleId: p.kind === 'address' ? p.rule.id : null,
           textRuleId: p.kind === 'text' ? p.rule.id : null
         });
         const out = await postRun(id, run.id);
