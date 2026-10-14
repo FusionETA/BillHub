@@ -1659,7 +1659,7 @@
 
         {tab === 'rules' && (() => {
           const rows = data.addressRuleRows || [];
-          const COLS = 'minmax(0,.85fr) minmax(0,1.9fr) minmax(0,1.6fr) minmax(0,.85fr) 64px 84px';
+          const COLS = 'minmax(0,1.2fr) minmax(0,1.7fr) minmax(0,1.5fr) minmax(0,1.2fr) 64px 84px';
           return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.65, maxWidth: '96ch' }}>
               <strong style={{ color: 'var(--text-body)' }}>This is for WazzOCR, not for recharging.</strong> When somebody photographs a utility bill into WazzOCR, it reads the premises address and looks it up here to learn what the paper cannot tell it: which Xero organisation pays it, and which contact to file it under. Bills Hub recharges the bill later, from the Recharge rules tab — nothing on this tab decides that.
@@ -1670,15 +1670,18 @@
                   message="Tell WazzOCR where each premises' bills belong: the organisation that pays, and the contact to file it under. Add as many rows as you like in one go — the dialog is a table, not a form."
                   action={<Button variant="primary" size="md" onClick={() => setAddressRules(true)}>New address rules</Button>} />
               : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto' }}>
-                <div style={{ minWidth: 1020 }}>
+                <div style={{ minWidth: 1140 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, padding: '10px 18px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)' }}>
                     <div>Paid by</div><div>Address on the bill</div><div>Xero contact</div><div>Recharge to</div><div>Active</div><div />
                   </div>
                   {rows.map(r => (
                     <div key={r.id} style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--neutral-100)', fontSize: 13.5, opacity: r.on ? 1 : .55 }}>
-                      <div style={{ ...Ellip }}>
+                      <div style={{ minWidth: 0 }} title={r.payerShort || r.payerLabel}>
                         {r.payerTenantId
-                          ? <Code>{r.payerLabel}</Code>
+                          ? <React.Fragment>
+                              <Code>{r.payerLabel}</Code>
+                              {r.payerShort && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3, ...Ellip }}>{r.payerShort}</div>}
+                            </React.Fragment>
                           : <span style={{ color: 'var(--color-danger)' }}>{r.payerLabel}</span>}
                       </div>
                       <div style={{ color: 'var(--text-body)', ...Ellip }} title={r.address}>{r.address || '—'}</div>
@@ -1697,9 +1700,12 @@
                           {r.broad ? `${r.coverLabel} — a shared contact, not one premises` : r.coverLabel}
                         </div>
                       </div>
-                      <div style={{ minWidth: 0, ...Ellip }}>
+                      <div style={{ minWidth: 0 }} title={r.ownerShort || ''}>
                         {r.ownerCode
-                          ? <Code>{r.ownerCode}</Code>
+                          ? <React.Fragment>
+                              <Code>{r.ownerCode}</Code>
+                              {r.ownerShort && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3, ...Ellip }}>{r.ownerShort}</div>}
+                            </React.Fragment>
                           : <span style={{ color: 'var(--text-subtle)', fontSize: 12.5 }}>—</span>}
                       </div>
                       <div><Switch checked={r.on} onChange={v => toggleAddressRule(r, v)} /></div>

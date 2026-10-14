@@ -472,6 +472,10 @@ function addressRuleRow(r) {
     // and has to read as a decision rather than as a blank cell.
     payerTenantId: r.payer_tenant_id || '',
     payerLabel: r.payer_tenant_id ? (r.payer_code || '—') : 'Not set',
+    // The code alone is not a name anybody reads. Forty-three of them look
+    // alike at a glance, and picking the wrong payer here sends WazzOCR's
+    // bills into the wrong Xero organisation.
+    payerShort: r.payer_tenant_id ? (r.payer_short || '') : '',
     contactName: r.contact_name || '',
     // A note on the row, not something this table does: the recharge comes
     // from a recharge rule.
