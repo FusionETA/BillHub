@@ -464,15 +464,21 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   // into recharging, so one row does both jobs and nobody writes the same
   // premises down twice.
   //
-  // Matched on the ADDRESS, never the contact — on this account one contact
-  // carries 1,834 bills across 29 organisations, and matching that would
-  // hand all of them to whichever premises was written first.
+  // Matched on the address when the bill carries one, and otherwise on the
+  // contact — which is the path that actually runs, because a bill reaches
+  // Bills Hub by syncing back from Xero and that sync carries no premises.
   const wismaBill = await makeBill(abm.tenantId, {
     ref: 'TNB-WISMA-0826', supplier: 'Tenaga Nasional Berhad - Wisma', total: 880.00
   });
   const contactOnly = await verdict(wismaBill);
-  check('the contact alone does not recharge a bill — the address does',
-    contactOnly.outcome === 'no-rule', contactOnly);
+  check('a contact naming one premises recharges on its own, with no address',
+    contactOnly.outcome === 'recharge' && contactOnly.ownerCode === 'ABKK', contactOnly);
+  check('and that costs Xero nothing either',
+    (() => { calls.length = 0; return true; })() && true);
+  calls.length = 0;
+  await verdict(wismaBill);
+  check('deciding by contact reads nothing back out of Xero',
+    calls.length === 0, calls.map((c) => c.path));
 
   // The same contact, the same row, but this bill carries the premises
   // WazzOCR read off the document.
@@ -492,6 +498,31 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   await verdict(wismaOcr);
   check('deciding it by address still costs Xero nothing',
     calls.length === 0, calls.map((c) => c.path));
+
+  // The generic-contact case. One contact, two premises, two different
+  // answers about where the money goes — so it declines rather than
+  // picking whichever row was saved first. This is what makes matching on
+  // the contact safe to do at all.
+  const clashRow = await register([
+    { premisesAddress: 'Lot 44, Jalan Tuaran Baru, 88450 Kota Kinabalu',
+      payerTenantId: abm.tenantId, contactName: 'Tenaga Nasional Berhad - Wisma',
+      ownerTenantId: kj.tenantId }]);
+  check('one contact may name a second premises', clashRow.status === 201, clashRow.body);
+  const split = await verdict(wismaBill);
+  check('a contact two rows disagree over recharges nothing',
+    split.outcome === 'no-rule', split);
+  check('and says so, naming both entities and both premises',
+    /disagree/.test(split.reason)
+    && /Ayu Borneo \(KK\)/.test(split.reason) && /Ayu Borneo \(KJ\)/.test(split.reason)
+    && /Tuaran/.test(split.reason) && /Jalan Lintas/.test(split.reason), split.reason);
+  // The bill that does carry its address is still decided, because the
+  // address settles what the contact could not.
+  check('but a bill carrying its premises is still decided',
+    (await verdict(wismaOcr)).ownerCode === 'ABKK');
+  await req('DELETE', '/api/recharge/address-rules/' + clashRow.body.rules.find(
+    (r) => /Tuaran/.test(r.address)).id, { cookie });
+  check('and removing the clash lets the contact decide again',
+    (await verdict(wismaBill)).ownerCode === 'ABKK');
 
   // "Recharge to" is required, and always was: owner_tenant_id is NOT NULL,
   // so a blank one used to reach MySQL and come back as a column error.
@@ -518,15 +549,21 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and it recharges nothing, because the payer owns the cost',
     own.outcome === 'own', own);
 
-  // A recharge rule still covers the bills no address can be read from.
+  // A recharge rule still covers suppliers the register says nothing about —
+  // the bills with no premises to detect, which is what that tab is for.
+  const strayBill = await makeBill(abm.tenantId, {
+    ref: 'OFFICE-SUPPLIES-0826', supplier: 'Pejabat Supplies Sdn Bhd', total: 310.00
+  });
+  check('a supplier in no register row is not recharged by the register',
+    (await verdict(strayBill)).outcome === 'no-rule');
   const viaRule = await req('POST', '/api/recharge/text-rules', {
     cookie,
-    body: { name: 'Wisma TNB', matchMode: 'all',
-      conditions: [{ field: 'supplier', operator: 'is', value: 'Tenaga Nasional Berhad - Wisma' }],
+    body: { name: 'Office supplies', matchMode: 'all',
+      conditions: [{ field: 'supplier', operator: 'is', value: 'Pejabat Supplies Sdn Bhd' }],
       ownerTenantId: kk.tenantId }
   });
-  check('a recharge rule still covers a bill with no address on it',
-    (await verdict(wismaBill)).ownerCode === 'ABKK', viaRule.body);
+  check('and a recharge rule is what covers it', 
+    (await verdict(strayBill)).ownerCode === 'ABKK', viaRule.body);
   await req('DELETE', '/api/recharge/text-rules/' + viaRule.body.rule.id, { cookie });
 
   // Switching a row off has to stop WazzOCR finding it, or the toggle is
@@ -626,6 +663,13 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   await db.execute('DELETE FROM bills WHERE id = ?', [inXeroOnly]);
 
   console.log('\nThe four steps');
+  // Paid now, after the rules above exist. Both timestamps are MySQL
+  // DATETIMEs, so they compare at whole seconds: this bill and the rule
+  // that covers it were written back to back, and the test only ever
+  // passed because they landed inside the same second. One second of
+  // drift anywhere earlier in the suite turned a recharge into
+  // "out of scope" — a failure that says nothing about the code.
+  await paidNow(billKilang);
   async function verdict(billId) {
     return (await req('GET', `/api/recharge/bills/${billId}/decide`, { cookie })).body;
   }

@@ -383,14 +383,39 @@ function matchAddressRule(bill, rules, { assumePaid = false } = {}) {
     && withinStart(bill, r, { assumePaid }));
   if (!usable.length) return null;
 
+  // 1. The address, when the bill carries one. The most precise thing
+  //    available, and best() settles one address sitting inside another —
+  //    a block and a unit within it — on length, so the more specific row
+  //    wins rather than whichever the database returned first.
   const f = localFields(bill);
   const text = [f.premises, f.reference, f.invoice_number].filter(Boolean).join(' ');
-  if (!text) return null;
-  // best() settles the case of one address sitting inside another — a block
-  // and a unit within it — on length, so the more specific row wins rather
-  // than whichever the database returned first.
-  const hit = premisesLib.best(text, usable);
-  return hit ? { rule: hit.rule } : null;
+  const byAddress = text ? premisesLib.best(text, usable) : null;
+  if (byAddress) return { rule: byAddress.rule, by: 'address' };
+
+  // 2. The contact, when it identifies the premises on its own.
+  //
+  //    This is the path that actually runs. A bill reaches Bills Hub by
+  //    syncing back from Xero, and that sync carries no premises: WazzOCR
+  //    writes the address nowhere Xero keeps it, so bills.premises_address
+  //    stays empty on every real bill. The contact is the one thing that
+  //    does survive the round trip.
+  //
+  //    Safe only while the contact names one premises, which is what a
+  //    per-premises contact ("TNB - 187A") is for. Two rows sharing a
+  //    contact and disagreeing about where to recharge is the generic
+  //    "TENAGA NASIONAL BERHAD" case — 1,834 bills across 29
+  //    organisations — and there the honest answer is to decline, not to
+  //    pick whichever row was written first.
+  const contactKey = premisesLib.normalise(bill.contact_name);
+  if (!contactKey) return null;
+  const sharing = usable.filter((r) => premisesLib.normalise(r.contact_name) === contactKey);
+  if (!sharing.length) return null;
+
+  const owners = new Set(sharing.map((r) => r.owner_tenant_id));
+  if (owners.size > 1) {
+    return { ambiguous: sharing, by: 'contact' };
+  }
+  return { rule: sharing[0], by: 'contact' };
 }
 
 // What to call a rule in a sentence. Address rules have no name of their
@@ -451,6 +476,19 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
   // is also what makes the two tabs divide the work the way they read —
   // address rules for bills WazzOCR recognised, recharge rules for the rest.
   const addr = matchAddressRule(bill, all.address, { assumePaid });
+  // Two register rows share this contact and disagree about where its bills
+  // go. Guessing would be a decision nobody made, and silence would read as
+  // "no rule covers this" — which is the one thing it is not.
+  if (addr && addr.ambiguous) {
+    const where = addr.ambiguous
+      .map((r) => `${r.owner_short || r.owner_code} (${r.premises_address})`).join(' and ');
+    return {
+      outcome: 'no-rule',
+      reason: `${bill.contact_name} is on ${addr.ambiguous.length} register rows that disagree about `
+            + `where its bills belong — ${where}. Nothing is recharged until the bill says which `
+            + 'premises it is for, or that contact is split into one per premises.'
+    };
+  }
   if (addr) return verdictFor(addr.rule, bill, { kind: 'address', address: addr.rule.premises_address });
 
   const text = await matchTextRule(accountId, bill, all.text, { fetch, assumePaid });
@@ -466,7 +504,7 @@ async function decide(accountId, bill, { rules = null, fetch = true, assumePaid 
   // off to write a second rule that also would not fire.
   const staleAddr = matchAddressRule(bill, all.address.filter(
     (r) => !withinStart(bill, r, { assumePaid })), { assumePaid: true });
-  if (staleAddr) {
+  if (staleAddr && staleAddr.rule) {
     return {
       outcome: 'out-of-scope',
       rule: staleAddr.rule,
