@@ -8,6 +8,7 @@
 //   GET    /api/recharge/premises?address=…&address=…&supplier=…
 //                                          WazzOCR: where does this bill go?
 //   GET    /api/recharge/accounts/:tenantId  one organisation's chart of accounts
+//   GET    /api/recharge/contacts/:tenantId  one organisation's supplier contacts
 //   GET/POST/PATCH/DELETE /api/recharge/address-rules[/:id]   the premises register
 //   POST   /api/recharge/plan               dry-run a recharge
 //   POST   /api/recharge/runs               create one (nothing in Xero yet)
@@ -229,6 +230,24 @@ router.get('/accounts/:tenantId', async (req, res) => {
     // A chart that cannot be read must not stop a rule being written.
     console.error('[recharge] chart of accounts failed:', err.message);
     res.status(200).json({ accounts: [], error: err.message });
+  }
+});
+
+// The suppliers one organisation buys from, for the address-rule dialog.
+// Asked per organisation rather than shipped whole: a contact belongs to one
+// Xero organisation, and a row that already says who pays should not be
+// offered the other forty-two organisations' contacts.
+router.get('/contacts/:tenantId', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    const rows = await require('../models/bills').contactsForTenant(accountId, req.params.tenantId);
+    res.json({ contacts: rows.map((r) => r.name).filter(Boolean) });
+  } catch (err) {
+    // Same bargain as the chart of accounts: the dialog falls back to the
+    // full list and says so. Not being able to narrow is not a reason to
+    // stop somebody writing the row.
+    console.error('[recharge] contacts for tenant failed:', err.message);
+    res.status(200).json({ contacts: [], error: err.message });
   }
 });
 

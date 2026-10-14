@@ -191,6 +191,21 @@ function contacts(accountId) {
   );
 }
 
+// The suppliers one organisation actually buys from. Distinct from
+// contacts() above, which spans all forty-odd: a contact exists per Xero
+// organisation, so offering the whole list on a row that has already named
+// who pays invites a pairing that cannot match a real bill.
+function contactsForTenant(accountId, tenantId) {
+  return db.query(
+    `SELECT contact_name AS name, COUNT(*) AS n
+       FROM bills b
+      WHERE b.account_id = ? AND b.xero_tenant_id = ? AND ${LIVE}
+        AND b.contact_name IS NOT NULL AND b.contact_name <> ''
+      GROUP BY contact_name ORDER BY contact_name`,
+    [accountId, tenantId]
+  );
+}
+
 function getById(accountId, id) {
   return db.getOne(
     `SELECT b.*, ${UI_STATUS_SQL} AS ui_status FROM bills b WHERE b.account_id = ? AND b.id = ?`,
@@ -305,7 +320,7 @@ async function applyStatus(accountId, id, xeroStatus) {
 }
 
 module.exports = {
-  list, listMeta, tabCounts, stats, contacts, SORTS,
+  list, listMeta, tabCounts, stats, contacts, contactsForTenant, SORTS,
   getById, getManyByIds, upsertFromXero, applyStatus, fit, WIDTHS,
   UI_STATUS_SQL
 };

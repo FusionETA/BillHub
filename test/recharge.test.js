@@ -489,6 +489,23 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     (await ask(WISMA_ADDR, 'Tenaga')).status === 404);
   await req('PATCH', '/api/recharge/address-rules/' + offRow.id, { cookie, body: { enabled: true } });
 
+  console.log('\nThe contacts a register row chooses from');
+  // A contact belongs to one Xero organisation. Offering all of them on a
+  // row that has already named the payer invites a pairing no real bill can
+  // satisfy — and the register, matching on address alone, would hand that
+  // unusable pair to WazzOCR rather than fall through.
+  const kjContacts = await req('GET', '/api/recharge/contacts/' + kj.tenantId, { cookie });
+  const kkContacts = await req('GET', '/api/recharge/contacts/' + kk.tenantId, { cookie });
+  check('one entity\'s contacts can be read', kjContacts.status === 200, kjContacts.body);
+  check('they are narrower than every contact on the account',
+    kjContacts.body.contacts.length < (await req('GET', '/api/recharge', { cookie })).body.suppliers.length,
+    { one: kjContacts.body.contacts.length });
+  check('a contact that bills one entity is not offered for another',
+    kjContacts.body.contacts.some((n) => !kkContacts.body.contacts.includes(n)),
+    { kj: kjContacts.body.contacts, kk: kkContacts.body.contacts });
+  check('an entity nobody has billed comes back empty rather than failing',
+    (await req('GET', '/api/recharge/contacts/no-such-tenant', { cookie })).body.contacts.length === 0);
+
   console.log('\nThe chart of accounts a rule chooses from');
   // Typed account codes fail at the last step, after one document may
   // already be posted. The dialog offers the real chart instead, and asks
