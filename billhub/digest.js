@@ -11,7 +11,51 @@ const entities = require('../models/entities');
 const accounts = require('../models/accounts');
 const wazzup = require('../lib/wazzup');
 const schedule = require('../lib/schedule');
+const syncState = require('../models/syncState');
 const { money, shortDate } = require('./viewModel');
+
+// How long the digest waits for a sync before going out anyway. The sync is
+// not abandoned — nothing can cancel it mid-flight — this only stops waiting
+// for it, which is the difference between a digest that is slightly stale and
+// a digest that never arrives.
+const SYNC_WAIT_MS = Number(process.env.DIGEST_SYNC_TIMEOUT_MS || 120000);
+
+// ── Freshness ───────────────────────────────────────────────────────────────
+
+// Pull from Xero before counting, so a digest says what is true this morning
+// rather than what was true at the last scheduled sync.
+//
+// Best effort on purpose. A digest nobody receives because Xero was briefly
+// unreachable is worse than one carrying last night's numbers — so a failure
+// or a slow run is reported in the message instead of stopping it.
+async function refreshBeforeSending(accountId) {
+  const sync = require('./sync');
+  let problem = null;
+  try {
+    let timer;
+    const waited = await Promise.race([
+      // syncAccount shares an in-flight run, so a scheduled sync already
+      // going is joined rather than started again.
+      sync.syncAccount(accountId).then(() => 'done'),
+      new Promise((resolve) => { timer = setTimeout(() => resolve('slow'), SYNC_WAIT_MS); })
+    ]);
+    clearTimeout(timer);
+    if (waited === 'slow') problem = 'the sync was still running';
+  } catch (err) {
+    problem = err.message;
+    console.error(`[digest] sync before sending failed: ${err.message}`);
+  }
+  // Read after, not before: a sync that worked has just moved this on.
+  //
+  // How long ago, not when. last_run_at is a MySQL DATETIME with no timezone
+  // on it, so converting it into the account's timezone counts the offset
+  // twice — the first version of this line reported a sync at 18:13 in a
+  // message stamped 11:36, eight hours in its own future. The elapsed
+  // minutes come from the database, which is the one place that can compare
+  // its own clock to its own column.
+  const minutesAgo = await syncState.minutesSinceSync(accountId).catch(() => null);
+  return { minutesAgo, problem };
+}
 
 // ── The numbers ─────────────────────────────────────────────────────────────
 
@@ -84,7 +128,34 @@ async function draftSummary(accountId, tenantIds = null) {
 const MAX_MESSAGE = 4000;
 
 // WhatsApp treats *text* as bold.
-function buildMessage({ settings, summary, accountName, entityCount, currency = 'RM', now = new Date(), scopeLabel = null }) {
+// "Up to date as of" in the account's own timezone, because the number above
+// it is only worth anything if the reader knows when it was true. A digest is
+// read on a phone, away from the screen that could answer this.
+function freshnessLine(freshness, timezone, now = new Date()) {
+  if (!freshness) return null;
+  const { minutesAgo, problem } = freshness;
+  if (minutesAgo == null) {
+    return problem
+      ? `_Xero could not be reached just now (${problem}), and nothing has synced yet._`
+      : '_Nothing has synced from Xero yet._';
+  }
+  // Both: "4 minutes ago" answers "is this current?" at a glance, which is
+  // the question somebody reading on a phone actually has, and the clock
+  // time is what they will quote back when something looks wrong.
+  //
+  // Derived from now minus the elapsed minutes rather than from the stored
+  // DATETIME, so the two agree and neither is in the future.
+  const when = schedule.describeNow(timezone, new Date(now.getTime() - minutesAgo * 60000));
+  const ago = minutesAgo < 1 ? 'just now'
+    : minutesAgo < 60 ? `${minutesAgo} minute${minutesAgo === 1 ? '' : 's'} ago`
+      : minutesAgo < 1440 ? `${Math.round(minutesAgo / 60)} hour${Math.round(minutesAgo / 60) === 1 ? '' : 's'} ago`
+        : `${Math.round(minutesAgo / 1440)} day${Math.round(minutesAgo / 1440) === 1 ? '' : 's'} ago`;
+  return problem
+    ? `_Synced with Xero ${ago} (${when}) — could not refresh just now, so this may be out of date._`
+    : `_Synced with Xero ${ago} · ${when}._`;
+}
+
+function buildMessage({ settings, summary, accountName, entityCount, currency = 'RM', now = new Date(), scopeLabel = null, freshness = null }) {
   const lines = [];
   const tail = [];          // oldest draft, the link — kept whatever else is cut
   let breakdown = [];       // one line per entity
@@ -92,6 +163,8 @@ function buildMessage({ settings, summary, accountName, entityCount, currency = 
   lines.push('*Bills Hub · Draft bills*');
   lines.push(`${schedule.describeNow(settings.timezone, now)}`);
   lines.push(scopeLabel || `${accountName} · ${entityCount} Xero ${entityCount === 1 ? 'entity' : 'entities'}`);
+  const fresh = freshnessLine(freshness, settings.timezone, now);
+  if (fresh) lines.push(fresh);
   lines.push('');
 
   if (!summary.count) {
@@ -148,13 +221,21 @@ function buildMessage({ settings, summary, accountName, entityCount, currency = 
 }
 
 // The message one recipient would get right now, without sending it.
-async function previewFor(accountId, recipient = null, { now = new Date() } = {}) {
+async function previewFor(accountId, recipient = null, { now = new Date(), freshness = null } = {}) {
   const settings = await digestModel.getSettings(accountId);
   const account = await accounts.getById(accountId);
   const connAccountId = await grantSource.connectionsAccountId(accountId).catch(() => null);
   const allEntities = connAccountId
     ? await entities.listByAccount(accountId, connAccountId)
     : [];
+
+  // A preview shows the last sync as it stands — it must not set a
+  // forty-three organisation sync going just because somebody opened the
+  // Notifications tab. Sending does that, and the sent message then carries
+  // a newer time than the preview did.
+  if (!freshness) {
+    freshness = { minutesAgo: await syncState.minutesSinceSync(accountId).catch(() => null), problem: null };
+  }
 
   const scoped = recipient && !recipient.all_entities;
   const tenantIds = scoped ? (recipient.entities || []).map((e) => e.tenantId) : null;
@@ -171,7 +252,7 @@ async function previewFor(accountId, recipient = null, { now = new Date() } = {}
       settings, summary,
       accountName: account?.name || 'Group',
       entityCount: allEntities.length,
-      currency, now, scopeLabel
+      currency, now, scopeLabel, freshness
     }),
     summary
   };
@@ -196,9 +277,14 @@ async function sendDigest(accountId, { triggerType = 'manual', now = new Date(),
     return { sent: 0, failed: 0, skipped: 0, results: [], reason: 'no active recipients' };
   }
 
+  // Once for the run, not once per recipient: ten people are being told about
+  // the same bills, and syncing forty-three organisations ten times would
+  // also give the first and last recipient different numbers.
+  const freshness = await refreshBeforeSending(accountId);
+
   const results = [];
   for (const r of recipients) {
-    const { text, summary } = await previewFor(accountId, r, { now });
+    const { text, summary } = await previewFor(accountId, r, { now, freshness });
 
     // A recipient with nothing to clear is not messaged unless asked for.
     if (!summary.count && !config.send_when_empty) {
@@ -227,6 +313,8 @@ async function sendDigest(accountId, { triggerType = 'manual', now = new Date(),
     sent: results.filter((r) => r.status === 'sent').length,
     failed: results.filter((r) => r.status === 'failed').length,
     skipped: results.filter((r) => r.status === 'skipped').length,
+    syncedMinutesAgo: freshness.minutesAgo,
+    syncProblem: freshness.problem,
     results
   };
 }

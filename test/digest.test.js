@@ -25,6 +25,17 @@ wazzup.sendMessage = async ({ channelId, apiKey, phone, text }) => {
   return { ok: true, messageId: 'msg-' + sends.length };
 };
 
+// The sync the digest now runs before sending. Stubbed so the suite can
+// assert it happened, and in what order, without reaching Xero.
+const sync = require('../billhub/sync');
+const syncCalls = [];
+let syncFails = null;
+sync.syncAccount = async (accountId) => {
+  syncCalls.push({ accountId, at: Date.now() });
+  if (syncFails) throw new Error(syncFails);
+  return { tenants: 1, upserted: 0, results: [] };
+};
+
 const app = require('../server');
 const server = app.listen(3315);
 
@@ -317,6 +328,70 @@ const at = (iso) => new Date(iso);
     /kaboom/.test(explain(500, '{"error":"SOMETHING_NEW","description":"kaboom"}')));
   check('and a reply that is not JSON at all does not crash it',
     typeof explain(502, '<html>Bad Gateway</html>') === 'string');
+
+  console.log('\nUp to date as of');
+  // A digest is read on a phone, away from the screen that could say when
+  // the numbers were last true. So it syncs first and then says when.
+  const digestLib2 = require('../billhub/digest');
+  const syncState = require('../models/syncState');
+
+  // Earlier blocks clear the recipient list, so this one brings its own.
+  await req('POST', '/api/digest/recipients', {
+    cookie, body: { name: 'Freshness Watcher', phone: '+60 12 999 0001', allEntities: true }
+  });
+
+  syncCalls.length = 0;
+  sends.length = 0;
+  syncFails = null;
+  const ran = await digestLib2.sendDigest(1, { triggerType: 'manual' });
+  check('sending pulls from Xero first', syncCalls.length === 1, syncCalls.length);
+  check('once for the run, not once per recipient',
+    syncCalls.length === 1 && ran.sent + ran.failed + ran.skipped >= 1,
+    { syncs: syncCalls.length, recipients: ran.sent + ran.failed + ran.skipped });
+
+  // Nothing has ever synced on this database, and saying so is the honest
+  // answer — a missing line would read as "up to date".
+  check('with nothing synced yet, it says that rather than nothing',
+    /Nothing has synced from Xero yet/.test(sends[sends.length - 1].text),
+    sends[sends.length - 1].text.split('\n')[3]);
+
+  // Now give it a successful sync to report.
+  await db.execute(
+    `INSERT INTO bill_sync_state (account_id, xero_tenant_id, last_run_at, last_status)
+     VALUES (1, 'tenant-abm', NOW(), 'ok')
+     ON DUPLICATE KEY UPDATE last_run_at = NOW(), last_status = 'ok'`);
+  sends.length = 0;
+  await digestLib2.sendDigest(1, { triggerType: 'manual' });
+
+  const withTime = sends[sends.length - 1];
+  const line = withTime.text.split('\n')[3];
+  check('once something has, the message says when', /Synced with Xero/.test(line), line);
+  check('as elapsed time and a clock time together',
+    /(ago|just now) · /.test(line), line);
+
+  // The trap this line was written into: last_run_at is a MySQL DATETIME
+  // with no timezone, so converting it into the account's timezone counts
+  // the offset twice. The first version reported a sync eight hours in its
+  // own future. Both stamps come from the same message, so they can be
+  // compared without knowing anything about the database's clock.
+  const stamped = withTime.text.split('\n')[1];
+  const asMinutes = (t) => { const m = /(\d{2}):(\d{2})/.exec(t); return Number(m[1]) * 60 + Number(m[2]); };
+  check('and the sync is never later than the message that reports it',
+    asMinutes(line) <= asMinutes(stamped), { sync: line, message: stamped });
+
+  // A digest nobody receives because Xero blinked is worse than one carrying
+  // last night's numbers, so the failure goes IN the message.
+  syncCalls.length = 0;
+  sends.length = 0;
+  syncFails = 'Xero token refresh failed (400)';
+  const degraded = await digestLib2.sendDigest(1, { triggerType: 'manual' });
+  check('a failed sync does not stop the digest', degraded.sent >= 1, degraded);
+  check('and it is reported rather than hidden, beside the time that still holds',
+    sends.some((x) => /Synced with Xero .* could not refresh just now/.test(x.text)),
+    sends[0] && sends[0].text.split('\n')[3]);
+  check('the caller is told too, so a log can show it',
+    /token refresh failed/.test(degraded.syncProblem || ''), degraded.syncProblem);
+  syncFails = null;
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   server.close();
