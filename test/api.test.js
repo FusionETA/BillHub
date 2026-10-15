@@ -160,9 +160,27 @@ function check(name, ok, detail) {
   const withAll = await req('GET', '/api/bills/entities?all=true', { cookie });
   check('but ?all=true still shows it', withAll.body.entities.length === 5);
 
+  // Switching one off means "do not sync and do not show". Stopping the sync
+  // alone leaves every bill pulled before the switch in the list and in the
+  // totals, so the organisation vanishes from the filter and its history
+  // does not — which is what the dialog promises not to do.
+  const allBills = await req('GET', '/api/bills?limit=500', { cookie });
+  const kkRows = (ref) => ref.body.rows.filter((r) => r.entityCode === 'ABKK').length;
+  check('its bills are gone from the list too, not just the organisation',
+    kkRows(allBills) === 0, allBills.body.rows.map((r) => r.entityCode));
+  const kkDirect = await req('GET', '/api/bills?entities=tenant-abkk', { cookie });
+  check('and asking for them by name returns none',
+    kkDirect.body.rows.length === 0, kkDirect.body.rows.length);
+  check('the totals no longer count them',
+    !/ABKK/.test(JSON.stringify(kkDirect.body.stats)) && kkDirect.body.metaText.startsWith('0 items'),
+    kkDirect.body.metaText);
+
   const renamed = await req('PATCH', '/api/bills/entities/tenant-abkk', { cookie, body: { code: 'kk2', included: true } });
   check('a code can be renamed, and is upper-cased', renamed.body.entity.code === 'KK2', renamed.body.entity);
   await req('PATCH', '/api/bills/entities/tenant-abkk', { cookie, body: { code: 'ABKK' } });
+  const backAgain = await req('GET', '/api/bills?entities=tenant-abkk', { cookie });
+  check('switching it back on brings its bills back — nothing was deleted',
+    backAgain.body.rows.length > 0, backAgain.body.rows.length);
 
   const noSuchOrg = await req('PATCH', '/api/bills/entities/not-a-tenant', { cookie, body: { included: false } });
   check('an unknown organisation is a 404', noSuchOrg.status === 404, noSuchOrg.status);

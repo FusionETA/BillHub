@@ -796,7 +796,10 @@ async function postRun(accountId, runId) {
   const known = new Map((await entities.listByAccount(accountId, wazzocrAccountId))
     .map((e) => [e.xero_tenant_id, e]));
   const payer = known.get(run.payer_tenant_id);
-  if (!payer) throw err('The paying organisation is no longer connected.', 409);
+  if (!payer) {
+    throw err('The paying organisation is not in use — either it was switched off in Settings → '
+      + 'Xero organisations, or its Xero connection is gone. Switching it back on is the usual fix.', 409);
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const due = new Date(Date.now() + Number(settings.due_days || 30) * 86400000).toISOString().slice(0, 10);
@@ -831,7 +834,8 @@ async function postRun(accountId, runId) {
   for (const line of run.lines) {
     const target = known.get(line.target_tenant_id);
     if (!target) {
-      await model.setLineError(line.id, 'That organisation is no longer connected.');
+      await model.setLineError(line.id,
+        'That organisation is not in use — switched off in Settings, or no longer connected to Xero.');
       results.push({ tenantId: line.target_tenant_id, ok: false, error: 'not connected' });
       continue;
     }
@@ -997,6 +1001,10 @@ async function candidateBills(accountId, { limit = 200, billIds = null, supplier
     where.push('b.xero_tenant_id = ?');
     params.push(tenantId);
   }
+  // An organisation switched off in Settings is not synced and not shown, so
+  // it must not be recharged either — its bills would otherwise be suggested
+  // from a list nobody can see them in.
+  where.push(bills.IN_USE);
   // The entity code comes along for the ride: a caller reporting on these
   // needs to say which company paid, and a tenant GUID tells nobody that.
   return db.query(

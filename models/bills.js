@@ -20,9 +20,27 @@ const UI_STATUS_SQL = `
 // (so a re-sync doesn't resurrect them) but never appear in a list or a total.
 const LIVE = "b.xero_status IN ('DRAFT','SUBMITTED','AUTHORISED','PAID')";
 
+// Bills belonging to an organisation somebody switched off in Settings →
+// Xero organisations.
+//
+// Switching one off means "do not sync and do not show". Stopping the sync
+// alone left every bill pulled before the switch sitting in the list,
+// counted in the totals and offered for payment — the organisation
+// disappeared from the filter and its history did not, which is the
+// opposite of what that dialog promises.
+//
+// NOT EXISTS rather than a join: a bill whose organisation has no entities
+// row yet counts as in use, the same rule entities.listSyncable applies, and
+// the row count of the outer query is left alone.
+const IN_USE = `NOT EXISTS (
+    SELECT 1 FROM entities ex
+     WHERE ex.account_id = b.account_id
+       AND ex.xero_tenant_id = b.xero_tenant_id
+       AND ex.included = 0)`;
+
 // Build the shared WHERE clause + params from the UI's filter set.
 function buildWhere(accountId, f = {}) {
-  const where = ['b.account_id = ?', LIVE];
+  const where = ['b.account_id = ?', LIVE, IN_USE];
   const params = [accountId];
 
   if (f.tenantIds && f.tenantIds.length) {
@@ -185,7 +203,8 @@ function contacts(accountId) {
   return db.query(
     `SELECT contact_name AS name, COUNT(*) AS n
        FROM bills b
-      WHERE b.account_id = ? AND ${LIVE} AND b.contact_name IS NOT NULL AND b.contact_name <> ''
+      WHERE b.account_id = ? AND ${LIVE} AND ${IN_USE}
+        AND b.contact_name IS NOT NULL AND b.contact_name <> ''
       GROUP BY contact_name ORDER BY contact_name`,
     [accountId]
   );
@@ -199,7 +218,7 @@ function contactsForTenant(accountId, tenantId) {
   return db.query(
     `SELECT contact_name AS name, COUNT(*) AS n
        FROM bills b
-      WHERE b.account_id = ? AND b.xero_tenant_id = ? AND ${LIVE}
+      WHERE b.account_id = ? AND b.xero_tenant_id = ? AND ${LIVE} AND ${IN_USE}
         AND b.contact_name IS NOT NULL AND b.contact_name <> ''
       GROUP BY contact_name ORDER BY contact_name`,
     [accountId, tenantId]
@@ -320,7 +339,7 @@ async function applyStatus(accountId, id, xeroStatus) {
 }
 
 module.exports = {
-  list, listMeta, tabCounts, stats, contacts, contactsForTenant, SORTS,
+  list, listMeta, tabCounts, stats, contacts, contactsForTenant, SORTS, IN_USE,
   getById, getManyByIds, upsertFromXero, applyStatus, fit, WIDTHS,
   UI_STATUS_SQL
 };

@@ -19,7 +19,10 @@ const { money, shortDate } = require('./viewModel');
 async function draftSummary(accountId, tenantIds = null) {
   const scoped = tenantIds && tenantIds.length;
   const params = [accountId];
-  let where = "b.account_id = ? AND b.xero_status = 'DRAFT'";
+  const bills = require('../models/bills');
+  // Switched-off organisations are not shown, so they must not be counted in
+  // a digest either — a nightly message about drafts nobody can open.
+  let where = `b.account_id = ? AND b.xero_status = 'DRAFT' AND ${bills.IN_USE}`;
   if (scoped) {
     where += ` AND b.xero_tenant_id IN (${tenantIds.map(() => '?').join(',')})`;
     params.push(...tenantIds);
