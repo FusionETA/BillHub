@@ -518,7 +518,12 @@ function rechargeTextRuleCard(r, waiting = 0) {
     joiner: r.match_mode === 'any' ? 'OR' : 'AND',
     conditions,
     payerTenantId: r.payer_tenant_id || null,
+    // Code and name apart, so the card can show them the way "Recharge to"
+    // beside it already does — a badge and a name, not one run-together
+    // string. payerLabel stays for anything still reading a single line.
     payerLabel: r.payer_tenant_id ? `${r.payer_code || '—'} · ${r.payer_short || '—'}` : 'Any entity',
+    payerCode: r.payer_tenant_id ? (r.payer_code || '—') : '',
+    payerShort: r.payer_tenant_id ? (r.payer_short || '—') : '',
     ownerTenantId: r.owner_tenant_id,
     ownerCode: r.owner_code || '—',
     ownerShort: r.owner_short || '—',

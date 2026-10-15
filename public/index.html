@@ -1801,7 +1801,14 @@
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--neutral-100)', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Paid by</span>
-                <span style={{ border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>{r.payerLabel}</span>
+                {/* The same shape as "Recharge to" across the arrow. They
+                    name the same kind of thing and were drawn two ways:
+                    a plain string here, a badge and a name there. */}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>
+                  {r.payerCode
+                    ? <React.Fragment><Code>{r.payerCode}</Code><span>{r.payerShort}</span></React.Fragment>
+                    : <span style={{ color: 'var(--text-muted)' }}>{r.payerLabel}</span>}
+                </span>
                 <span style={{ color: 'var(--text-subtle)' }}>→</span>
                 <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recharge to</span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-subtle)', borderRadius: 999, padding: '5px 12px', fontSize: 13, color: 'var(--text-body)' }}>
