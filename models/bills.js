@@ -216,14 +216,26 @@ async function stats(accountId, filters = {}) {
 }
 
 // Distinct suppliers, for the Contact filter.
-function contacts(accountId) {
+//
+// Narrowed to the organisations the entity filter has chosen, because the
+// two filters are read as one question: having picked a company, the
+// contacts worth offering are the ones that company actually buys from. On
+// this account the whole list is thousands long and most of it cannot
+// return a single row beside the entity already chosen.
+//
+// The counts narrow with it, for the same reason — "139 bills" beside a
+// supplier that has two in the selected organisation would be a number
+// about somebody else's company.
+function contacts(accountId, tenantIds = null) {
+  const scoped = Array.isArray(tenantIds) && tenantIds.length;
   return db.query(
     `SELECT contact_name AS name, COUNT(*) AS n
        FROM bills b
       WHERE b.account_id = ? AND ${LIVE} AND ${IN_USE}
         AND b.contact_name IS NOT NULL AND b.contact_name <> ''
+        ${scoped ? `AND b.xero_tenant_id IN (${tenantIds.map(() => '?').join(',')})` : ''}
       GROUP BY contact_name ORDER BY contact_name`,
-    [accountId]
+    scoped ? [accountId, ...tenantIds] : [accountId]
   );
 }
 

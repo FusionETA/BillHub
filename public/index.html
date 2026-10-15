@@ -805,7 +805,18 @@
       const [q, setQ] = useState('');
       const ref = useClickOutside(open, useCallback(() => setOpen(false), []));
 
-      const shown = contacts.filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase()));
+      // A contact chosen before the entity filter narrowed has to stay on the
+      // list even when the narrowed set no longer contains it. Otherwise it
+      // goes on filtering the bills to nothing from a row nobody can see,
+      // and there is no way left to switch it off.
+      // First, not last. Appended to the end of twenty-five alphabetical
+      // rows it is findable only by scrolling to look for something you
+      // have no reason to think is there.
+      const orphans = selected
+        .filter(n => !contacts.some(c => c.name === n))
+        .map(name => ({ name, count: 0, outOfScope: true }));
+      const base = orphans.length ? orphans.concat(contacts) : contacts;
+      const shown = base.filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase()));
       const label = selected.length === 0
         ? (contacts.length ? 'All contacts' : 'No contacts yet')
         : selected.length === 1 ? selected[0] : selected.length + ' contacts';
@@ -823,7 +834,7 @@
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {selected.length ? selected.length + ' selected' : 'All contacts'}
-              {q && ' · ' + shown.length + ' of ' + contacts.length + ' shown'}
+              {q && ' · ' + shown.length + ' of ' + base.length + ' shown'}
             </span>
             <span style={{ flex: 1 }} />
             {/* Selecting the filtered set is the whole point of searching for
@@ -839,7 +850,12 @@
               <div key={c.name} onClick={() => toggle(c.name)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', minWidth: 0 }}>
                 <Checkbox checked={selected.includes(c.name)} onChange={() => toggle(c.name)} />
                 <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-body)', ...Ellip }}>{c.name}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}>{c.count}</span>
+                {/* Nothing in the chosen organisations, so the count would
+                    read as a plain zero rather than as the reason. */}
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}
+                  title={c.outOfScope ? 'No bills in the selected entities' : null}>
+                  {c.outOfScope ? 'none here' : c.count}
+                </span>
               </div>
             ))}
           </div>
@@ -1010,9 +1026,13 @@
         return () => { cancelled = true; };
       }, [tab, entityKey, contactKey, dq, f.dateType, f.dateFrom, f.dateTo, dAmountFrom, dAmountTo, page, pageSize, sort, dir, nonce, refreshKey]);
 
+      // Re-asked whenever the entity selection changes: the contacts worth
+      // offering are the ones those organisations actually buy from, and the
+      // counts beside them have to be about the same organisations.
       useEffect(() => {
-        api.get('/api/bills/contacts').then(d => setContacts(d.contacts || [])).catch(() => {});
-      }, [nonce]);
+        const qs = entityKey ? '?entities=' + encodeURIComponent(entityKey) : '';
+        api.get('/api/bills/contacts' + qs).then(d => setContacts(d.contacts || [])).catch(() => {});
+      }, [nonce, entityKey]);
 
       // Bills the current filters no longer return shouldn't stay selected.
       const rows = (data && data.rows) || [];

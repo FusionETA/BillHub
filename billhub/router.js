@@ -3,6 +3,7 @@
 //   GET  /api/bills                 -> { stats, statusTabs, rows, metaText, banner, entities }
 //   GET  /api/bills/entities        -> connected orgs, for the entity filter
 //   GET  /api/bills/contacts        -> distinct suppliers, for the Contact filter
+//        ?entities=a,b                 narrowed to those organisations
 //   GET  /api/bills/:id             -> one bill, with its Xero line items
 //   POST /api/bills/:id/submit      -> DRAFT      -> SUBMITTED in Xero
 //   POST /api/bills/:id/approve     -> SUBMITTED  -> AUTHORISED in Xero
@@ -187,7 +188,9 @@ router.get('/entities', async (req, res) => {
 router.get('/contacts', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
   try {
-    const rows = await bills.contacts(accountId);
+    // Same shape the bills list takes, so one entity selection drives both.
+    const tenantIds = String(req.query.entities || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const rows = await bills.contacts(accountId, tenantIds);
     res.json({ contacts: rows.map((r) => ({ name: r.name, count: Number(r.n) })) });
   } catch (err) {
     fail(res, err);

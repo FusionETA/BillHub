@@ -284,6 +284,37 @@ function check(name, ok, detail) {
   const cts = await req('GET', '/api/bills/contacts', { cookie });
   check('contacts endpoint lists distinct suppliers', cts.body.contacts.length === 10, cts.body.contacts.length);
 
+  // The two filters are read as one question: having picked a company, the
+  // contacts worth offering are the ones that company actually buys from.
+  // On the live account the whole list is thousands long and most of it
+  // cannot return a row beside the entity already chosen.
+  const scopedCts = await req('GET', '/api/bills/contacts?entities=tenant-abkj', { cookie });
+  check('naming an entity narrows the contact list',
+    scopedCts.body.contacts.length > 0 && scopedCts.body.contacts.length < cts.body.contacts.length,
+    { all: cts.body.contacts.length, one: scopedCts.body.contacts.length });
+  check('and every one of them really does bill that entity',
+    await (async () => {
+      for (const c of scopedCts.body.contacts) {
+        const r = await req('GET', `/api/bills?entities=tenant-abkj&contact=${encodeURIComponent(c.name)}&limit=1`, { cookie });
+        if (!r.body.rows.length) return false;
+      }
+      return true;
+    })(), scopedCts.body.contacts.map((c) => c.name));
+
+  // The counts narrow too — "139 bills" beside a supplier with two in the
+  // chosen organisation would be a number about somebody else's company.
+  const shared = scopedCts.body.contacts.find((c) =>
+    (cts.body.contacts.find((x) => x.name === c.name) || {}).count > c.count);
+  check('the counts are about the chosen entity, not the whole account',
+    Boolean(shared) || scopedCts.body.contacts.every((c) =>
+      c.count === (cts.body.contacts.find((x) => x.name === c.name) || {}).count),
+    shared || 'no contact spans entities in this fixture');
+
+  const twoCts = await req('GET', '/api/bills/contacts?entities=tenant-abkj,tenant-abkk', { cookie });
+  check('two entities give at least what one gives',
+    twoCts.body.contacts.length >= scopedCts.body.contacts.length,
+    { one: scopedCts.body.contacts.length, two: twoCts.body.contacts.length });
+
   // ── Sorting ───────────────────────────────────────────────────────────────
   console.log('\nSorting');
   // No limit of its own: two limit parameters in one URL parse to NaN and
