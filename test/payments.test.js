@@ -1022,14 +1022,21 @@ function check(name, ok, detail) {
     check('and repeats the reference as the detail number', m[9] === m[5], [m[5], m[9]]);
     check('and the amount as the detail amount', m[12] === m[4], [m[4], m[12]]);
 
-    // Not selected by default any more — Ayu Borneo pay JomPay from Hong
-    // Leong — but still correct, and still reachable via biller_format_key.
+    // Selected by default for a CIMB account: JomPay is paid from the same
+    // place as the suppliers, out of the same BizConverter workbook.
     const j = row(jom, { contact_name: 'Indah Water', payee_bank_account_name: '7011',
                          payee_account: '880142300561', payee_details: 'BM 69',
                          payee_code: 'IWK', amount: 128.90, bill_date: '2026-09-18' });
     check('the JomPAY row repeats the paying account, which Hong Leong does not',
       j[1] === '8010072820', j);
     check('and dates Ref-2 from the bill', /0926$/.test(j[3]), j[3]);
+    // The five columns of BizConverter's "JomPAY Payment" sheet, in its
+    // order. Checked against the sheet itself, which states 8/40/20/30/18
+    // above headers that read *JomPAY Biller Code, *Source Account, *Ref-1,
+    // Ref-2, *Amount.
+    check('the JomPAY row is the sheet\'s five columns, in its order',
+      j.length === 5 && j[0] === '7011' && j[2] === '880142300561' && String(j[4]) === '128.90',
+      j);
 
     // The layout follows the bank, with nothing configured.
     const pay = require('../billhub/payments');
@@ -1040,11 +1047,13 @@ function check(name, ok, detail) {
     // a payee has no email, which is tested on its own further down.
     check('a CIMB paying account picks a CIMB layout without being told',
       (await pay.formatForRail(1, cimbBank, 'transfer')).format_key === 'cimb-bulk-email');
-    // Ayu Borneo pay suppliers from CIMB and every JomPay bill from Hong
-    // Leong, so a utility routed to CIMB would make a file nobody uploads.
-    check('and does NOT take JomPay, because that is not what the account is for',
-      (await pay.formatForRail(1, cimbBank, 'biller')) === null);
-    check('which the code can state rather than infer', pay.doesBiller(cimbBank) === false);
+    // Both rails come out of the one BizConverter workbook: the transfer
+    // sheet for suppliers, "JomPAY Payment" for utilities. It used to refuse
+    // the second and name Hong Leong instead, which was right while JomPay
+    // was paid from there and wrong once it moved to CIMB.
+    check('and takes JomPay from the same account',
+      (await pay.formatForRail(1, cimbBank, 'biller')).format_key === 'cimb-jompay');
+    check('which the code can state rather than infer', pay.doesBiller(cimbBank) === true);
 
     const bills = await db.query(
       "SELECT id FROM bills WHERE account_id = 1 AND xero_tenant_id = ? LIMIT 20", [cimbBank.xero_tenant_id]);
@@ -1053,9 +1062,11 @@ function check(name, ok, detail) {
     if (mixed) {
       const biller = mixed.runs.find((r) => r.rail === 'biller');
       if (biller) {
-        check('and says where those bills should go instead',
-          biller.warnings.some((w) => /does not pay JomPay/.test(w) && /Hong Leong/.test(w)),
-          biller.warnings);
+        // Two files from one selection, not a refusal naming another bank.
+        check('a mixed selection yields a JomPay run alongside the transfer one',
+          biller.format === 'cimb-jompay', { format: biller.format, warnings: biller.warnings });
+        check('and no longer sends anybody to Hong Leong',
+          !biller.warnings.some((w) => /Hong Leong/.test(w)), biller.warnings);
       }
     }
 

@@ -330,7 +330,12 @@ const LAYOUTS = {
   // The with-email sheet is the one Ayu Borneo want: it sends the payee an
   // advice. It needs an email address on every line, so a payee without one
   // is reported rather than silently producing a line CIMB will refuse.
-  cimb: { transfer: 'cimb-bulk-email', biller: null },
+  // Both rails, from the one BizConverter workbook: the transfer sheet for
+  // suppliers, "JomPAY Payment" for utilities. The layout was built from
+  // that sheet months ago and then never reachable, because this said null
+  // and the refusal it produced named Hong Leong as the account to use —
+  // for a group whose JomPAY bills are paid from CIMB.
+  cimb: { transfer: 'cimb-bulk-email', biller: 'cimb-jompay' },
   hlb: { transfer: 'hlb-connectfirst', biller: 'hlb-jompay' }
 };
 
