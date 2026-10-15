@@ -802,6 +802,17 @@ async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
   return { tenantId, copied, skipped };
 }
 
+// A Xero tenant id in a message, swapped for the organisation it belongs to.
+// Used where a failure is recorded: the allowlist and a few Xero errors name
+// the organisation by GUID, and nobody reading the Recharge tab knows which
+// company that is.
+function withEntityNames(message, known) {
+  return String(message || '').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, (id) => {
+    const e = known.get(id);
+    return e ? `${e.short_name || e.code} (${e.code})` : id;
+  });
+}
+
 async function postRun(accountId, runId) {
   const run = await model.getRun(accountId, runId);
   if (!run) throw err('Recharge not found.', 404);
@@ -994,9 +1005,13 @@ async function postRun(accountId, runId) {
 
       results.push({ tenantId: line.target_tenant_id, code: target.code, ok: true, arNumber, apNumber });
     } catch (e) {
-      await model.setLineError(line.id, e.message);
-      console.error(`[recharge] run ${runId} line ${target.code}: ${e.message}`);
-      results.push({ tenantId: line.target_tenant_id, code: target.code, ok: false, error: e.message });
+      // The allowlist refuses by tenant id, because lib/xero.js is below the
+      // layer that knows an organisation has a name. Here both are in hand,
+      // and "e1434619-aa20-…" on screen is a question rather than an answer.
+      const named = withEntityNames(e.message, known);
+      await model.setLineError(line.id, named);
+      console.error(`[recharge] run ${runId} line ${target.code}: ${named}`);
+      results.push({ tenantId: line.target_tenant_id, code: target.code, ok: false, error: named });
     }
   }
 
