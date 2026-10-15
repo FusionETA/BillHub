@@ -232,30 +232,34 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   console.log('\nShortening an entity for a reference');
   const entityRef = require('../lib/entityRef');
   const AB = [
-    { code: 'ABKJ', short_name: 'Ayu Borneo (KJ)' },
-    { code: 'ABKK', short_name: 'Ayu Borneo (KK)' },
-    { code: 'ABSDK', short_name: 'Ayu Borneo (SDK)' },
+    { code: 'KJ', short_name: 'Ayu Borneo (KJ)' },
+    { code: 'KK', short_name: 'Ayu Borneo (KK)' },
+    { code: 'ICM', short_name: 'Ayu Borneo (PJ)' },
     { code: 'ABM', short_name: 'Ayu Borneo Management' }
   ];
   const abCodes = AB.map((e) => e.code);
-  check('the name says what distinguishes the organisation',
-    AB.slice(0, 3).map((e) => entityRef.short(e, abCodes)).join() === 'KJ,KK,SDK',
+  check('the reference is the code',
+    AB.map((e) => entityRef.short(e, abCodes)).join() === 'KJ,KK,ICM,ABM',
     AB.map((e) => entityRef.short(e, abCodes)));
-  // Read from the entity's own name, not from the set it sits in: connecting
-  // an organisation from outside the group must not lengthen everyone else's
-  // references.
+  // The whole reason this changed: a code set deliberately has to be what a
+  // bank statement shows, or the code on screen and the code in the file
+  // disagree and neither end says which one a line meant.
+  check('a code that disagrees with the name still wins',
+    entityRef.short({ code: 'ICM', short_name: 'Ayu Borneo (PJ)' }) === 'ICM');
   check('an unrelated organisation joining changes nothing',
     entityRef.short(AB[0], abCodes.concat(['DCGLOBAL'])) === 'KJ');
-  check('a name with no bracketed suffix falls back to the shared prefix',
-    entityRef.short({ code: 'ABSH', short_name: 'Ayu Borneo Sabah' }, ['ABSH', 'ABKJ', 'ABKK']) === 'SH');
-  check('and to the code itself when there is no shared prefix either',
-    entityRef.short({ code: 'ABSH', short_name: 'Ayu Borneo Sabah' }, ['ABSH', 'DCGLOBAL']) === 'ABSH');
+  // A reference crosses a bank's file format and Xero's Reference field, and
+  // neither is a place to discover a space.
+  check('a space in a code is dropped, not carried into a bank file',
+    entityRef.short({ code: 'JS JP2' }) === 'JSJP2');
+  check('and so is punctuation', entityRef.short({ code: 'K.J-1' }) === 'KJ1');
+  check('a missing code is empty rather than something invented',
+    entityRef.short({ code: '', short_name: 'Ayu Borneo (KJ)' }) === '');
   // Two entities whose references cannot be told apart is far worse than one
-  // long reference.
-  check('a prefix that would empty a code is not taken',
-    entityRef.commonPrefix(['ABKJ', 'AB']) === '');
-  check('punctuation in a bracketed name is dropped, not carried into a bank file',
-    entityRef.short({ code: 'X', short_name: 'Something (K.J-1)' }) === 'KJ1');
+  // long reference — and stripping punctuation is what can collide two codes
+  // that looked different.
+  check('"EM J" and "EMJ" collapse to the same reference, which a caller must catch',
+    entityRef.short({ code: 'EM J' }) === entityRef.short({ code: 'EMJ' }));
 
   console.log('\nAccount codes come off the bill, not from a settings page');
   const billKilang = await makeBill(abm.tenantId, {
@@ -865,10 +869,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('the whole bill goes to the entity the rule names',
     plan.body.lines.length === 1 && plan.body.lines[0].code === 'ABKJ'
     && plan.body.lines[0].amount === '17,980.00', plan.body.lines);
-  // "Ayu Borneo (KJ)" says KJ is what distinguishes it; the group's own
-  // prefix inside the group's own reference says nothing.
-  check('the reference carries the short form of the entity',
-    /^IC-TNB-GRP-0726-KJ$/.test(plan.body.lines[0].reference), plan.body.lines[0].reference);
+  // The code, not the bracketed part of the name. This fixture is still on
+  // the old ABKJ-style codes, and that is the point: whatever the code says
+  // is what a bank statement will show.
+  check('the reference carries the entity code',
+    /^IC-TNB-GRP-0726-ABKJ$/.test(plan.body.lines[0].reference), plan.body.lines[0].reference);
   check('planning writes nothing',
     Number((await db.getOne('SELECT COUNT(*) AS n FROM recharge_runs')).n) === 0);
 
