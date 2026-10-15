@@ -47,6 +47,15 @@ Two things it sets deliberately:
   cannot change anything. Replace it when you have decided what may be written
   to; § 7c has the rest.
 
+`XERO_ALLOW_DRAFTS_ANYWHERE=true` carves one exception out of that list: a
+recharge may create its DRAFT invoice and DRAFT bill in any connected
+organisation, while payments and bill approvals stay restricted to the list.
+A recharge in a group of forty-three can land in any of them, so without this
+the feature works only for the organisations somebody remembered to list —
+and the alternative, dropping the allowlist, also permits paying and approving
+everywhere. Nothing moves in a ledger until a draft is approved, and either
+document is deleted with one click.
+
 Use a second Xero client secret if you would rather the two apps be revocable
 independently:
 

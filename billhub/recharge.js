@@ -68,7 +68,7 @@ async function findOrCreateContact(accountId, tenantId, name) {
       body: { Contacts: [{ Name: name }] },
       // A recharge cannot draft anything without the other entity existing
       // as a contact, so this goes with the drafts testing mode allows.
-      allowInTestMode: true
+      draftDocument: true
     });
     id = created?.Contacts?.[0]?.ContactID || null;
     if (!id) throw err(`Could not create the contact "${name}" in Xero.`, 502);
@@ -792,7 +792,7 @@ async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
           body: got.buffer,
           headers: { 'Content-Type': file.MimeType || got.contentType },
           // Part of the draft it hangs on, so it follows the same rule.
-          allowInTestMode: true
+          draftDocument: true
         });
       copied += 1;
     } catch (e) {
@@ -931,7 +931,7 @@ async function postRun(accountId, runId) {
           // A DRAFT in a live organisation is what testing mode is for:
           // visible, reviewable, and deleted with one click if it is wrong.
           // The payment that would have preceded it is what stays blocked.
-          allowInTestMode: true,
+          draftDocument: true,
           body: {
             Invoices: [{
               Type: 'ACCREC',
@@ -972,7 +972,7 @@ async function postRun(accountId, runId) {
           // A DRAFT in a live organisation is what testing mode is for:
           // visible, reviewable, and deleted with one click if it is wrong.
           // The payment that would have preceded it is what stays blocked.
-          allowInTestMode: true,
+          draftDocument: true,
           body: {
             Invoices: [{
               Type: 'ACCPAY',

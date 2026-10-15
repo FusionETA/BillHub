@@ -43,6 +43,17 @@ function refused(fn) {
   check('and the message names the organisation', blocked && /tenant-abm/.test(blocked.message), blocked && blocked.message);
   check('PUT is refused too', refused(() => xero.assertWritable('tenant-abm', 'PUT')) !== null);
 
+  // A draft is not what the allowlist is for: nothing moves and either
+  // document is deleted with a click. But a recharge in a group of
+  // forty-three can land in any of them, so covering drafts would mean the
+  // feature only works for the organisations somebody remembered to list.
+  const draftBlocked = refused(() => xero.assertWritable('tenant-abm', 'POST', true));
+  check('a draft is refused too while the flag is off',
+    draftBlocked !== null, draftBlocked && draftBlocked.message);
+  check('and the refusal names the flag that would permit it',
+    draftBlocked && /XERO_ALLOW_DRAFTS_ANYWHERE/.test(draftBlocked.message),
+    draftBlocked && draftBlocked.message);
+
   // The real api() call must refuse before it reaches the network or the token.
   let apiErr = null;
   try { await xero.api(1, 'tenant-abm', '/Invoices', { method: 'POST', body: {} }); }
