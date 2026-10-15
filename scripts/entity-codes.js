@@ -120,15 +120,23 @@ function parseCsv(text) {
 
   const codes = plan.map((p) => p.code);
   console.log(`\n${plan.length} of ${wanted.length} row(s) matched an organisation here.\n`);
-  const w = (s, n) => String(s == null ? '' : s).padEnd(n);
-  console.log(`  ${w('ORGANISATION', 38)}${w('CODE', 16)}${w('→ NEW', 16)}${w('REFERENCE', 12)}→ NEW`);
+  // Padded to the widest value actually present, not to a guess. ABMANAGEMENT
+  // is twelve characters and ran straight into the column beside it.
+  const cell = (v, n) => `${String(v == null ? '' : v)}  `.padEnd(n + 2);
+  const widest = (...vals) => Math.max(...vals.map((v) => String(v || '').length));
+  const wCode = widest('CODE', ...plan.map((p) => p.entity.code));
+  // '(same)' is six characters and lands in both of these columns.
+  const wNew = widest('→ NEW', '(same)', ...plan.map((p) => p.code));
+  const wRef = widest('REFERENCE', ...plan.map((p) => entityRef.short(p.entity)));
+  const w = cell;
+  console.log(`  ${w('ORGANISATION', 38)}${w('CODE', wCode)}${w('→ NEW', wNew)}${w('REFERENCE', wRef)}→ NEW`);
   for (const p of plan) {
     const before = entityRef.short(p.entity, live.map((e) => e.code));
     const after = entityRef.short({ ...p.entity, code: p.code }, codes);
     const changed = p.entity.code !== p.code;
     console.log(`  ${w((p.entity.short_name || p.entity.tenant_name || '').slice(0, 36), 38)}`
-      + `${w(p.entity.code, 16)}${w(changed ? p.code : '(same)', 16)}`
-      + `${w(before, 12)}${before === after ? '(same)' : after}`);
+      + `${w(p.entity.code, wCode)}${w(changed ? p.code : '(same)', wNew)}`
+      + `${w(before, wRef)}${before === after ? '(same)' : after}`);
   }
 
   const spaced = plan.filter((p) => /[^A-Za-z0-9]/.test(p.code));
