@@ -239,15 +239,35 @@ router.get('/accounts/:tenantId', async (req, res) => {
 // offered the other forty-two organisations' contacts.
 router.get('/contacts/:tenantId', async (req, res) => {
   const accountId = needAccount(req, res); if (!accountId) return;
+  const tenantId = req.params.tenantId;
+  // Everything Xero has, UNION what has already billed here.
+  //
+  // Xero is the real answer: a register row usually names a contact created
+  // for the purpose, with no bills against it yet, and a list built from
+  // bills cannot contain it. The bills are added anyway so the list survives
+  // a Xero call that fails, and so a contact renamed in Xero still shows the
+  // name the existing bills carry.
+  let fromXero = [];
+  let problem = null;
   try {
-    const rows = await require('../models/bills').contactsForTenant(accountId, req.params.tenantId);
-    res.json({ contacts: rows.map((r) => r.name).filter(Boolean) });
+    fromXero = await recharge.contactsInXero(accountId, tenantId,
+      { refresh: String(req.query.refresh || '') === 'true' });
   } catch (err) {
-    // Same bargain as the chart of accounts: the dialog falls back to the
-    // full list and says so. Not being able to narrow is not a reason to
-    // stop somebody writing the row.
+    problem = err.message;
+    console.error('[recharge] reading contacts from Xero failed:', err.message);
+  }
+  try {
+    const billed = await require('../models/bills').contactsForTenant(accountId, tenantId);
+    const names = [...new Set(fromXero.concat(billed.map((r) => r.name)))]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    res.json({ contacts: names, error: problem });
+  } catch (err) {
+    // The dialog falls back to every contact on the account and says so.
+    // Not being able to narrow is not a reason to stop somebody writing the
+    // row they came to write.
     console.error('[recharge] contacts for tenant failed:', err.message);
-    res.status(200).json({ contacts: [], error: err.message });
+    res.status(200).json({ contacts: fromXero, error: problem || err.message });
   }
 });
 

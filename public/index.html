@@ -320,7 +320,7 @@
     // character, leaving a column of identical lines and no way to tell
     // which was which — the distinguishing part of these names is at the
     // end, which is exactly what a truncation removes.
-    function SupplierPicker({ label, options = [], value = '', onChange, hint, allowFreeText = false, note = '' }) {
+    function SupplierPicker({ label, options = [], value = '', onChange, hint, allowFreeText = false, note = '', onReload = null, reloading = false }) {
       const [open, setOpen] = useState(false);
       const [q, setQ] = useState('');
       const shown = q ? options.filter(o => o.toLowerCase().includes(q.toLowerCase())) : options;
@@ -349,6 +349,12 @@
               style={{ width: '100%', boxSizing: 'border-box', height: 40, border: '1.5px solid var(--border-default)', borderRadius: 10, padding: '0 12px', fontFamily: 'var(--font-body)', fontSize: 13.5, color: 'var(--text-body)', background: 'var(--surface-card)', outline: 'none' }} />
             <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 2px' }}>
               {q ? `${shown.length} of ${options.length} match "${q}"` : `${options.length} suppliers`}{note ? ` · ${note}` : ''}
+              {/* The list is Xero's. Somebody who has just created the
+                  contact in another tab needs it now, not in two minutes. */}
+              {onReload && <button type="button" onClick={onReload} disabled={reloading}
+                style={{ border: 'none', background: 'none', padding: '0 0 0 8px', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: reloading ? 'default' : 'pointer' }}>
+                {reloading ? 'checking Xero…' : 'reload from Xero'}
+              </button>}
             </div>
             {allowFreeText && q && !options.includes(q) && (
               <button type="button" onClick={() => choose(q)}
@@ -1885,22 +1891,36 @@
 
     function ContactField({ tenantId, value, onChange, allContacts = [], label, hint }) {
       const [contacts, setContacts] = useState(() => (tenantId && contactCache.get(tenantId)) || null);
+      const [reloading, setReloading] = useState(false);
+      const [nonce, setNonce] = useState(0);
 
       useEffect(() => {
         if (!tenantId) { setContacts(null); return; }
-        const cached = contactCache.get(tenantId);
+        const cached = nonce === 0 && contactCache.get(tenantId);
         if (cached) { setContacts(cached); return; }
         setContacts(null);
         let cancelled = false;
-        request('/api/recharge/contacts/' + encodeURIComponent(tenantId))
+        // The list comes from Xero, so a contact created there a minute ago
+        // is already in it. `refresh` skips the server's own cache, for the
+        // minute when somebody is making the contact and picking it in the
+        // same breath.
+        request('/api/recharge/contacts/' + encodeURIComponent(tenantId) + (nonce ? '?refresh=true' : ''))
           .then(d => {
             const list = (d.contacts || []).filter(Boolean);
             if (list.length) contactCache.set(tenantId, list);
             if (!cancelled) setContacts(list.length ? list : null);
           })
-          .catch(() => { if (!cancelled) setContacts(null); });
+          .catch(() => { if (!cancelled) setContacts(null); })
+          .finally(() => { if (!cancelled) setReloading(false); });
         return () => { cancelled = true; };
-      }, [tenantId]);
+      }, [tenantId, nonce]);
+
+      const reload = () => {
+        if (!tenantId) return;
+        contactCache.delete(tenantId);
+        setReloading(true);
+        setNonce(n => n + 1);
+      };
 
       const narrowed = Boolean(tenantId && contacts && contacts.length);
       const base = narrowed ? contacts : allContacts;
@@ -1909,8 +1929,9 @@
       // a select that silently drops the saved value clears it on save.
       const options = value && !base.includes(value) ? [value].concat(base) : base;
       return <SupplierPicker label={label} hint={hint} options={options} value={value} onChange={onChange} allowFreeText
+        onReload={tenantId ? reload : null} reloading={reloading}
         note={narrowed ? 'in this organisation only'
-          : tenantId ? 'every organisation — this one has no bills yet'
+          : tenantId ? 'every organisation — this one has none yet'
           : 'every organisation — choose Paid by to narrow'} />;
     }
 

@@ -30,8 +30,14 @@ let attachments = {};     // xeroInvoiceId -> [{ FileName, MimeType, ContentLeng
 let attachmentsFail = null;// an Error thrown by the Attachments endpoints
 const uploaded = [];      // { tenantId, invoiceId, name, contentType, bytes }
 
+// Contacts Xero holds for an organisation, which is not the same set as the
+// contacts that have billed it — a register row usually names one created
+// for the purpose, with nothing against it yet.
+const xeroContacts = {};
+
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
+  opts = { ...opts, tenantIdForTest: tenantId };
 
   // A single contact by id: where the premises lives when somebody puts it
   // on the supplier in Xero rather than on the bill.
@@ -40,7 +46,11 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
     return { Contacts: [{ ContactID: oneContact[1], Addresses: contactAddresses[oneContact[1]] || [] }] };
   }
   if (path.startsWith('/Contacts') && (opts.method || 'GET') === 'GET') {
-    // Pretend the counterparty contact does not exist, so the create path runs.
+    // A page of the organisation's contacts, when the register dialog asks.
+    // Default empty, so the counterparty lookup still finds nothing and the
+    // create path runs.
+    const page = /[?&]page=(\d+)/.exec(path);
+    if (page) return { Contacts: Number(page[1]) === 1 ? (xeroContacts[opts.tenantIdForTest] || []) : [] };
     return { Contacts: [] };
   }
   if (path === '/Contacts' && opts.method === 'POST') {
@@ -593,6 +603,23 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     { kj: kjContacts.body.contacts, kk: kkContacts.body.contacts });
   check('an entity nobody has billed comes back empty rather than failing',
     (await req('GET', '/api/recharge/contacts/no-such-tenant', { cookie })).body.contacts.length === 0);
+
+  // The case the register exists for: a contact made this morning for one
+  // premises, with no bills against it yet. A list built from bills cannot
+  // contain it, so the row could not be written at all.
+  xeroContacts[kj.tenantId] = [
+    { Name: 'TM Technology Services Sdn Bhd - KJ 267-G', ContactStatus: 'ACTIVE' },
+    { Name: 'TM Technology Services Sdn Bhd (archived)', ContactStatus: 'ARCHIVED' }
+  ];
+  const freshList = await req('GET', '/api/recharge/contacts/' + kj.tenantId + '?refresh=true', { cookie });
+  check('a contact with no bills yet is still offered',
+    freshList.body.contacts.includes('TM Technology Services Sdn Bhd - KJ 267-G'),
+    freshList.body.contacts);
+  check('an archived one is not, because a bill cannot be filed under it',
+    !freshList.body.contacts.some((n) => /archived/.test(n)), freshList.body.contacts);
+  check('and the contacts that have billed it are still there too',
+    kjContacts.body.contacts.every((n) => freshList.body.contacts.includes(n)),
+    { was: kjContacts.body.contacts.length, now: freshList.body.contacts.length });
 
   console.log('\nThe chart of accounts a rule chooses from');
   // Typed account codes fail at the last step, after one document may

@@ -695,6 +695,51 @@ async function chartOfAccounts(accountId, tenantId, { refresh = false } = {}) {
   return accounts;
 }
 
+// ── Contacts, for the register dialog ───────────────────────────────────────
+
+// Every contact one organisation has in Xero.
+//
+// Read from Xero, not from the bills already here. A register row names the
+// contact WazzOCR should file a premises' bills UNDER, and that is very often
+// a contact somebody created this morning for exactly this purpose — "TM
+// Technology Services Sdn Bhd - KJ 267-G" with no bills against it yet. A
+// list built from bills cannot contain it, so the row could not be written
+// for the one case the register exists to serve.
+//
+// Xero pages at a hundred, so this is cached per organisation — otherwise
+// the dialog would ask again on every keystroke that changes an entity.
+//
+// Two minutes, not the chart of accounts' half hour. A chart changes about
+// never; a contact list changes precisely when somebody is sitting in Xero
+// creating the per-premises contact they are about to come here and pick,
+// and half an hour of "it isn't there" is the whole feature failing at the
+// only moment it is used. ?refresh=true skips it outright.
+const CONTACTS_TTL_MS = Number(process.env.CONTACT_LIST_TTL_MS || 120000);
+const CONTACT_PAGE_SIZE = 100;
+const CONTACT_MAX_PAGES = Number(process.env.CONTACT_MAX_PAGES || 40);
+const contactListCache = new Map();   // tenantId -> { at, names }
+
+async function contactsInXero(accountId, tenantId, { refresh = false } = {}) {
+  if (!tenantId) return [];
+  const hit = contactListCache.get(tenantId);
+  if (!refresh && hit && Date.now() - hit.at < CONTACTS_TTL_MS) return hit.names;
+
+  const names = [];
+  for (let page = 1; page <= CONTACT_MAX_PAGES; page += 1) {
+    const payload = await xero.api(accountId, tenantId, `/Contacts?page=${page}`);
+    const list = payload?.Contacts || [];
+    for (const c of list) {
+      // ARCHIVED contacts cannot take a new bill, so offering one is
+      // offering a choice that fails later.
+      if (c.Name && c.ContactStatus !== 'ARCHIVED') names.push(c.Name);
+    }
+    if (list.length < CONTACT_PAGE_SIZE) break;
+  }
+  const sorted = [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  contactListCache.set(tenantId, { at: Date.now(), names: sorted });
+  return sorted;
+}
+
 // ── Attachments ─────────────────────────────────────────────────────────────
 
 // Xero caps an attachment at 25MB. Nothing here would be useful at that size
@@ -1273,6 +1318,7 @@ async function runTextRule(accountId, ruleId) {
 
 module.exports = {
   decide, loadRules, premisesText, planRun, createRun, postRun, suggestions,
+  contactsInXero,
   sweep, sweepSoon, startScheduler, stopScheduler, chartOfAccounts,
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
