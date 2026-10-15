@@ -454,12 +454,20 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
     // A run that has not reached Xero has no documents to link to, so the
     // row has to offer the thing that would create them.
     posted: Boolean(line.ar_invoice_id && line.ap_invoice_id),
-    partial: Boolean(line.ar_invoice_id) !== Boolean(line.ap_invoice_id),
+    // A cancelled run is settled. Whatever stopped it last is history, not
+    // an outstanding problem, and a red banner under a row nobody intends
+    // to post again reads as something still wrong with the account.
+    partial: r.status !== 'cancelled'
+      && Boolean(line.ar_invoice_id) !== Boolean(line.ap_invoice_id),
     // A test run can never be posted: the Xero guard would refuse it, and
     // offering a button that always fails is worse than not offering one.
     canPost: r.status === 'draft' && !r.test_mode,
     canCancel: r.status === 'draft' && !line.ar_invoice_id && !line.ap_invoice_id,
-    error: line.line_error || r.post_error || null,
+    error: r.status === 'cancelled' ? null : (line.line_error || r.post_error || null),
+    // Said quietly instead, so a run cancelled for a reason can still give
+    // it — the duplicate this account carried was cancelled by a migration,
+    // and "Cancelled" alone would not say why.
+    cancelNote: r.status === 'cancelled' ? (r.post_error || null) : null,
 
     lineId: line.id || null
   };

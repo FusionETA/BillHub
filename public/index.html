@@ -1701,6 +1701,12 @@
                       {r.partial && <strong>Only one side reached Xero — post again to finish. </strong>}
                       {r.error}
                     </div>}
+
+                    {/* Why it was cancelled, in grey. Not red: nothing here
+                        is waiting on anybody. */}
+                    {r.cancelNote && <div style={{ padding: '8px 18px', background: 'var(--neutral-50)', color: 'var(--text-muted)', fontSize: 12.5, borderBottom: '1px solid var(--neutral-100)' }}>
+                      {r.cancelNote}
+                    </div>}
                   </div>
                 ))}
               </div>

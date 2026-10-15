@@ -1580,7 +1580,19 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     "SELECT COUNT(*) AS n FROM recharge_runs WHERE bill_id = ? AND status <> 'cancelled'", [raceBill]);
   check('and the database holds one live run for that bill',
     Number(liveForBill.n) === 1, liveForBill);
-  if (won.length) await req('POST', `/api/recharge/runs/${won[0].value.body.id}/cancel`, { cookie });
+  if (won.length) {
+    const id = won[0].value.body.id;
+    // Give it a failure, then cancel it: a cancelled run is settled, and a
+    // red banner under a row nobody intends to post again reads as
+    // something still wrong with the account.
+    await db.execute("UPDATE recharge_runs SET post_error = 'Xero said no' WHERE id = ?", [id]);
+    await req('POST', `/api/recharge/runs/${id}/cancel`, { cookie });
+    const row = (await req('GET', '/api/recharge', { cookie })).body.runRows.find((r) => r.id === id);
+    check('a cancelled run shows no error', row && !row.error, row && row.error);
+    check('and is not flagged half-posted either', row && row.partial === false, row && row.partial);
+    check('but still says why it was cancelled, quietly',
+      row && /Xero said no/.test(row.cancelNote || ''), row && row.cancelNote);
+  }
 
   // Its own bill, because a bill that already has a run is refused and the
   // check would skip without saying so.
