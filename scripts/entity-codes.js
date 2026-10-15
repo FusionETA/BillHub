@@ -31,6 +31,25 @@ const grantSource = require('../lib/grantSource');
 const entityRef = require('../lib/entityRef');
 
 const ACCOUNT_ID = Number(process.env.DEMO_ACCOUNT_ID || 1);
+
+// Something between here and a terminal turns "--apply" into an em-dash.
+// Read as a filename it fails with ENOENT on a name nobody typed, which
+// says nothing about what went wrong — and the run that was meant to change
+// forty-three codes quietly did not.
+//
+// Named rather than silently accepted: these flags decide whether anything
+// is written, and guessing at a mangled one is the wrong kind of helpful.
+for (const a of process.argv.slice(2)) {
+  if (/^[\u2010-\u2015]/.test(a)) {
+    console.error(`\nThat is a dash, not two hyphens: ${JSON.stringify(a)}`);
+    console.error(`Write it as --${a.replace(/^[\u2010-\u2015]+/, '')}\n`);
+    process.exit(1);
+  }
+  if (/^(apply|allow-duplicate-references)$/.test(a)) {
+    console.error(`\nMissing the hyphens: write --${a}, not ${a}\n`);
+    process.exit(1);
+  }
+}
 const apply = process.argv.includes('--apply');
 // Two codes that differ only in punctuation strip to the same bank
 // reference. That is refused by default, because two organisations nobody
