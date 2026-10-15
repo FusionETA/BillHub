@@ -509,15 +509,15 @@ async function getRun(accountId, id) {
   return runs.find((r) => r.id === Number(id)) || null;
 }
 
-async function createRun(accountId, { ruleId = null, textRuleId = null, bill, targets, premisesAddress = null, testMode = false }) {
+async function createRun(accountId, { ruleId = null, textRuleId = null, bill, targets, premisesAddress = null, madeInTest = false }) {
   return db.transaction(async (conn) => {
     const total = targets.reduce((n, t) => n + Number(t.amount), 0);
     const [res] = await conn.execute(
       `INSERT INTO recharge_runs
         (account_id, rule_id, text_rule_id, bill_id, payer_tenant_id, xero_invoice_id, supplier_name,
          bill_reference, premises_address, bill_total, recharge_total, currency_code, paid_on,
-         test_mode, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'draft')`,
+         test_mode, made_in_test, status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'draft')`,
       [accountId, ruleId, textRuleId, bill.id, bill.xero_tenant_id, bill.xero_invoice_id,
        bill.contact_name, bill.reference || bill.invoice_number,
        premisesAddress ? String(premisesAddress).slice(0, 512) : null,
@@ -528,7 +528,9 @@ async function createRun(accountId, { ruleId = null, textRuleId = null, bill, ta
        // beats showing "paid not recorded" for something it paid itself.
        bill.fully_paid_on || (bill.marked_paid_at
          ? new Date(bill.marked_paid_at).toISOString().slice(0, 10) : null),
-       testMode ? 1 : 0]
+       // test_mode stays 0 — the run posts real drafts, so hiding it would
+       // hide something that exists. made_in_test is the label beside it.
+       0, madeInTest ? 1 : 0]
     );
     for (const t of targets) {
       await conn.execute(

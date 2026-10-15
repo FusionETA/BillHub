@@ -627,6 +627,11 @@ CREATE TABLE IF NOT EXISTS recharge_runs (
   -- testing mode is off, the same as a test payment batch — a run that can
   -- never be posted sitting among real ones is only confusing.
   test_mode       TINYINT(1) NOT NULL DEFAULT 0,
+  -- Created while testing mode was on. A label, not a visibility rule: the
+  -- two documents such a run posts are real drafts in Xero, so hiding the
+  -- run would hide something that exists. `test_mode` above is the older,
+  -- stronger flag — a run that posted nothing — and nothing sets it now.
+  made_in_test   TINYINT(1) NOT NULL DEFAULT 0,
   post_error      VARCHAR(512),
   posted_at       DATETIME NULL,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,

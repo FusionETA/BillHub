@@ -645,11 +645,10 @@ async function createRun(accountId, input) {
     bill: plan.bill,
     targets: plan.lines,
     premisesAddress: plan.address,
-    // Not stamped as a test any more. A recharge drafted in testing mode
-    // now posts two real DRAFT documents into Xero, so a run that hid
-    // itself when the switch went off would be hiding something that
-    // exists — and somebody would have to find those drafts by hand.
-    testMode: false
+    // Labelled, not hidden. The two DRAFT documents a run posts under
+    // testing mode are real, so it stays on the list when the switch goes
+    // off — with a TEST tag, so nobody has to remember which were which.
+    madeInTest: await testMode.isOn(accountId)
   });
   return { ...created, lines: plan.lines, payer: plan.payer, address: plan.address };
 }

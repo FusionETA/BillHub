@@ -1542,12 +1542,38 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('a write nobody opted in is still refused at the chokepoint',
     stray && stray.testMode === true, stray && stray.message);
 
+  const tagged = (await req('GET', '/api/recharge', { cookie })).body.runRows
+    .find((r) => r.id === tmRun.body.id);
+  check('a run drafted under testing mode is labelled as one',
+    tagged && tagged.madeInTest === true, tagged && tagged.madeInTest);
+
   await testModeLib.set(1, false);
   testModeLib.forget(1);
   const afterOff = (await req('GET', '/api/recharge', { cookie })).body;
+  const still = afterOff.runRows.find((r) => r.id === tmRun.body.id);
   check('the run stays visible once testing mode is off — its documents are real',
-    afterOff.runRows.some((r) => r.id === tmRun.body.id),
-    afterOff.runRows.map((r) => r.id));
+    Boolean(still), afterOff.runRows.map((r) => r.id));
+  check('and keeps the label, so the two can still be told apart',
+    still && still.madeInTest === true, still && still.madeInTest);
+
+  // The label is not the old hide-it flag. test_mode means "posted nothing"
+  // and nothing sets it now; made_in_test means "drafted while the switch
+  // was on" and the documents are real.
+  check('and is not the flag that used to hide it',
+    still && still.testMode === false, still && still.testMode);
+
+  // Its own bill, because a bill that already has a run is refused and the
+  // check would skip without saying so.
+  const plainBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-NOTEST-0826', supplier: BOTH_SUPPLIER, total: 555.00
+  });
+  const realRun2 = await req('POST', '/api/recharge/runs', { cookie, body: { billId: plainBill } });
+  check('a second run can be drafted with testing mode off', realRun2.status === 201, realRun2.body);
+  const plain = (await req('GET', '/api/recharge', { cookie })).body.runRows
+    .find((r) => r.id === realRun2.body.id);
+  check('and carries no label, because nothing about it was a test',
+    plain && plain.madeInTest === false, plain && plain.madeInTest);
+  await req('POST', `/api/recharge/runs/${realRun2.body.id}/cancel`, { cookie });
 
   console.log('\nThe view');
   const final = await req('GET', '/api/recharge', { cookie });

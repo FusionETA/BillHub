@@ -412,6 +412,9 @@ function rechargeRunRow(r, { currency = 'RM', shortCodes = new Map() } = {}) {
     // nothing was sent to Xero and nothing ever will be. It has to read as
     // that rather than as a draft somebody forgot to post.
     testMode: Boolean(r.test_mode),
+    // Drafted while testing mode was on. Its documents are real, so this is
+    // a label on a visible row rather than a reason to hide it.
+    madeInTest: Boolean(r.made_in_test),
     statusLabel: r.test_mode ? 'Testing mode' : status.label,
     statusBg: r.test_mode ? 'var(--amber-100)' : status.bg,
     statusFg: r.test_mode ? '#8a6300' : status.fg,

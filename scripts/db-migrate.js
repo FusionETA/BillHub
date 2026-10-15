@@ -344,6 +344,15 @@ const ADJUSTMENTS = [
     sql: 'ALTER TABLE entities ADD COLUMN short_code VARCHAR(16) NULL'
   },
   {
+    why: 'recharge_runs.made_in_test — which runs were drafted while testing mode was on',
+    check: hasColumn('recharge_runs', 'made_in_test'),
+    needed: (row) => Number(row.n) === 0,
+    // Defaults to 0: every run that already exists was made before this
+    // existed, and calling them all tests would be a migration with an
+    // opinion about history it cannot have.
+    sql: 'ALTER TABLE recharge_runs ADD COLUMN made_in_test TINYINT(1) NOT NULL DEFAULT 0'
+  },
+  {
     why: 'entities.in_default_view — synced, but kept off the opening screen until somebody filters to it',
     check: hasColumn('entities', 'in_default_view'),
     needed: (row) => Number(row.n) === 0,

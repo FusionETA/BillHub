@@ -1556,7 +1556,11 @@
 
       const cur = data.currency;
 
-      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px', opacity: loading ? .6 : 1, transition: 'opacity var(--dur-fast)' }}>
+      // Dimmed only while there is nothing to show. This view re-fetches
+      // every 2.5s while a recharge is settling, and dimming on each one
+      // made the whole page flash grey over and over for as long as
+      // anything was waiting — which reads as the page being broken.
+      return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px', opacity: loading && !data ? .6 : 1, transition: 'opacity var(--dur-fast)' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, marginBottom: 18, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Intercompany recharge</span></div>
@@ -1679,6 +1683,11 @@
                         <span style={{ minWidth: 0 }}>
                           <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12.5, ...Ellip }} title={r.notes}>{r.notes}</span>
                           {r.testMode && <span style={{ display: 'inline-block', marginTop: 4, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--amber-100)', color: '#8a6300' }}>Testing mode · not sent to Xero</span>}
+                          {/* Drafted while testing mode was on. Its two
+                              documents are real, so this says where the run
+                              came from rather than that nothing happened. */}
+                          {!r.testMode && r.madeInTest && <span title="Drafted while testing mode was on. The payment was not sent to Xero; the draft invoice and draft bill are real."
+                            style={{ display: 'inline-block', marginTop: 4, fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--amber-100)', color: '#8a6300' }}>TEST</span>}
                         </span>
                         <span style={{ flex: 1 }} />
                         {r.canPost && <Button variant="primary" size="sm" onClick={() => postRun(r)}
@@ -3214,8 +3223,8 @@
           setXero(x => ({ ...(x || {}), testMode: on }));
           setDataNonce(n => n + 1);
           pushToast(on
-            ? { title: 'Testing mode on', message: 'Bills Hub will read from Xero but change nothing in it. Bank files are still generated.' }
-            : { title: 'Testing mode off', message: 'Changes reach Xero again. Test files are hidden — turn testing back on to see them.' });
+            ? { title: 'Testing mode on', message: 'No payment reaches Xero. Bills are marked paid here only, and a recharge still posts its draft invoice and draft bill.' }
+            : { title: 'Testing mode off', message: 'Payments reach Xero again, and bills paid only in testing are back to Awaiting payment. Recharges drafted meanwhile stay, tagged TEST.' });
         } catch (e) {
           pushToast({ title: 'Could not change testing mode', message: e.message, tone: 'error' });
         }
