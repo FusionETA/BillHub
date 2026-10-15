@@ -635,15 +635,19 @@ CREATE TABLE IF NOT EXISTS recharge_runs (
   post_error      VARCHAR(512),
   posted_at       DATETIME NULL,
   created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  -- A bill is recharged once — but a cancelled run releases it, and a run
-  -- worked out in testing mode must not hold it against the real one. A
-  -- plain UNIQUE (account_id, bill_id) says none of that: it counts
-  -- cancelled rows and test rows alike. MySQL has no partial index, so the
-  -- condition goes into a generated column instead, and NULL drops a row
-  -- out of the index.
+  -- A bill is recharged once, and a cancelled run releases it. A plain
+  -- UNIQUE (account_id, bill_id) would not say that: it counts cancelled
+  -- rows too. MySQL has no partial index, so the condition goes into a
+  -- generated column and NULL drops a row out of the index.
+  --
+  -- test_mode was once part of this key, so that a run which posted nothing
+  -- did not hold a bill against the real one. Testing mode now posts real
+  -- drafts and nothing sets that flag, which left the key splitting a bill
+  -- across the two values and permitting exactly the duplicate it exists to
+  -- prevent — two runs, two sales invoices, one bill.
   live_bill_id    BIGINT UNSIGNED GENERATED ALWAYS AS
                     (IF(status = 'cancelled', NULL, bill_id)) VIRTUAL,
-  UNIQUE KEY uq_run_bill (account_id, live_bill_id, test_mode),
+  UNIQUE KEY uq_run_bill (account_id, live_bill_id),
   INDEX idx_run_list (account_id, status, created_at),
   CONSTRAINT fk_run_account2 FOREIGN KEY (account_id) REFERENCES accounts(id),
   CONSTRAINT fk_run_rule FOREIGN KEY (rule_id) REFERENCES recharge_rules(id) ON DELETE SET NULL,

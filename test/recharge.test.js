@@ -1562,6 +1562,26 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and is not the flag that used to hide it',
     still && still.testMode === false, still && still.testMode);
 
+  // Two callers that both passed planRun's check — the auto-post sweep and
+  // somebody pressing Draft recharge. Before uq_run_bill dropped test_mode
+  // from its columns, a bill with an old test_mode=1 run could take a
+  // second live one, which is two sales invoices for one cost.
+  const raceBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-RACE-0826', supplier: BOTH_SUPPLIER, total: 404.00
+  });
+  const raced = await Promise.allSettled([
+    req('POST', '/api/recharge/runs', { cookie, body: { billId: raceBill } }),
+    req('POST', '/api/recharge/runs', { cookie, body: { billId: raceBill } })
+  ]);
+  const won = raced.filter((r) => r.value && r.value.status === 201);
+  check('two runs raced onto one bill produce exactly one',
+    won.length === 1, raced.map((r) => r.value && r.value.status));
+  const liveForBill = await db.getOne(
+    "SELECT COUNT(*) AS n FROM recharge_runs WHERE bill_id = ? AND status <> 'cancelled'", [raceBill]);
+  check('and the database holds one live run for that bill',
+    Number(liveForBill.n) === 1, liveForBill);
+  if (won.length) await req('POST', `/api/recharge/runs/${won[0].value.body.id}/cancel`, { cookie });
+
   // Its own bill, because a bill that already has a run is refused and the
   // check would skip without saying so.
   const plainBill = await makeBill(abm.tenantId, {

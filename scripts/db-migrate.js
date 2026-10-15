@@ -344,6 +344,49 @@ const ADJUSTMENTS = [
     sql: 'ALTER TABLE entities ADD COLUMN short_code VARCHAR(16) NULL'
   },
   {
+    // Two runs for one bill means two sales invoices for one cost. The key
+    // that prevents it included test_mode, so that a run which posted
+    // nothing did not hold the bill against a real one. Testing mode now
+    // posts real drafts and nothing sets that flag, so the key split each
+    // bill across 0 and 1 and allowed the pair it exists to prevent.
+    //
+    // The duplicates already made are cancelled first, and only ones that
+    // posted nothing — a run with a document behind it is a real accounting
+    // record, not this script's to retract. If a pair remains where both
+    // posted, the index below refuses to build, which is correct: it needs
+    // a person.
+    why: 'cancel duplicate recharge runs that posted nothing, so one bill has one live run',
+    check: `SELECT COUNT(*) AS n FROM recharge_runs a
+             WHERE a.status <> 'cancelled'
+               AND NOT EXISTS (SELECT 1 FROM recharge_run_lines l
+                                WHERE l.run_id = a.id AND (l.ar_invoice_id IS NOT NULL OR l.ap_invoice_id IS NOT NULL))
+               AND EXISTS (SELECT 1 FROM recharge_runs b
+                            WHERE b.account_id = a.account_id AND b.bill_id = a.bill_id
+                              AND b.id <> a.id AND b.status <> 'cancelled')`,
+    needed: (row) => Number(row.n) > 0,
+    sql: `UPDATE recharge_runs a
+             JOIN (SELECT a2.id FROM recharge_runs a2
+                    WHERE a2.status <> 'cancelled'
+                      AND NOT EXISTS (SELECT 1 FROM recharge_run_lines l
+                                       WHERE l.run_id = a2.id AND (l.ar_invoice_id IS NOT NULL OR l.ap_invoice_id IS NOT NULL))
+                      AND EXISTS (SELECT 1 FROM recharge_runs b
+                                   WHERE b.account_id = a2.account_id AND b.bill_id = a2.bill_id
+                                     AND b.id <> a2.id AND b.status <> 'cancelled')) d ON d.id = a.id
+             SET a.status = 'cancelled',
+                 a.post_error = 'Cancelled: a second run existed for this bill and this one posted nothing.'`
+  },
+  {
+    why: 'uq_run_bill — one live recharge per bill, without test_mode splitting it in two',
+    // SEQ_IN_INDEX counts the columns: three means test_mode is still in it.
+    check: `SELECT COUNT(*) AS n FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_runs'
+               AND INDEX_NAME = 'uq_run_bill'`,
+    needed: (row) => Number(row.n) !== 2,
+    sql: `ALTER TABLE recharge_runs
+            DROP INDEX uq_run_bill,
+            ADD UNIQUE KEY uq_run_bill (account_id, live_bill_id)`
+  },
+  {
     why: 'recharge_runs.made_in_test — which runs were drafted while testing mode was on',
     check: hasColumn('recharge_runs', 'made_in_test'),
     needed: (row) => Number(row.n) === 0,

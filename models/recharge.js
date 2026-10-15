@@ -510,6 +510,24 @@ async function getRun(accountId, id) {
 }
 
 async function createRun(accountId, { ruleId = null, textRuleId = null, bill, targets, premisesAddress = null, madeInTest = false }) {
+  // uq_run_bill is what actually stops a bill being recharged twice.
+  // planRun checks first and gives a better message, but between its check
+  // and this insert another caller can pass the same check — the auto-post
+  // sweep and somebody pressing Draft recharge is exactly that pair, and it
+  // produced two runs for one bill on the live account.
+  try {
+    return await insertRun(accountId, { ruleId, textRuleId, bill, targets, premisesAddress, madeInTest });
+  } catch (e) {
+    if (e && e.code === 'ER_DUP_ENTRY' && /uq_run_bill/.test(e.message || '')) {
+      throw Object.assign(
+        new Error('That bill is already being recharged by another run. Open the Recharge tab to see it.'),
+        { statusCode: 409 });
+    }
+    throw e;
+  }
+}
+
+async function insertRun(accountId, { ruleId, textRuleId, bill, targets, premisesAddress, madeInTest }) {
   return db.transaction(async (conn) => {
     const total = targets.reduce((n, t) => n + Number(t.amount), 0);
     const [res] = await conn.execute(
