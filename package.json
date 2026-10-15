@@ -46,7 +46,8 @@
     "wazzup-channel": "node scripts/wazzup-channel.js",
     "auth-preflight": "node scripts/auth-preflight.js",
     "demo:wazzocr": "node scripts/demo-wazzocr-bill.js",
-    "entity-codes": "node scripts/entity-codes.js"
+    "entity-codes": "node scripts/entity-codes.js",
+    "mark-test-run": "node scripts/mark-test-run.js"
   },
   "engines": {
     "node": ">=18"
