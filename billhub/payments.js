@@ -411,6 +411,16 @@ async function createBatch(accountId, { billIds, bankAccountId, paymentDate, gen
     posted = await postToXero(accountId, created.id, {
       reference, status: generateFile ? 'ready' : 'posted'
     });
+  } else if (testing) {
+    // No payment reaches Xero — that is the whole point of the switch. But
+    // the bill is marked paid HERE, because everything downstream of paying
+    // is the part worth testing: the recharge decides, drafts its two
+    // documents and posts them for real, and none of that happens for a
+    // bill Bills Hub still thinks is outstanding.
+    //
+    // Undone when testing mode is turned off. See lib/testMode.set.
+    const full = await batches.getById(accountId, created.id);
+    await applyPaidLocally(accountId, full, await batches.lines(created.id));
   }
 
   return {

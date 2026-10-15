@@ -65,7 +65,10 @@ async function findOrCreateContact(accountId, tenantId, name) {
   if (!id) {
     const created = await xero.api(accountId, tenantId, '/Contacts', {
       method: 'POST',
-      body: { Contacts: [{ Name: name }] }
+      body: { Contacts: [{ Name: name }] },
+      // A recharge cannot draft anything without the other entity existing
+      // as a contact, so this goes with the drafts testing mode allows.
+      allowInTestMode: true
     });
     id = created?.Contacts?.[0]?.ContactID || null;
     if (!id) throw err(`Could not create the contact "${name}" in Xero.`, 502);
@@ -642,7 +645,11 @@ async function createRun(accountId, input) {
     bill: plan.bill,
     targets: plan.lines,
     premisesAddress: plan.address,
-    testMode: await testMode.isOn(accountId)
+    // Not stamped as a test any more. A recharge drafted in testing mode
+    // now posts two real DRAFT documents into Xero, so a run that hid
+    // itself when the switch went off would be hiding something that
+    // exists — and somebody would have to find those drafts by hand.
+    testMode: false
   });
   return { ...created, lines: plan.lines, payer: plan.payer, address: plan.address };
 }
@@ -738,7 +745,9 @@ async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
         `/Invoices/${invoiceId}/Attachments/${encodeURIComponent(name)}`, {
           method: 'PUT',
           body: got.buffer,
-          headers: { 'Content-Type': file.MimeType || got.contentType }
+          headers: { 'Content-Type': file.MimeType || got.contentType },
+          // Part of the draft it hangs on, so it follows the same rule.
+          allowInTestMode: true
         });
       copied += 1;
     } catch (e) {
@@ -752,9 +761,10 @@ async function postRun(accountId, runId) {
   const run = await model.getRun(accountId, runId);
   if (!run) throw err('Recharge not found.', 404);
   if (run.status === 'cancelled') throw err('That recharge was cancelled.', 409);
-  // Refused on the run's own flag, not on whether testing mode happens to be
-  // on now. Somebody told this run it was a test; turning the switch off
-  // later must not quietly turn it into a real one.
+  // Only runs drafted before testing mode started posting real drafts carry
+  // this flag; nothing stamps it now. They were worked out when a test
+  // posted nothing, so they have no documents behind them and turning the
+  // switch off later must not quietly promote them into real ones.
   if (run.test_mode) {
     throw err(
       'That recharge was worked out in testing mode, so it can never be posted. '
@@ -862,6 +872,10 @@ async function postRun(accountId, runId) {
         const contactId = await findOrCreateContact(accountId, run.payer_tenant_id, target.short_name);
         const res = await xero.api(accountId, run.payer_tenant_id, '/Invoices', {
           method: 'POST',
+          // A DRAFT in a live organisation is what testing mode is for:
+          // visible, reviewable, and deleted with one click if it is wrong.
+          // The payment that would have preceded it is what stays blocked.
+          allowInTestMode: true,
           body: {
             Invoices: [{
               Type: 'ACCREC',
@@ -899,6 +913,10 @@ async function postRun(accountId, runId) {
         const contactId = await findOrCreateContact(accountId, line.target_tenant_id, payer.short_name);
         const res = await xero.api(accountId, line.target_tenant_id, '/Invoices', {
           method: 'POST',
+          // A DRAFT in a live organisation is what testing mode is for:
+          // visible, reviewable, and deleted with one click if it is wrong.
+          // The payment that would have preceded it is what stays blocked.
+          allowInTestMode: true,
           body: {
             Invoices: [{
               Type: 'ACCPAY',
@@ -1092,11 +1110,9 @@ async function sweep(accountId, { limit = 50 } = {}) {
     // the other it is documents in two organisations nobody asked for.
     if (!Number(settings.auto_post)) return { ...idle, skipped: 'switched off' };
 
-    // Testing mode posts nothing, and must not quietly bank the recharges
-    // either: a run worked out under it can never be posted, and it would
-    // still mark its bill as recharged. The bills stay as suggestions and
-    // wait for testing mode to come off.
-    if (await testMode.isOn(id)) return { ...idle, skipped: 'testing mode' };
+    // Testing mode no longer stops this. It blocks the payment, not the
+    // recharge: the two documents a recharge posts are DRAFTS, which is
+    // exactly what somebody turning this switch on wants to inspect.
 
     const pending = await suggestions(id, { limit });
     let posted = 0;

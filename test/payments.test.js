@@ -628,9 +628,15 @@ function check(name, ok, detail) {
 
     check('but NOTHING was written to Xero',
       !xeroCalls.some((c) => c.method !== 'GET'), xeroCalls.map((c) => c.method + ' ' + c.path));
-    const stillOwing = await db.getOne(
-      `SELECT COUNT(*) AS n FROM bills WHERE xero_status = 'AUTHORISED' AND id IN (${billIds.map(() => '?').join(',')})`, billIds);
-    check('the bills are untouched, still awaiting payment', Number(stillOwing.n) === billIds.length, stillOwing);
+    // Marked paid HERE and nowhere else. Everything downstream of paying is
+    // the part worth testing — the recharge deciding and drafting — and none
+    // of it happens for a bill Bills Hub still thinks is outstanding.
+    const markedHere = await db.getOne(
+      `SELECT COUNT(*) AS n FROM bills WHERE marked_paid_at IS NOT NULL AND id IN (${billIds.map(() => '?').join(',')})`, billIds);
+    check('the bills are marked paid here, so the rest of the flow can run',
+      Number(markedHere.n) === billIds.length, markedHere);
+    check('and still nothing was written to Xero',
+      !xeroCalls.some((c) => c.method !== 'GET'), xeroCalls.map((c) => c.method + ' ' + c.path));
 
     const trow = await db.getOne('SELECT status, test_mode, file_name, xero_posted_at FROM payment_batches WHERE id = ?', [tb.id]);
     check('the batch is marked as a test', Number(trow.test_mode) === 1, trow.test_mode);
@@ -640,11 +646,13 @@ function check(name, ok, detail) {
     const dl = await req('GET', `/api/payments/batches/${tb.id}/file`, { cookie, raw: true });
     check('which downloads', dl.status === 200, dl.status);
 
-    // The point of not reserving them: the layout gets checked by running the
-    // same bills over and over.
+    // A test-paid bill is paid as far as Bills Hub is concerned, so it is no
+    // longer available to pay again — the same answer a real payment gives.
+    // Turning testing mode off is what releases it, and that is tested below.
     const again2 = await req('POST', '/api/payments/batches', { cookie, body: {
       billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02', generateFile: true, postNow: true } });
-    check('the same bills can be run again', again2.status === 201, again2.body);
+    check('a bill paid in testing cannot be paid twice, the same as a real one',
+      again2.status >= 400 && /paid/i.test(JSON.stringify(again2.body)), again2.body);
 
     const card = (await req('GET', '/api/payments', { cookie })).body.batchCards.find((c) => c.id === tb.id);
     check('the card says so', card && card.testMode === true && /testing mode/i.test(card.postedNote || ''), card && card.postedNote);
@@ -683,9 +691,23 @@ function check(name, ok, detail) {
     const onView = (await req('GET', '/api/payments', { cookie })).body;
 
     await testMode.set(1, false);
+
+    // The one durable trace a test leaves. marked_paid_at is what makes a
+    // bill recharge-eligible, so a test bill left carrying it would look
+    // paid in Bills Hub for ever while Xero says otherwise — and would stay
+    // out of every future payment run.
+    const undone = await db.query(
+      `SELECT marked_paid_at, amount_due, xero_status FROM bills WHERE id IN (${billIds.map(() => '?').join(',')})`,
+      billIds);
+    check('turning it off unmarks the bills it only pretended to pay',
+      undone.every((b) => b.marked_paid_at === null), undone.map((b) => b.marked_paid_at));
+    check('and puts the balance back, or they could never be paid for real',
+      undone.every((b) => Number(b.amount_due) > 0 && b.xero_status !== 'PAID'),
+      undone.map((b) => ({ due: b.amount_due, status: b.xero_status })));
+
     const off = await req('POST', '/api/payments/preview', { cookie, body: {
       billIds, bankAccountId: abmBank.id, paymentDate: '2026-10-02' } });
-    check('turning it off takes effect at once', off.body.testMode === false, off.body.testMode);
+    check('turning it off takes effect at once', off.body.testMode === false, { testMode: off.body.testMode, body: off.body });
 
     // A test batch paid nothing and will never go to a bank. Left in the list
     // once the switch is off, it looks exactly like a file someone still has
@@ -698,10 +720,17 @@ function check(name, ok, detail) {
       && offView.batchCards.length < onView.batchCards.length,
       { on: onView.batchCards.length, off: offView.batchCards.length });
     // Stats that disagree with the list are worse than either on its own.
-    // `again2` above is still sitting at ready, so that card has to move.
+    // Asserted as the invariant rather than as a number that moves: with a
+    // test-paid bill no longer re-payable there is no second batch to shift
+    // the count, and a test that needs one is testing its own fixture.
     const ready = (v) => v.bankStats.find((x) => x.label === 'Ready to download').sub;
-    check('the stat cards count the same batches the list shows',
-      ready(offView) !== ready(onView), { on: ready(onView), off: ready(offView) });
+    const readyCards = (v) => v.batchCards.filter((c) => c.status === 'ready').length;
+    check('the Ready card counts exactly the ready batches in the list, testing on',
+      ready(onView) === `${readyCards(onView)} file${readyCards(onView) === 1 ? '' : 's'}`,
+      { card: ready(onView), list: readyCards(onView) });
+    check('and again once testing is off, with the test batches gone',
+      ready(offView) === `${readyCards(offView)} file${readyCards(offView) === 1 ? '' : 's'}`,
+      { card: ready(offView), list: readyCards(offView) });
     check('the real batches are still there', offView.batchCards.length > 0, offView.batchCards.length);
   }
 

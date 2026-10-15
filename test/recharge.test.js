@@ -16,6 +16,9 @@ const http = require('http');
 const db = require('../db');
 const xero = require('../lib/xero');
 const premises = require('../lib/premises');
+// The real guard, not the stub below: testing mode has to hold at the one
+// place every Xero call passes through, or the opt-in is a hole.
+const realXeroApi = require('../lib/xero').api;
 
 const calls = [];
 let invoiceSeq = 0;
@@ -1279,6 +1282,13 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
       ownerTenantId: kj.tenantId
     }
   });
+  // Paid after BOTH rules exist. A rule only counts bills marked paid after
+  // it was written, and these were paid a moment before this second rule —
+  // close enough that the two MySQL DATETIMEs usually landed in the same
+  // second and the comparison passed by luck. One second of drift anywhere
+  // earlier in the suite turned both counts to zero.
+  await paidNow(fuel, fuelCardBill);
+
   const secondList = await req('GET', '/api/recharge/text-rules', { cookie });
   const fuelCard = secondList.body.rules.find((r) => r.id === fuelRule.body.id);
   const secondCard = secondList.body.rules.find((r) => r.id === second.body.id);
@@ -1460,10 +1470,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     back.body.settings.autoPost === true, back.body.settings);
 
   console.log('\nTesting mode');
-  // Testing mode exists so the whole thing can be exercised against real
-  // Xero data without a single document reaching Xero. A recharge worked out
-  // under it is real arithmetic over real bills and must never be mistaken
-  // for one that happened.
+  // Testing mode blocks the payment, not the recharge. The two documents a
+  // recharge posts are DRAFTS, and a draft in a live organisation is exactly
+  // what somebody turning this switch on wants to look at: visible,
+  // reviewable, deleted with one click. What stays blocked is moving a bill
+  // to Paid in Xero, which is the irreversible half.
   const tmBill = await makeBill(abm.tenantId, {
     ref: 'TNB-TEST-0826', supplier: BOTH_SUPPLIER, total: 777.00
   });
@@ -1471,45 +1482,40 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   await testModeLib.set(1, true);
   calls.length = 0;
   const tmRun = await req('POST', '/api/recharge/runs', { cookie, body: { billId: tmBill } });
-  check('a recharge can still be worked out in testing mode', tmRun.status === 201, tmRun.body);
-  check('and it touches Xero not at all', calls.length === 0, calls.map((c) => c.path));
+  check('a recharge can be worked out in testing mode', tmRun.status === 201, tmRun.body);
 
   const tmRow = (await req('GET', '/api/recharge', { cookie })).body.runRows.find((r) => r.id === tmRun.body.id);
-  check('it is shown while testing mode is on', Boolean(tmRow), 'missing');
-  check('marked as what it is', tmRow.testMode === true && tmRow.statusLabel === 'Testing mode', tmRow.statusLabel);
-  // Offering a button whose only outcome is a refusal is worse than not
-  // offering one.
-  check('and it offers no way to post', tmRow.canPost === false, tmRow.canPost);
+  check('it is shown, and not as a pretend one', Boolean(tmRow) && tmRow.testMode !== true, tmRow && tmRow.statusLabel);
+  check('and it offers a way to post, because posting now works', tmRow.canPost === true, tmRow.canPost);
 
-  // Refused on the run's own flag, not on whether the switch is still on.
-  // lib/xero.js refuses the call as well; this is the one that survives
-  // somebody turning testing mode off tomorrow.
   calls.length = 0;
   const tmPost = await req('POST', `/api/recharge/runs/${tmRun.body.id}/post`, { cookie });
-  check('posting one is refused',
-    tmPost.status === 409 && /worked out in testing mode/.test(tmPost.body.error), tmPost.body);
-  check('and nothing was attempted against Xero', calls.length === 0, calls.map((c) => c.path));
+  check('posting it in testing mode succeeds', tmPost.status === 200 && tmPost.body.posted === 1, tmPost.body);
+  check('both documents reached Xero',
+    calls.filter((c) => c.path === '/Invoices' && c.method === 'POST').length === 2,
+    calls.map((c) => c.method + ' ' + c.path));
+  check('and both are DRAFT, which is what makes this safe',
+    calls.filter((c) => c.path === '/Invoices' && c.method === 'POST')
+      .every((c) => c.body.Invoices[0].Status === 'DRAFT'),
+    calls.filter((c) => c.path === '/Invoices').map((c) => c.body && c.body.Invoices[0].Status));
+  check('no payment was attempted',
+    !calls.some((c) => /Payment/i.test(c.path)), calls.map((c) => c.path));
+
+  // The guard still holds for everything nobody opted in: lib/xero.js
+  // refuses a write unless the call site asked for it by name.
+  let stray = null;
+  try {
+    await realXeroApi(1, 'tenant-abm', '/BankTransactions', { method: 'POST', body: {} });
+  } catch (e) { stray = e; }
+  check('a write nobody opted in is still refused at the chokepoint',
+    stray && stray.testMode === true, stray && stray.message);
 
   await testModeLib.set(1, false);
   testModeLib.forget(1);
-  const stillRefused = await req('POST', `/api/recharge/runs/${tmRun.body.id}/post`, { cookie });
-  check('and it stays refused once testing mode is off — it was always a test',
-    stillRefused.status === 409 && /worked out in testing mode/.test(stillRefused.body.error),
-    stillRefused.body);
   const afterOff = (await req('GET', '/api/recharge', { cookie })).body;
-  check('turning testing mode off hides it, the same as a test payment batch',
-    !afterOff.runRows.some((r) => r.id === tmRun.body.id),
+  check('the run stays visible once testing mode is off — its documents are real',
+    afterOff.runRows.some((r) => r.id === tmRun.body.id),
     afterOff.runRows.map((r) => r.id));
-  check('and it is out of the figures too',
-    Number((await db.getOne("SELECT recharge_total FROM recharge_runs WHERE id = ?", [tmRun.body.id])).recharge_total) === 777
-    && !/777/.test(afterOff.rechargeStats[0].amount),
-    afterOff.rechargeStats[0].amount);
-
-  // The dangerous one: a bill tried in testing mode must not be left
-  // unrechargeable for good, held by a run nobody can see.
-  const realRun = await req('POST', '/api/recharge/runs', { cookie, body: { billId: tmBill } });
-  check('the bill it held is free to be recharged for real', realRun.status === 201, realRun.body);
-  await req('POST', `/api/recharge/runs/${realRun.body.id}/cancel`, { cookie });
 
   console.log('\nThe view');
   const final = await req('GET', '/api/recharge', { cookie });

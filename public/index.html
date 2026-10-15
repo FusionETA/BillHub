@@ -696,7 +696,7 @@
 
               <div style={{ gridColumn: '1 / -1', background: testing ? 'var(--amber-100)' : 'var(--neutral-50)', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: testing ? '#6b4d00' : 'var(--text-body)', lineHeight: 1.6 }}>
                 {testing
-                  ? <React.Fragment><strong>Testing mode is on.</strong> The bank file will be generated from live Xero data, but nothing will be recorded in Xero and these bills will stay at Awaiting payment.</React.Fragment>
+                  ? <React.Fragment><strong>Testing mode is on.</strong> No payment reaches Xero — these bills are marked paid in Bills Hub only, so the rest of the flow runs. Any recharge they set off posts its draft invoice and draft bill into Xero for real. Turning testing mode off puts these bills back to Awaiting payment.</React.Fragment>
                   : 'Payments will be recorded in ' + tenantIds.length + ' Xero ' + (tenantIds.length === 1 ? 'entity' : 'entities') + ' using the same date, account and reference.'}
               </div>
 
@@ -1541,7 +1541,7 @@
 
         {data.testMode && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--amber-100)', borderRadius: 10, padding: '12px 18px', marginBottom: 14, fontSize: 13.5, color: '#6b4d00', lineHeight: 1.6 }}>
           <div style={{ flex: 1 }}>
-            <strong>Testing mode is on.</strong> The rules run against real Xero data, but nothing is sent to Xero — a recharge drafted now is marked <em>Testing mode</em>, cannot be posted, and disappears from this list when testing mode is turned off.
+            <strong>Testing mode is on.</strong> Recharges run and post for real: the draft invoice and the draft bill are created in Xero, where you can read them and delete them. What testing mode stops is the payment — a bill paid now is marked paid in Bills Hub only.
           </div>
         </div>}
 
@@ -1559,7 +1559,7 @@
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
               {data.testMode
-                ? 'Testing mode is on, so nothing is posted automatically. Recharging one here works the split out and records it, and sends nothing to Xero.'
+                ? 'Testing mode stops payments, not recharges. These post their draft invoice and draft bill into Xero as usual.'
                 : data.settings.autoPost
                   // With posting automatic these are the leftovers, and
                   // saying which kind matters: they were paid before the
@@ -2387,7 +2387,7 @@
             because "no file will reach the bank either" is the part someone
             testing a layout can forget. */}
         {testing && <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'var(--amber-100)', border: '1px solid #e7c96b', borderLeft: '4px solid var(--amber-500)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13.5, color: '#6b4d00', lineHeight: 1.6 }}>
-          <span><strong style={{ color: '#5a4100' }}>Testing mode is on.</strong> Files here are built from live Xero data, but nothing is recorded in Xero and the bills stay at Awaiting payment. Batches made this way are tagged <strong>TEST</strong> and do not reserve their bills, so the same selection can be run again.</span>
+          <span><strong style={{ color: '#5a4100' }}>Testing mode is on.</strong> Files here are built from live Xero data and no payment is recorded in Xero. The bills are marked paid in Bills Hub so the rest of the flow runs, which means a recharge they trigger does post its drafts into Xero. Batches are tagged <strong>TEST</strong>, and turning testing mode off removes them and puts their bills back to Awaiting payment.</span>
         </div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 20 }}>
@@ -3187,7 +3187,7 @@
             does, so it cannot be left to a toggle in the corner. */}
         {testing && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap', background: 'var(--amber-500)', borderBottom: '1px solid #c99a00', padding: '9px 20px', fontSize: 13, color: '#3d2c00' }}>
           <strong>Testing mode is on.</strong>
-          <span>Bills Hub reads from Xero but changes nothing in it. Bank files are still generated from live data.</span>
+          <span>No payment reaches Xero. Bills are marked paid here only, bank files are built from live data, and a recharge still posts its draft invoice and draft bill into Xero.</span>
           <button onClick={() => toggleTesting(false)} style={{ border: 'none', background: 'rgba(0,0,0,.14)', borderRadius: 999, padding: '3px 12px', fontSize: 12, fontWeight: 700, color: '#3d2c00', cursor: 'pointer' }}>Turn off</button>
         </div>}
 
