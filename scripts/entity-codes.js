@@ -32,6 +32,12 @@ const entityRef = require('../lib/entityRef');
 
 const ACCOUNT_ID = Number(process.env.DEMO_ACCOUNT_ID || 1);
 const apply = process.argv.includes('--apply');
+// Two codes that differ only in punctuation strip to the same bank
+// reference. That is refused by default, because two organisations nobody
+// can tell apart on a statement is the kind of thing found months later in
+// a reconciliation. Allowed only when somebody says so on the command line,
+// which puts the decision in the shell history beside the run.
+const allowRefClash = process.argv.includes('--allow-duplicate-references');
 const file = process.argv.slice(2).find((a) => !a.startsWith('--') && a !== '-');
 
 function readStdin() {
@@ -158,8 +164,16 @@ function parseCsv(text) {
   }
   for (const [r, group] of byRef) {
     if (group.length < 2) continue;
-    problems.push(`${group.map((g) => `"${g.code}"`).join(' and ')} both become "${r}" in a `
-      + `bank reference (${group.map((g) => g.entity.short_name || g.entity.tenant_name).join(', ')})`);
+    const says = `${group.map((g) => `"${g.code}"`).join(' and ')} both become "${r}" in a `
+      + `bank reference (${group.map((g) => g.entity.short_name || g.entity.tenant_name).join(', ')})`;
+    if (allowRefClash) {
+      console.log(`\n  ⚠  ${says}.`);
+      console.log('     Allowed because --allow-duplicate-references was given. A payment or');
+      console.log('     recharge line for either company will carry the same suffix, so a');
+      console.log('     statement cannot say which of the two it belonged to.');
+    } else {
+      problems.push(says);
+    }
   }
 
   const untouched = live.filter((e) => !plan.some((p) => p.entity.xero_tenant_id === e.xero_tenant_id));
