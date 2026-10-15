@@ -226,6 +226,9 @@ router.post('/preview', async (req, res) => {
       // The dialog says what the button will do, and in testing mode it does
       // something different, so the preview is where that has to come from.
       testMode: await testMode.isOn(accountId),
+      // Whether a recharge posts itself. The dialog promised the opposite
+      // for months after this was switched on by default.
+      autoPost: Boolean(Number((await require('../models/recharge').getSettings(accountId)).auto_post)),
       bankAccount: vm.bankAccountRow(planned.bank),
       paymentDate: planned.paymentDate,
       currency: planned.currencyCode || '',

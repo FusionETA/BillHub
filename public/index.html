@@ -710,8 +710,17 @@
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-heading)', marginBottom: 2 }}>
                   {recharges.length === 1 ? 'One of these will be recharged' : recharges.length + ' of these will be recharged'}
                 </div>
+                {/* Written when a recharge waited for somebody to press a
+                    button. It has posted itself since auto-post went on by
+                    default, and in testing mode the payment does not reach
+                    Xero at all — so this said two things that were not true
+                    of the button beside it. */}
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
-                  Paying them marks them paid in Xero. Each one then appears on the Recharge tab, where you draft it and post it — nothing is recharged on its own.
+                  {testing
+                    ? 'No payment reaches Xero, but each recharge below still runs: its draft invoice and draft bill are created in Xero for real.'
+                    : preview && preview.autoPost === false
+                      ? 'Paying them marks them paid in Xero. Each one then appears on the Recharge tab, where you draft it and post it.'
+                      : 'Paying them marks them paid in Xero, and each recharge below then drafts and posts its two documents on its own. They appear on the Recharge tab as they finish.'}
                 </div>
                 {recharges.map(d => (
                   <div key={d.billId} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '7px 0', borderTop: '1px solid var(--neutral-100)' }}>
