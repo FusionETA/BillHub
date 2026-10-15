@@ -35,7 +35,12 @@ const id = Number(argv.find((a) => /^\d+$/.test(a)));
         + `${w(Number(r.made_in_test) ? 'TEST' : '', 7)}${w(Number(r.recharge_total).toFixed(2), 12)}`
         + `${r.bill_reference || ''} · ${r.supplier_name || ''}`);
     }
-    console.log('\n  Tag one with:  node scripts/mark-test-run.js <ID>\n');
+    // A real id from the list above, not <ID>. A placeholder gets pasted
+    // verbatim, and bash reads the angle bracket as a redirect and fails
+    // before node ever runs.
+    const example = rows.find((r) => !Number(r.made_in_test)) || rows[0];
+    console.log(`\n  Tag one with:  npm run mark-test-run -- ${example.id}`);
+    console.log(`  Take it off:   npm run mark-test-run -- ${example.id} --off\n`);
     await db.close();
     return;
   }
