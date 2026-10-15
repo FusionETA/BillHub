@@ -42,7 +42,7 @@ function codeFrom(tenantName) {
 // Hub account, `xero_connections` by the WazzOCR one, so both are passed in.
 function listByAccount(accountId, connAccountId, { includedOnly = true } = {}) {
   return db.query(
-    `SELECT e.id, e.xero_tenant_id, e.code, e.short_name, e.position, e.included,
+    `SELECT e.id, e.xero_tenant_id, e.code, e.short_name, e.position, e.included, e.in_default_view,
             e.base_currency, c.tenant_name, c.status, c.needs_reconnect
        FROM entities e
        JOIN ${CONNECTIONS} c
@@ -157,12 +157,13 @@ async function currencyFor(accountId, connAccountId) {
   return { code: null, symbol: '', mixed: null };
 }
 
-async function update(accountId, tenantId, { code, shortName, included, position } = {}) {
+async function update(accountId, tenantId, { code, shortName, included, position, inDefaultView } = {}) {
   const sets = [];
   const params = [];
   if (code !== undefined) { sets.push('code = ?'); params.push(String(code).trim().toUpperCase().slice(0, 16)); }
   if (shortName !== undefined) { sets.push('short_name = ?'); params.push(String(shortName).trim().slice(0, 255)); }
   if (included !== undefined) { sets.push('included = ?'); params.push(included ? 1 : 0); }
+  if (inDefaultView !== undefined) { sets.push('in_default_view = ?'); params.push(inDefaultView ? 1 : 0); }
   if (position !== undefined) { sets.push('position = ?'); params.push(Number(position) || 0); }
   if (!sets.length) return 0;
   params.push(accountId, tenantId);

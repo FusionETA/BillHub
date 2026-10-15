@@ -182,6 +182,45 @@ function check(name, ok, detail) {
   check('switching it back on brings its bills back — nothing was deleted',
     backAgain.body.rows.length > 0, backAgain.body.rows.length);
 
+  // The other half of the pair, and the distinction is the point: `included`
+  // decides what is synced at all, `inDefaultView` decides only what the
+  // opening screen shows. A synced organisation kept off that screen is
+  // still there the moment somebody asks for it.
+  const inViewFirst = await req('GET', '/api/bills?limit=500', { cookie });
+  const kjBefore = inViewFirst.body.rows.filter((r) => r.entityCode === 'ABKJ').length;
+  check('the organisation has bills to begin with', kjBefore > 0, kjBefore);
+
+  const outOfView = await req('PATCH', '/api/bills/entities/tenant-abkj',
+    { cookie, body: { inDefaultView: false } });
+  check('an organisation can be taken out of the default view',
+    outOfView.status === 200 && outOfView.body.entity.inDefaultView === false, outOfView.body);
+  check('and stays in use, because that is a different question',
+    outOfView.body.entity.included === true, outOfView.body.entity);
+
+  const defaulted = await req('GET', '/api/bills?limit=500', { cookie });
+  check('its bills are off the opening screen',
+    defaulted.body.rows.filter((r) => r.entityCode === 'ABKJ').length === 0,
+    defaulted.body.rows.map((r) => r.entityCode));
+  check('and the screen says so rather than quietly showing fewer',
+    /not in the default view/.test(defaulted.body.defaultViewNote || '')
+    && /ABKJ/.test(defaulted.body.defaultViewNote || ''), defaulted.body.defaultViewNote);
+
+  const asked = await req('GET', '/api/bills?entities=tenant-abkj&limit=500', { cookie });
+  check('but asking for it by name still returns every one of them',
+    asked.body.rows.length === kjBefore, { asked: asked.body.rows.length, before: kjBefore });
+  check('and the note goes quiet, because nothing is being hidden now',
+    !asked.body.defaultViewNote, asked.body.defaultViewNote);
+
+  check('it is still listed in the entity filter, unlike one out of use',
+    defaulted.body.entities.some((e) => e.code === 'ABKJ'),
+    defaulted.body.entities.map((e) => e.code));
+
+  await req('PATCH', '/api/bills/entities/tenant-abkj', { cookie, body: { inDefaultView: true } });
+  const restored = await req('GET', '/api/bills?limit=500', { cookie });
+  check('putting it back restores the opening screen',
+    restored.body.rows.filter((r) => r.entityCode === 'ABKJ').length === kjBefore
+    && !restored.body.defaultViewNote, restored.body.defaultViewNote);
+
   const noSuchOrg = await req('PATCH', '/api/bills/entities/not-a-tenant', { cookie, body: { included: false } });
   check('an unknown organisation is a 404', noSuchOrg.status === 404, noSuchOrg.status);
 

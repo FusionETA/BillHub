@@ -108,6 +108,12 @@ CREATE TABLE IF NOT EXISTS entities (
   short_name     VARCHAR(255) NOT NULL,
   position       INT DEFAULT 0,
   included       TINYINT(1) NOT NULL DEFAULT 1,   -- 0 = hide from Bills Hub
+  -- Two different questions, which is why there are two columns.
+  -- `included` is what Bills Hub syncs at all: off means the bills never
+  -- arrive and the ones already here are hidden. `in_default_view` is only
+  -- about the opening screen: the bills are synced and reachable from the
+  -- entity filter, they are simply not in the way until somebody asks.
+  in_default_view TINYINT(1) NOT NULL DEFAULT 1,  -- 0 = synced, but not shown until filtered to
   -- The organisation's own base currency, read from Xero. What the UI labels
   -- figures with; NULL until the first sync has asked.
   base_currency  VARCHAR(8) NULL,

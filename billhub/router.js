@@ -98,8 +98,22 @@ router.get('/', async (req, res) => {
       bannerHead: bannerData?.head || '',
       bannerTail: bannerData?.tail || '',
       hasBanner: Boolean(bannerData),
-      entities: entityRows.map((e) => ({ code: e.code, short: e.short_name, tenantId: e.xero_tenant_id })),
+      entities: entityRows.map((e) => ({
+        code: e.code, short: e.short_name, tenantId: e.xero_tenant_id,
+        inDefaultView: e.in_default_view == null ? true : Boolean(e.in_default_view)
+      })),
       entityCount: entityRows.length,
+      // A filter nobody chose has to say so, or the first question is "where
+      // did that company's bills go" — the same complaint the Xero
+      // organisations toggle used to earn. Only when it is actually acting:
+      // naming an entity turns it off.
+      defaultViewNote: filters.tenantIds.length ? null : (() => {
+        const out = entityRows.filter((e) => e.in_default_view === 0);
+        if (!out.length) return null;
+        return `${out.length} organisation${out.length === 1 ? ' is' : 's are'} not in the default view`
+          + ` (${out.map((e) => e.code).join(', ')}). Choose ${out.length === 1 ? 'it' : 'them'}`
+          + ' in the Xero entity filter to see those bills.';
+      })(),
       currency,
       currencyNote: cur.mixed
         ? `Your organisations report in ${cur.mixed.join(' and ')}. Totals below add them together — filter to one entity for a figure you can rely on.`
@@ -128,7 +142,9 @@ router.patch('/entities/:tenantId', async (req, res) => {
       ok: true,
       entity: row && {
         tenantId: row.xero_tenant_id, code: row.code, short: row.short_name,
-        included: Boolean(row.included), name: row.tenant_name
+        included: Boolean(row.included),
+        inDefaultView: row.in_default_view == null ? true : Boolean(row.in_default_view),
+        name: row.tenant_name
       }
     });
   } catch (err) { fail(res, err); }
@@ -152,6 +168,7 @@ router.get('/entities', async (req, res) => {
         name: e.tenant_name,
         baseCurrency: e.base_currency || null,
         included: e.included == null ? true : Boolean(e.included),
+        inDefaultView: e.in_default_view == null ? true : Boolean(e.in_default_view),
         needsReconnect: Boolean(e.needs_reconnect)
       })),
       // Everything the organisations panel needs, in one call.

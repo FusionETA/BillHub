@@ -32,6 +32,19 @@ const LIVE = "b.xero_status IN ('DRAFT','SUBMITTED','AUTHORISED','PAID')";
 // NOT EXISTS rather than a join: a bill whose organisation has no entities
 // row yet counts as in use, the same rule entities.listSyncable applies, and
 // the row count of the outer query is left alone.
+// The opening screen, as opposed to what exists at all.
+//
+// An organisation can be synced and reachable and still not be what somebody
+// wants to see first: forty-three of them is a lot to read past. This narrows
+// a request that named no entity, and nothing else — picking that
+// organisation in the filter still shows its bills, which is the whole
+// difference between this and IN_USE.
+const IN_DEFAULT_VIEW = `NOT EXISTS (
+    SELECT 1 FROM entities dv
+     WHERE dv.account_id = b.account_id
+       AND dv.xero_tenant_id = b.xero_tenant_id
+       AND dv.in_default_view = 0)`;
+
 const IN_USE = `NOT EXISTS (
     SELECT 1 FROM entities ex
      WHERE ex.account_id = b.account_id
@@ -46,6 +59,10 @@ function buildWhere(accountId, f = {}) {
   if (f.tenantIds && f.tenantIds.length) {
     where.push(`b.xero_tenant_id IN (${f.tenantIds.map(() => '?').join(',')})`);
     params.push(...f.tenantIds);
+  } else {
+    // Only when nothing was asked for. Naming an organisation is asking for
+    // it, and an explicit request outranks a default every time.
+    where.push(IN_DEFAULT_VIEW);
   }
   if (f.status && f.status !== 'all') {
     where.push(`${UI_STATUS_SQL} = ?`);
@@ -339,7 +356,7 @@ async function applyStatus(accountId, id, xeroStatus) {
 }
 
 module.exports = {
-  list, listMeta, tabCounts, stats, contacts, contactsForTenant, SORTS, IN_USE,
+  list, listMeta, tabCounts, stats, contacts, contactsForTenant, SORTS, IN_USE, IN_DEFAULT_VIEW,
   getById, getManyByIds, upsertFromXero, applyStatus, fit, WIDTHS,
   UI_STATUS_SQL
 };

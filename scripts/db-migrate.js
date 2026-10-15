@@ -343,6 +343,15 @@ const ADJUSTMENTS = [
     needed: (row) => Number(row.n) === 0,
     sql: 'ALTER TABLE entities ADD COLUMN short_code VARCHAR(16) NULL'
   },
+  {
+    why: 'entities.in_default_view — synced, but kept off the opening screen until somebody filters to it',
+    check: hasColumn('entities', 'in_default_view'),
+    needed: (row) => Number(row.n) === 0,
+    // Defaults to 1, so every organisation that exists today keeps showing.
+    // A setting that hid things the moment it was deployed would be a
+    // migration with an opinion.
+    sql: 'ALTER TABLE entities ADD COLUMN in_default_view TINYINT(1) NOT NULL DEFAULT 1'
+  },
   // ── Recharge: the premises register ──────────────────────────────────────
   //
   // Three adjustments stood here, building the address rule's old shape: a
