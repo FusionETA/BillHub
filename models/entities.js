@@ -174,6 +174,31 @@ async function update(accountId, tenantId, { code, shortName, included, position
   return res.affectedRows;
 }
 
+// A Xero tenant id inside a message, swapped for the organisation it names.
+//
+// The allowlist and several Xero errors identify an organisation by GUID,
+// because they are raised below the layer that knows one has a name. On
+// screen that is a question rather than an answer — "may not write to
+// e1434619-aa20-…" tells nobody which company to go and fix.
+async function describeTenantsIn(accountId, message) {
+  const text = String(message == null ? '' : message);
+  const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+  if (!GUID.test(text)) return text;
+  GUID.lastIndex = 0;
+  let rows = [];
+  try {
+    rows = await db.query('SELECT xero_tenant_id, code, short_name FROM entities WHERE account_id = ?',
+      [accountId]);
+  } catch (e) {
+    return text;   // a message is not worth failing a request over
+  }
+  const by = new Map(rows.map((r) => [r.xero_tenant_id, r]));
+  return text.replace(GUID, (id) => {
+    const e = by.get(id);
+    return e ? `${e.short_name || e.code} (${e.code})` : id;
+  });
+}
+
 // Map of tenantId -> { code, shortName } for decorating bill rows.
 async function map(accountId) {
   const rows = await db.query(
@@ -186,6 +211,7 @@ async function map(accountId) {
 }
 
 module.exports = {
+  describeTenantsIn,
   listByAccount, listSyncable, ensure, update, map, codeFrom, shortNameFrom,
   setBaseCurrency, setShortCode, shortCodes, currencyFor, SYMBOLS
 };

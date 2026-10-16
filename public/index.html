@@ -1529,19 +1529,6 @@
         } catch (e) { toastError(e, 'Could not update the rule'); }
       }
 
-      async function runTextRule(rule) {
-        setBusy('run-' + rule.id);
-        try {
-          const r = await api.post('/api/recharge/text-rules/' + rule.id + '/run');
-          onToast(r.drafted
-            ? { title: `${r.drafted} recharge${r.drafted === 1 ? '' : 's'} drafted`,
-                message: 'Check them on Recharge runs, then post each one to Xero.' }
-            : { title: 'Nothing to do', message: `No paid bill is waiting on "${rule.name}".` });
-          reload();
-        } catch (e) { toastError(e, 'Could not run the rule'); }
-        finally { setBusy(null); }
-      }
-
       if (error) {
         return <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 120px' }}>
           <Placeholder tone="error" title="Could not load recharges" message={error}
@@ -1797,12 +1784,11 @@
                   {r.accountsLabel && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.accountsLabel}</div>}
                 </div>
                 <span style={{ flex: 1 }} />
-                {r.waitingLabel && <span style={{ fontSize: 11.5, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'var(--amber-100)', color: '#8a6300' }}>{r.waitingLabel}</span>}
+                {/* Was the prompt to press Run now. Auto-post picks these up
+                    on its own, so it reads as a count, not a chore. */}
+                {r.waitingLabel && <span title="Picked up automatically on the next sweep."
+                  style={{ fontSize: 11.5, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'var(--amber-100)', color: '#8a6300' }}>{r.waitingLabel}</span>}
                 <Switch checked={r.on} onChange={v => toggleTextRule(r, v)} />
-                <Button variant="outline" size="sm" onClick={() => runTextRule(r)}
-                  style={busy === 'run-' + r.id ? { opacity: .6, pointerEvents: 'none' } : null}>
-                  {busy === 'run-' + r.id ? 'Running…' : 'Run now'}
-                </Button>
                 <button aria-label="Edit rule" onClick={() => setTextRuleFor(r)} className="feta-hover"
                   style={{ border: 'none', background: 'none', color: 'var(--text-subtle)', cursor: 'pointer', padding: 6, display: 'inline-flex', borderRadius: '50%' }}><Icon name="pencil" size={16} /></button>
                 <button aria-label="Delete rule" onClick={() => deleteTextRule(r)} className="feta-hover"

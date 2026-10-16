@@ -43,10 +43,17 @@ async function currencyFor(req) {
   return entities.currencyFor(req.user.account_id, connAccountId);
 }
 
-function fail(res, err, fallback = 500) {
+// `accountId` is optional, and when given any Xero tenant id in the message
+// is swapped for the organisation it names — the allowlist refuses by GUID,
+// and a toast reading "may not write to e1434619-aa20-…" tells nobody which
+// company to go and fix.
+async function fail(res, err, fallback = 500, accountId = null) {
   const xeroAuth = err.statusCode === 401;
+  const message = accountId
+    ? await entities.describeTenantsIn(accountId, err.message)
+    : err.message;
   res.status(xeroAuth ? 424 : (err.statusCode || fallback))
-     .json({ error: err.message, ...(xeroAuth ? { needsXeroReconnect: true } : {}) });
+     .json({ error: message, ...(xeroAuth ? { needsXeroReconnect: true } : {}) });
 }
 
 // ── The view ────────────────────────────────────────────────────────────────
@@ -84,7 +91,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[payments] view failed:', err.message);
-    fail(res, err);
+    await fail(res, err, 500, accountId);
   }
 });
 
@@ -94,7 +101,7 @@ router.post('/sync', async (req, res) => {
     res.json(await payments.syncAll(accountId));
   } catch (err) {
     console.error('[payments] sync failed:', err.message);
-    fail(res, err);
+    await fail(res, err, 500, accountId);
   }
 });
 
@@ -108,7 +115,7 @@ router.get('/bank-accounts', async (req, res) => {
       enabledOnly: req.query.all !== 'true'
     });
     res.json({ bankAccounts: rows.map(vm.bankAccountRow) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 router.patch('/bank-accounts/:id(\\d+)', async (req, res) => {
@@ -117,7 +124,7 @@ router.patch('/bank-accounts/:id(\\d+)', async (req, res) => {
     const n = await bankAccounts.update(accountId, Number(req.params.id), req.body || {});
     if (!n) return res.status(404).json({ error: 'Paying account not found.' });
     res.json({ ok: true, bankAccount: vm.bankAccountRow(await bankAccounts.getById(accountId, Number(req.params.id))) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 // ── File layouts ────────────────────────────────────────────────────────────
@@ -127,7 +134,7 @@ router.get('/formats', async (req, res) => {
   try {
     const rows = await bankFormats.listForAccount(accountId);
     res.json({ formats: rows.map(vm.bankFormatRow) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 router.put('/formats/:key', async (req, res) => {
@@ -147,7 +154,7 @@ router.put('/formats/:key', async (req, res) => {
     }
     await bankFormats.upsertForAccount(accountId, key, body);
     res.json({ ok: true, format: vm.bankFormatRow(await bankFormats.get(accountId, key)) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 router.delete('/formats/:key', async (req, res) => {
@@ -156,7 +163,7 @@ router.delete('/formats/:key', async (req, res) => {
     const n = await bankFormats.removeForAccount(accountId, req.params.key);
     if (!n) return res.status(404).json({ error: 'No layout of your own with that key.' });
     res.json({ ok: true });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 // ── Payees ──────────────────────────────────────────────────────────────────
@@ -169,7 +176,7 @@ router.get('/payees', async (req, res) => {
       missingOnly: req.query.missing === 'true'
     });
     res.json({ payees: rows.map(vm.payeeRow), summary: await payees.summary(accountId) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 router.put('/payees/:tenantId/:contactId', async (req, res) => {
@@ -177,7 +184,7 @@ router.put('/payees/:tenantId/:contactId', async (req, res) => {
   try {
     await payees.setManual(accountId, req.params.tenantId, req.params.contactId, req.body || {});
     res.json({ ok: true, payee: vm.payeeRow(await payees.get(accountId, req.params.tenantId, req.params.contactId)) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 // ── Batches ─────────────────────────────────────────────────────────────────
@@ -247,7 +254,7 @@ router.post('/preview', async (req, res) => {
         .filter((w) => !/ has no (bank|biller) account number\.$/.test(w)),
       missingPayeeAccounts: planned.runs.flatMap((x) => x.missingPayeeAccounts)
     });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 router.post('/batches', async (req, res) => {
@@ -263,7 +270,7 @@ router.post('/batches', async (req, res) => {
     });
   } catch (err) {
     console.error('[payments] create batch failed:', err.message);
-    fail(res, err, 400);
+    await fail(res, err, 400, accountId);
   }
 });
 
@@ -275,7 +282,7 @@ router.get('/batches/:id(\\d+)', async (req, res) => {
     const cur = await currencyFor(req);
     const currency = cur.symbol;
     res.json({ batch: vm.batchCard(batch, await batches.lines(batch.id), currency) });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 const extOf = (name) => String(name || '').split('.').pop().toLowerCase();
@@ -313,7 +320,7 @@ router.get('/batches/:id(\\d+)/file', async (req, res) => {
     }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.send(text);
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 // Confirming the file reached the banking portal. The bills were paid in Xero
@@ -344,7 +351,7 @@ router.post('/batches/:id(\\d+)/uploaded', async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (err) {
     console.error('[payments] marking uploaded failed:', err.message);
-    fail(res, err);
+    await fail(res, err, 500, accountId);
   }
 });
 
@@ -368,7 +375,7 @@ router.post('/batches/:id(\\d+)/receipt',
       res.json({ ok: true, ...out });
     } catch (err) {
       console.error('[payments] attaching the receipt failed:', err.message);
-      fail(res, err);
+      await fail(res, err, 500, accountId);
     }
   });
 
@@ -382,7 +389,7 @@ router.post('/batches/:id(\\d+)/cancel', async (req, res) => {
       });
     }
     res.json({ ok: true });
-  } catch (err) { fail(res, err); }
+  } catch (err) { await fail(res, err, 500, accountId); }
 });
 
 module.exports = router;
