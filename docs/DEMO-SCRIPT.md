@@ -36,7 +36,7 @@ removes.
    it is a transfer and the name is resolved to the BNM bank code the file
    needs.
 
-4. **Generate the file.** Hong Leong produces a ConnectFirst bulk payment
+4. **Generate the file.** Hong Leong produces a ConnectPro bulk payment
    or a JomPay bulk file. CIMB produces a filled BizConverter workbook,
    which is then run through CIMB's own converter and the resulting .txt
    uploaded to BizChannel.
@@ -130,7 +130,7 @@ on the reference, with recharge rules.
 ### Bank files
 
 1. **Which banks do you actually pay from today**, and which portal does
-   each one use? We have built Hong Leong ConnectFirst and CIMB
+   each one use? We have built Hong Leong ConnectPro and CIMB
    BizConverter. Is there anything else?
 
 2. **Can we do one controlled test upload per format?** One line, known

@@ -224,7 +224,7 @@ async function seed({ quiet = false } = {}) {
     ['tenant-abm',  'acct-abm-cimb', '091', 'CIMB Operating 8830',  '883099887766', 'generic-csv'],
     ['tenant-abkk', 'acct-abkk-mbb', '090', 'Maybank Current 7781', '778154321098', 'maybank-m2e-csv'],
     // Deliberately left without a format, to exercise the fallback — which is
-    // now Hong Leong ConnectFirst rather than a generic CSV.
+    // now Hong Leong ConnectPro rather than a generic CSV.
     ['tenant-abkj', 'acct-abkj-mbb', '090', 'Maybank Current 3320', '332011223344', null]
   ];
   for (const [tenantId, xeroAccountId, code, name, number, formatKey] of BANKS) {

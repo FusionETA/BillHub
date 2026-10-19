@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Rebuild templates/hlb-connectfirst.xlsx from Hong Leong's own ConnectFirst
+"""Rebuild templates/hlb-connectpro.xlsx from Hong Leong's own ConnectPro
 workbook, keeping the header's formatting.
 
     python3 scripts/build-hlb-template.py ~/Downloads/CFRIST_Bulk_Empty.xls
 
-Why this exists. ConnectFirst ships as .xls, Bills Hub fills and serves .xlsx,
+Why this exists. ConnectPro ships as .xls, Bills Hub fills and serves .xlsx,
 and the first conversion carried the text across but not the lavender fill, the
 red/teal column labels, the wrapped 96pt header row or the column widths. The
 file worked and looked wrong, which is the kind of thing a person quite
@@ -29,7 +29,7 @@ import zipfile
 
 import xlrd
 
-TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'templates', 'hlb-connectfirst.xlsx')
+TEMPLATE = os.path.join(os.path.dirname(__file__), '..', 'templates', 'hlb-connectpro.xlsx')
 SHEET = 'xl/worksheets/sheet1.xml'
 STYLES = 'xl/styles.xml'
 

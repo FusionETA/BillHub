@@ -69,7 +69,7 @@ function assess(row, scheme, paysBiller = true) {
 
   // Which bank an organisation pays from, and therefore which files it
   // produces. The layout follows the paying account, so this is the only
-  // thing that decides whether a run comes out as ConnectFirst or
+  // thing that decides whether a run comes out as ConnectPro or
   // BizConverter — and an organisation can have accounts at both.
   const accounts = await db.query(
     `SELECT xero_tenant_id, name, bank_name, is_default, format_key
@@ -154,8 +154,8 @@ function assess(row, scheme, paysBiller = true) {
         const b = bankOf(a);
         const files = b === 'CIMB'
           ? 'BizConverter bulk sheet (suppliers only, no JomPay)'
-          : b === 'Hong Leong' ? 'ConnectFirst + JomPay workbooks'
-          : 'ConnectFirst + JomPay workbooks (no bank set, so the default)';
+          : b === 'Hong Leong' ? 'ConnectPro + JomPay workbooks'
+          : 'ConnectPro + JomPay workbooks (no bank set, so the default)';
         console.log('    ' + (a.is_default ? '* ' : '  ') + String(a.name).slice(0, 34).padEnd(36)
           + String(b).padEnd(14) + files);
       }

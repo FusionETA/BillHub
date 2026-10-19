@@ -40,7 +40,7 @@ const iso = (d) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10
 // is a JomPay biller code. details/code build the "Other Payment Details"
 // column — entity prefix, supplier abbreviation, then the period.
 const BILLS = [
-  // Four suppliers → ConnectFirst bulk payment file.
+  // Four suppliers → ConnectPro bulk payment file.
   { name: 'Sinaran Office Supplies Sdn Bhd', bankAccountName: 'Maybank',          account: '514027718842', code: 'SOS',  details: 'MA', email: 'accounts@sinaran.example.com', amount: 3280.00, ref: 'SOS-26-1041' },
   { name: 'Kinabalu Freight Services Sdn Bhd', bankAccountName: 'CIMB Bank Berhad', account: '8604113277',  code: 'KFS',  details: 'MA', email: 'billing@kinabalu.example.com', amount: 1875.40, ref: 'KF/2610/0088' },
   { name: 'Borneo Facility Care Sdn Bhd',    bankAccountName: 'Public Bank Berhad', account: '3192847561',  code: 'BFC',  details: 'HG', email: 'ar@bfcare.example.com',       amount:  940.00, ref: 'BFC-1026-12' },

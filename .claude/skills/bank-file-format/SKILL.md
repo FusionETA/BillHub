@@ -59,7 +59,7 @@ refused.
 Two shapes, and picking wrong wastes the rest of the work.
 
 **A form the bank uploads.** One sheet, you fill it, the user uploads it to the
-portal. Hong Leong's ConnectFirst works this way. Build a template with
+portal. Hong Leong's ConnectPro works this way. Build a template with
 `extract_template.py` and point the layout at it.
 
 **The bank's own converter.** A workbook of many sheets with a CompanyInfo page
@@ -163,7 +163,7 @@ an account at that bank produces the right file with nothing configured:
 ```js
 const LAYOUTS = {
   cimb: { transfer: 'cimb-bulk-email', biller: null },
-  hlb: { transfer: 'hlb-connectfirst', biller: 'hlb-jompay' }
+  hlb: { transfer: 'hlb-connectpro', biller: 'hlb-jompay' }
 };
 ```
 

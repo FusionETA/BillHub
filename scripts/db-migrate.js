@@ -559,13 +559,13 @@ const ADJUSTMENTS = [
     why: 'bank_accounts / payment_batches — repoint the retired layouts at Hong Leong',
     check: "SELECT COUNT(*) AS n FROM bank_accounts WHERE format_key IN ('generic-csv','maybank-m2e-csv')",
     needed: (row) => Number(row.n) > 0,
-    sql: "UPDATE bank_accounts SET format_key = 'hlb-connectfirst' WHERE format_key IN ('generic-csv','maybank-m2e-csv')"
+    sql: "UPDATE bank_accounts SET format_key = 'hlb-connectpro' WHERE format_key IN ('generic-csv','maybank-m2e-csv')"
   },
   {
     why: 'payment_batches — the same, so an old file still renders',
     check: "SELECT COUNT(*) AS n FROM payment_batches WHERE format_key IN ('generic-csv','maybank-m2e-csv')",
     needed: (row) => Number(row.n) > 0,
-    sql: "UPDATE payment_batches SET format_key = 'hlb-connectfirst' WHERE format_key IN ('generic-csv','maybank-m2e-csv')"
+    sql: "UPDATE payment_batches SET format_key = 'hlb-connectpro' WHERE format_key IN ('generic-csv','maybank-m2e-csv')"
   },
   {
     why: 'bank_formats — drop the retired built-in layouts',
@@ -671,7 +671,34 @@ const ADJUSTMENTS = [
     check: width('bills', 'reference'),
     needed: (row) => Number(row.n) < 500,
     sql: 'ALTER TABLE bills MODIFY reference VARCHAR(500)'
-  }
+  },
+  {
+    // Hong Leong renamed the product. format_key is not just a label — it is
+    // stored on every bank account that chose the layout and on every batch
+    // ever generated with it, so the rows have to move with the code or a
+    // paying account points at a layout that no longer exists.
+    //
+    // bank_formats carries UNIQUE (account_id, format_key). If the app has
+    // already booted on the new code it will have seeded a hlb-connectpro
+    // row, and renaming onto it would collide — so that freshly seeded row
+    // goes first and the original, which may carry edits, is the one kept.
+    why: "rename the Hong Leong layout from hlb-connectfirst to hlb-connectpro",
+    check: `SELECT
+              (SELECT COUNT(*) FROM bank_formats WHERE format_key = 'hlb-connectfirst')
+              + (SELECT COUNT(*) FROM payment_batches WHERE format_key = 'hlb-connectfirst')
+              + (SELECT COUNT(*) FROM bank_accounts
+                  WHERE format_key = 'hlb-connectfirst' OR biller_format_key = 'hlb-connectfirst') AS n`,
+    needed: (row) => Number(row.n) > 0,
+    sql: [
+      `DELETE n FROM bank_formats n
+         JOIN bank_formats o ON o.account_id = n.account_id AND o.format_key = 'hlb-connectfirst'
+        WHERE n.format_key = 'hlb-connectpro'`,
+      "UPDATE bank_formats SET format_key = 'hlb-connectpro' WHERE format_key = 'hlb-connectfirst'",
+      "UPDATE payment_batches SET format_key = 'hlb-connectpro' WHERE format_key = 'hlb-connectfirst'",
+      "UPDATE bank_accounts SET format_key = 'hlb-connectpro' WHERE format_key = 'hlb-connectfirst'",
+      "UPDATE bank_accounts SET biller_format_key = 'hlb-connectpro' WHERE biller_format_key = 'hlb-connectfirst'"
+    ]
+  },
 ];
 
 (async () => {
@@ -699,8 +726,13 @@ const ADJUSTMENTS = [
     const [[row]] = await conn.query(a.check);
     if (!row || !a.needed(row)) continue;
     console.log(`  altering: ${a.why}`);
-    await conn.query(a.sql);
-    console.log(`  done:     ${a.sql}`);
+    // An adjustment may be several statements — renaming a key held in four
+    // columns is one change, and splitting it into four adjustments would
+    // let a half-done rename look finished to the guard on the next run.
+    for (const statement of (Array.isArray(a.sql) ? a.sql : [a.sql])) {
+      await conn.query(statement);
+      console.log(`  done:     ${statement}`);
+    }
   }
 
   const [tables] = await conn.query('SHOW TABLES');

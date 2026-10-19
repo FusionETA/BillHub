@@ -304,7 +304,7 @@ function check(name, ok, detail) {
   // losing one silently should.
   const keys = formats.body.formats.map((f) => f.key);
   check('every built-in layout is offered',
-    ['generic-csv', 'maybank-m2e-csv', 'hlb-connectfirst', 'hlb-jompay'].every((k) => keys.includes(k)), keys);
+    ['generic-csv', 'maybank-m2e-csv', 'hlb-connectpro', 'hlb-jompay'].every((k) => keys.includes(k)), keys);
   check('only the generic one claims to be verified',
     formats.body.formats.filter((f) => f.verified).map((f) => f.key).join() === 'generic-csv',
     formats.body.formats.filter((f) => f.verified).map((f) => f.key));
@@ -744,9 +744,9 @@ function check(name, ok, detail) {
     check('the row reports both rails', 'formatKey' in before && 'billerFormatKey' in before, Object.keys(before));
 
     const set = await req('PATCH', `/api/payments/bank-accounts/${before.id}`,
-      { cookie, body: { formatKey: 'hlb-connectfirst', billerFormatKey: 'hlb-jompay' } });
+      { cookie, body: { formatKey: 'hlb-connectpro', billerFormatKey: 'hlb-jompay' } });
     check('both can be set in one call',
-      set.status === 200 && set.body.bankAccount.formatKey === 'hlb-connectfirst'
+      set.status === 200 && set.body.bankAccount.formatKey === 'hlb-connectpro'
       && set.body.bankAccount.billerFormatKey === 'hlb-jompay', set.body.bankAccount);
 
     const stored = await db.getOne('SELECT format_key, biller_format_key FROM bank_accounts WHERE id = ?', [before.id]);
@@ -827,10 +827,10 @@ function check(name, ok, detail) {
 
     check('nothing to trim still works', ref2('MA', null, null) === 'MA 1026');
 
-    // ConnectFirst's own cap is per mode and far wider on DuitNow; it must not
+    // ConnectPro's own cap is per mode and far wider on DuitNow; it must not
     // have been dragged down to 20 with it.
     const cf = require('../lib/bankFile');
-    const wide = { format_key: 'hlb-connectfirst', delimiter: ',', extension: 'csv', include_header: 0,
+    const wide = { format_key: 'hlb-connectpro', delimiter: ',', extension: 'csv', include_header: 0,
                    payment_mode: 'DUITNW',
                    columns: [{ header: 'Other Payment Details', field: 'otherDetails', transform: 'trim',
                                maxLengthByMode: { FT: 20, IBG: 20, RENTAS: 20, DUITNW: 140 } }] };
@@ -1073,7 +1073,7 @@ function check(name, ok, detail) {
     await db.execute("UPDATE bank_accounts SET bank_name = 'Hong Leong Bank' WHERE id = ?", [abm.id]);
     const hlbBank = await require('../models/bankAccounts').getById(1, abm.id);
     check('and a Hong Leong one still picks Hong Leong',
-      (await pay.formatForRail(1, hlbBank, 'transfer')).format_key === 'hlb-connectfirst');
+      (await pay.formatForRail(1, hlbBank, 'transfer')).format_key === 'hlb-connectpro');
     check('and still takes JomPay',
       (await pay.formatForRail(1, hlbBank, 'biller')).format_key === 'hlb-jompay');
   }

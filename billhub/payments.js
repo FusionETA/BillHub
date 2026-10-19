@@ -319,7 +319,7 @@ async function planBatch(accountId, { billIds, bankAccountId, paymentDate }) {
 // generic one so a batch is never blocked by an unconfigured format.
 // Which pair of layouts a paying account uses, taken from the bank it belongs
 // to. Nothing has to be configured: an account at CIMB produces BizConverter
-// sheets and one at Hong Leong produces ConnectFirst, because that is the only
+// sheets and one at Hong Leong produces ConnectPro, because that is the only
 // answer that could be right. `format_key` on the account still overrides,
 // which is what a second CIMB product or a customer-edited layout would need.
 // CIMB has no biller entry on purpose. BizConverter does have a JomPAY sheet,
@@ -336,7 +336,7 @@ const LAYOUTS = {
   // and the refusal it produced named Hong Leong as the account to use —
   // for a group whose JomPAY bills are paid from CIMB.
   cimb: { transfer: 'cimb-bulk-email', biller: 'cimb-jompay' },
-  hlb: { transfer: 'hlb-connectfirst', biller: 'hlb-jompay' }
+  hlb: { transfer: 'hlb-connectpro', biller: 'hlb-jompay' }
 };
 
 function layoutsFor(bank) {
