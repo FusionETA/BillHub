@@ -9,10 +9,11 @@
 // Six bills by default: four suppliers, two utilities. All AUTHORISED, so they
 // land straight in Awaiting payment.
 //
-// --cimb seeds suppliers only, at banks on CIMB's list. A CIMB account pays
-// suppliers and never JomPay, so utilities in that run would only produce a
-// refusal; and CIMB names 33 IBG participants against Hong Leong's 113, so a
-// supplier has to be at one of those to produce a line at all.
+// --cimb seeds for a CIMB account: suppliers at banks on CIMB's own list, plus
+// utilities on JomPay. CIMB names 33 IBG participants against Hong Leong's
+// 113, so a supplier has to be at one of those to produce a line at all — one
+// deliberately is not, so the refusal shows up in a run rather than only in a
+// unit test.
 //
 // The payee bank details are written to Bills Hub, not to Xero. Xero's API
 // accepts a Contact's BatchPayments block and then silently keeps only
@@ -58,7 +59,13 @@ const CIMB_BILLS = [
   { name: 'Suria Cold Chain Sdn Bhd',      bankAccountName: 'RHB Bank Berhad',    account: '21409500117722', code: 'SCC', details: 'BM 69', email: 'ap@suriacold.example.com',   amount: 1312.75, ref: 'SCC26/0908' },
   // One at a bank Hong Leong lists and CIMB does not, so the refusal shows up
   // in a run rather than only in a unit test.
-  { name: 'Mahkota Investment Advisory Sdn Bhd', bankAccountName: 'Alliance Investment Bank', account: '140910020099881', code: 'MIA', details: 'HQ', email: '', amount: 4400.00, ref: 'MIA-2609-02' }
+  { name: 'Mahkota Investment Advisory Sdn Bhd', bankAccountName: 'Alliance Investment Bank', account: '140910020099881', code: 'MIA', details: 'HQ', email: '', amount: 4400.00, ref: 'MIA-2609-02' },
+  // Two on JomPay. CIMB pays both rails out of the one BizConverter workbook
+  // — the transfer sheet for suppliers, "JomPAY Payment" for utilities — so a
+  // single selection has to produce two files. Kept distinct from the Hong
+  // Leong set's billers so a run of each is told apart at a glance.
+  { name: 'Syarikat Air Darul Aman Sdn Bhd', bankAccountName: '5454', account: '770351900284', code: 'SADA', details: 'MA 12', email: '', amount: 318.60, ref: 'SADA 2610' },
+  { name: 'Astro Malaysia Sdn Bhd',          bankAccountName: '4200', account: '620044881277', code: 'ASTR', details: 'HQ',    email: '', amount: 189.00, ref: 'ASTRO 2610' }
 ];
 
 (async () => {
@@ -103,16 +110,27 @@ const CIMB_BILLS = [
       }] }
     })).Contacts[0];
 
-    await xero.api(ACCOUNT, t, '/Invoices', {
-      method: 'POST',
-      body: { Invoices: [{
-        Type: 'ACCPAY',
-        Contact: { ContactID: saved.ContactID },
-        Date: iso(-12), DueDate: iso(18),
-        Reference: b.ref, Status: 'AUTHORISED', LineAmountTypes: 'NoTax',
-        LineItems: [{ Description: `${b.name} — ${b.ref}`, Quantity: 1, UnitAmount: b.amount, AccountCode: arg('--account-code') || '400' }]
-      }] }
-    });
+    // Running this twice used to put a second real invoice into Xero for every
+    // line, which is a mess to unpick by hand. The payee details below are
+    // refreshed either way, so a re-run still repairs a bank name somebody
+    // changed without also doubling the pay run.
+    const already = await db.getOne(
+      'SELECT id FROM bills WHERE account_id = ? AND xero_tenant_id = ? AND reference = ?',
+      [ACCOUNT, t, b.ref]);
+    if (already) {
+      console.log(`  ${b.name.slice(0, 36).padEnd(38)} already there, left alone`);
+    } else {
+      await xero.api(ACCOUNT, t, '/Invoices', {
+        method: 'POST',
+        body: { Invoices: [{
+          Type: 'ACCPAY',
+          Contact: { ContactID: saved.ContactID },
+          Date: iso(-12), DueDate: iso(18),
+          Reference: b.ref, Status: 'AUTHORISED', LineAmountTypes: 'NoTax',
+          LineItems: [{ Description: `${b.name} — ${b.ref}`, Quantity: 1, UnitAmount: b.amount, AccountCode: arg('--account-code') || '400' }]
+        }] }
+      });
+    }
 
     // The part Xero will not keep.
     await payees.setManual(ACCOUNT, t, saved.ContactID, {
@@ -124,14 +142,18 @@ const CIMB_BILLS = [
       ...(b.email ? { email: b.email } : {})
     });
 
-    const rail = /^\d{4,5}$/.test(b.bankAccountName) ? 'JomPay' : 'transfer';
-    console.log(`  ${b.name.slice(0, 36).padEnd(38)} ${rail.padEnd(9)} ${String(b.amount.toFixed(2)).padStart(9)}  ${b.bankAccountName}`);
+    if (!already) {
+      const rail = /^\d{4,5}$/.test(b.bankAccountName) ? 'JomPay' : 'transfer';
+      console.log(`  ${b.name.slice(0, 36).padEnd(38)} ${rail.padEnd(9)} ${String(b.amount.toFixed(2)).padStart(9)}  ${b.bankAccountName}`);
+    }
   }
 
   const transfers = set.filter((b) => !/^\d{4,5}$/.test(b.bankAccountName)).length;
+  const billers = set.length - transfers;
   console.log(set === CIMB_BILLS
-    ? `\n  ${transfers} supplier(s) for the CIMB bulk payment sheet. No utilities: CIMB does not pay JomPay.`
-    : `\n  ${transfers} bank transfer + ${set.length - transfers} JomPay = two files from one selection.`);
+    ? `\n  ${transfers} supplier(s) + ${billers} JomPay = two CIMB files from one selection.`
+      + '\n  Pay them from a CIMB account, or the Hong Leong layout is chosen instead.'
+    : `\n  ${transfers} bank transfer + ${billers} JomPay = two files from one selection.`);
 
   if (!process.argv.includes('--no-sync')) {
     console.log('\nSyncing…');
