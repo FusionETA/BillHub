@@ -5,6 +5,9 @@
 //   node scripts/demo-signum.js --tag B    another set, so a run can be
 //                                          repeated without clashing
 //   node scripts/demo-signum.js --list     show what is there already
+//   node scripts/demo-signum.js --files    hang a PDF and an image on each,
+//                                          so the recharge has something to
+//                                          carry into the other organisation
 //
 // Unlike scripts/demo-recharge.js, which seeds mock organisations straight
 // into the database, this writes REAL bills into the real Xero organisation
@@ -57,6 +60,62 @@ const BILLS = [
     reference: 'EPF-SIGNUM-1226', amount: 3480.00,
     description: 'EPF employer contribution — Signum staff (Dec 2026)' }
 ];
+
+// --files hangs a readable PDF and a small image on each bill it creates, so
+// a recharge can be watched carrying the supplier's own paperwork into the
+// other organisation — alongside the sales invoice PDF the recharge renders
+// for itself. Without them the bill has nothing to copy and only half the
+// behaviour is visible.
+const WITH_FILES = process.argv.includes('--files');
+
+// A one-page PDF, assembled by hand so the script needs no PDF library. The
+// xref offsets have to be the real byte positions or a reader rejects the
+// file, so the objects are measured as they are concatenated rather than
+// guessed at.
+function billPdf(lines) {
+  const esc = (t) => String(t).replace(/([\\()])/g, '\\$1');
+  const text = 'BT /F1 11 Tf 1.3 Tf\n'.replace('1.3 Tf', '') + lines
+    .map((l, i) => `BT /F1 ${i === 0 ? 16 : 11} Tf 60 ${790 - i * 26} Td (${esc(l)}) Tj ET`)
+    .join('\n');
+  const objects = [
+    '<</Type/Catalog/Pages 2 0 R>>',
+    '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+    '<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>',
+    '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>',
+    `<</Length ${Buffer.byteLength(text)}>>\nstream\n${text}\nendstream`
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  objects.forEach((body, i) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const startxref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+    + offsets.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('')
+    + `trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\nstartxref\n${startxref}\n%%EOF\n`;
+  return Buffer.from(pdf, 'latin1');
+}
+
+// A real, if tiny, PNG. Fixed bytes rather than generated, because a valid
+// PNG needs CRCs and the point here is only that a second file of a second
+// type makes the trip.
+const METER_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64');
+
+// Best effort, and loud about it: a demo bill without its attachment is still
+// a usable demo bill, but silently producing one would waste the run.
+async function attach(tenant, invoiceId, name, buffer, contentType) {
+  try {
+    await xero.api(ACCOUNT_ID, tenant, `/Invoices/${invoiceId}/Attachments/${encodeURIComponent(name)}`, {
+      method: 'PUT', body: buffer, headers: { 'Content-Type': contentType }
+    });
+    console.log(`    + ${name} (${buffer.length} bytes)`);
+  } catch (e) {
+    console.log(`    ! ${name} not attached: ${e.message}`);
+  }
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const plus = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -146,6 +205,24 @@ async function main() {
 
     console.log(`\n  ${reference}  ${payer.base_currency} ${spec.amount.toFixed(2)}  → ${spec.shows}`);
     console.log(`    ${inv.InvoiceNumber || inv.InvoiceID} awaiting payment in ${payer.code}`);
+
+    if (WITH_FILES) {
+      await attach(tenant, inv.InvoiceID, `${reference}.pdf`, billPdf([
+        spec.contact,
+        '',
+        `Reference      ${reference}`,
+        `Premises       Level 12, Signum Tower, Jalan Kia Peng`,
+        `               50450 Kuala Lumpur`,
+        `Billed to      ${payer.short_name}`,
+        `Period         ${today()}`,
+        '',
+        `Amount due     ${payer.base_currency} ${spec.amount.toFixed(2)}`,
+        '',
+        'Demo document. Created by scripts/demo-signum.js --files',
+        'so a recharge can be watched carrying it across.'
+      ]), 'application/pdf');
+      await attach(tenant, inv.InvoiceID, 'meter reading.png', METER_PNG, 'image/png');
+    }
   }
 
   console.log('\nSyncing them back into Bills Hub…');
