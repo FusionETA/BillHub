@@ -964,7 +964,20 @@ async function postRun(accountId, runId) {
       // 2. The mirror bill in the subsidiary, from the payer. DRAFT so the
       //    subsidiary approves it through the normal Bills flow rather than
       //    having a payable appear already authorised.
+      //
+      //    By now Xero has numbered the sales invoice above, so this bill can
+      //    name it. InvoiceNumber on an ACCPAY is "the supplier's invoice
+      //    number", and the payer is the supplier here — so the payer's own
+      //    INV-0048 is literally the right value for the field, and it is the
+      //    one the receiving entity's bookkeeper will be asked about. Without
+      //    it the two documents share only the IC- reference, which exists
+      //    for Bills Hub's benefit rather than for anyone reading Xero.
+      //
+      //    On a re-post of a half-finished run arNumber is read back from the
+      //    line, so the second attempt carries it too. Left off entirely when
+      //    Xero returned no number, rather than inventing one.
       if (!apId) {
+        const apDescription = arNumber ? `${description} · against invoice ${arNumber}` : description;
         const contactId = await findOrCreateContact(accountId, line.target_tenant_id, payer.short_name);
         const res = await xero.api(accountId, line.target_tenant_id, '/Invoices', {
           method: 'POST',
@@ -980,10 +993,11 @@ async function postRun(accountId, runId) {
               DueDate: due,
               ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
+              ...(arNumber ? { InvoiceNumber: arNumber } : {}),
               Status: 'DRAFT',
               LineAmountTypes: 'Exclusive',
               LineItems: [{
-                Description: description,
+                Description: apDescription,
                 Quantity: 1,
                 UnitAmount: Number(line.amount),
                 AccountCode: apCode,

@@ -110,7 +110,11 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
     return {
       Invoices: [{
         InvoiceID: String(invoiceSeq).padStart(8, '0') + '-0000-0000-0000-000000000000',
-        InvoiceNumber: (inv.Type === 'ACCREC' ? 'AR-IC-' : 'BILL-IC-') + (1000 + invoiceSeq),
+        // Xero numbers an ACCREC itself and echoes back the InvoiceNumber
+        // supplied on an ACCPAY, which is what carries the payer's sales
+        // invoice number onto the receiving entity's bill.
+        InvoiceNumber: inv.InvoiceNumber
+          || (inv.Type === 'ACCREC' ? 'AR-IC-' : 'BILL-IC-') + (1000 + invoiceSeq),
         Type: inv.Type, Status: inv.Status
       }]
     };
@@ -936,6 +940,25 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('both sides are stated in the original bill\'s currency',
     ar[0].body.Invoices[0].CurrencyCode === 'MYR' && ap[0].body.Invoices[0].CurrencyCode === 'MYR',
     { ar: ar[0].body.Invoices[0].CurrencyCode, ap: ap[0].body.Invoices[0].CurrencyCode });
+  // The receiving entity's bookkeeper is looking at a bill from a sister
+  // company and needs to be able to ask about "invoice AR-IC-1001". The IC-
+  // reference pairs the two for Bills Hub; the sales invoice number is what
+  // pairs them for the two people reconciling.
+  const postedLine = await db.getOne(
+    'SELECT ar_invoice_number, ap_invoice_number FROM recharge_run_lines WHERE run_id = ?', [runId]);
+  const arNumber = postedLine.ar_invoice_number;
+  check('the bill carries the payer\'s sales invoice number as the supplier invoice number',
+    ap[0].body.Invoices[0].InvoiceNumber === arNumber,
+    { sent: ap[0].body.Invoices[0].InvoiceNumber, arNumber });
+  check('and names it on the face of the bill',
+    ap[0].body.Invoices[0].LineItems[0].Description.includes(arNumber),
+    ap[0].body.Invoices[0].LineItems[0].Description);
+  check('the sales invoice itself is not given one, so Xero numbers it',
+    ar[0].body.Invoices[0].InvoiceNumber === undefined,
+    ar[0].body.Invoices[0].InvoiceNumber);
+  check('and Xero stores it back on the bill',
+    postedLine.ap_invoice_number === arNumber, postedLine);
+
   check('both sides carry the same amount and reference',
     ar[0].body.Invoices[0].LineItems[0].UnitAmount === ap[0].body.Invoices[0].LineItems[0].UnitAmount
     && ar[0].body.Invoices[0].Reference === ap[0].body.Invoices[0].Reference,
