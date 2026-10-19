@@ -86,7 +86,11 @@ async function draftSummary(accountId, tenantIds = null) {
        LEFT JOIN entities e ON e.account_id = b.account_id AND e.xero_tenant_id = b.xero_tenant_id
       WHERE ${where}
       GROUP BY b.xero_tenant_id, e.code, e.short_name
-      ORDER BY total DESC`,
+      -- By how many bills are waiting, not by how much they are worth: the
+      -- digest asks somebody to go and clear a queue, and the length of that
+      -- queue is the work. One large bill is a smaller job than twenty small
+      -- ones. Value breaks ties so the order is stable.
+      ORDER BY n DESC, total DESC`,
     params
   );
 
