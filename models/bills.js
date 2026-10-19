@@ -140,12 +140,20 @@ async function list(accountId, wazzocrAccountId, filters = {}, { limit = 100, of
   const { sql, params } = buildWhere(accountId, filters);
   const rows = await db.query(
     `SELECT b.*, ${UI_STATUS_SQL} AS ui_status,
-            e.code AS entity_code, e.short_name AS entity_short, c.tenant_name
+            e.code AS entity_code, e.short_name AS entity_short, c.tenant_name,
+            -- The supplier's bank details, so they can be checked against the
+            -- amount on the same screen rather than in Xero, where anybody can
+            -- change them between the check and the bank file.
+            p.bank_name AS payee_bank, p.bank_account_name AS payee_bank_account_name,
+            p.account_number AS payee_account, p.source AS payee_source
        FROM bills b
        LEFT JOIN entities e
          ON e.account_id = b.account_id AND e.xero_tenant_id = b.xero_tenant_id
        LEFT JOIN ${CONNECTIONS} c
          ON c.account_id = ? AND c.xero_tenant_id = b.xero_tenant_id
+       LEFT JOIN payees p
+         ON p.account_id = b.account_id AND p.xero_tenant_id = b.xero_tenant_id
+        AND p.contact_id = b.contact_id
       WHERE ${sql}
       ORDER BY ${orderBy(sort, dir)}
       LIMIT ? OFFSET ?`,

@@ -6,6 +6,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const { formatPhone } = require('../lib/wazzup');
 const rechargeModel = require('../models/recharge');
 const xeroLinks = require('../lib/xeroLinks');
+const banks = require('../lib/malaysianBanks');
 
 // 1276.4 -> "1,276.40"
 function money(n) {
@@ -41,6 +42,39 @@ const ACTION = {
   payment:  'Mark paid'
 };
 
+// The supplier's bank, resolved exactly the way lib/bankFile.js will resolve
+// it when the bank file is written — the hand-set payees.bank_name first, then
+// whatever Xero holds. Showing the stored field instead would be close to
+// useless: Xero has no "bank name" on a contact at all, so payees.bank_name is
+// blank for every supplier nobody has corrected by hand, and the bank the file
+// will actually address is the one inferred from "Bank account name".
+//
+// `ok` is the part worth reading. A name that places to no published bank code
+// is a line the bank will reject, and the whole reason to check here rather
+// than in Xero is to see that before the file is generated, not after.
+function payeeBank(b) {
+  const hand = String(b.payee_bank || '').trim();
+  const xeroText = String(b.payee_bank_account_name || '').trim();
+
+  // A JomPAY biller code is not a bank and is not a missing one: those lines
+  // go down the biller rail, where the code itself is the destination.
+  if (banks.isBillerCode(xeroText)) return { text: `JomPAY biller ${xeroText}`, ok: true, kind: 'biller' };
+
+  const raw = hand || xeroText;
+  if (!raw) return { text: '', ok: false, kind: 'missing' };
+
+  const placed = Boolean(banks.bankCode(hand) || banks.bankCode(xeroText));
+  // "33-Public Bank Berhad/ Public Finance Berhad" reads as a bank; the raw
+  // "PBB" somebody typed into Xero does not. Fall back to the raw text when
+  // it cannot be placed, because hiding it would hide what has to be fixed.
+  const label = banks.bnmLabel(hand) || banks.bnmLabel(xeroText);
+  return {
+    text: label ? label.replace(/^\d+-/, '') : raw,
+    ok: placed,
+    kind: placed ? 'bank' : 'unknown'
+  };
+}
+
 function billRow(b) {
   const status = STATUS_STYLE[b.ui_status] || STATUS_STYLE.draft;
   const due = b.due_date ? new Date(b.due_date) : null;
@@ -49,6 +83,7 @@ function billRow(b) {
   // The reference column shows Xero's Reference, falling back to the invoice
   // number — a bill entered from a photo often has one but not the other.
   const reference = b.reference || b.invoice_number || '—';
+  const bank = payeeBank(b);
 
   return {
     id: b.id,
@@ -74,6 +109,15 @@ function billRow(b) {
 
     paidFmt: money(b.amount_paid),
     outFmt: money(b.amount_due),
+
+    // Optional columns. Always sent, shown only when switched on, so turning
+    // one on is instant rather than another request.
+    bankName: bank.text,
+    bankOk: bank.ok,
+    bankKind: bank.kind,
+    bankAccount: b.payee_account || '',
+    // A value somebody corrected in Bills Hub, which a re-sync will not undo.
+    bankHeldHere: b.payee_source === 'manual',
     filesFmt: b.attachment_count > 0 ? String(b.attachment_count) : (b.has_attachments ? '1' : '—'),
 
     hasAction: Boolean(ACTION[b.ui_status]),

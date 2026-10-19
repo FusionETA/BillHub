@@ -498,18 +498,115 @@
       { key: 'reference', label: 'Reference', width: 196, sort: 'reference' },
       { key: 'date',      label: 'Date',      width: 100, sort: 'date' },
       { key: 'dueDate',   label: 'Due date',  width: 104, sort: 'dueDate' },
+      // Beside the amount on purpose: bank, account and amount are the three
+      // values that must not be wrong, and they are checked as a set.
+      { key: 'bankName',  label: 'Bank name', width: 190 },
+      { key: 'bankAcct',  label: 'Bank acc no', width: 150 },
       { key: 'paid',      label: 'Paid',      width: 96,  sort: 'paid', align: 'right' },
       { key: 'out',       label: 'Due',       width: 100, sort: 'outstanding', align: 'right' },
       { key: 'files',     label: 'Files',     width: 58,  sort: 'files', align: 'center' },
       { key: 'action',    label: '',          width: 110, min: 80 }
     ];
+    // The box each cell sits in. Defined once beside the column list so a
+    // column's width, label and alignment stay in one place; anything that
+    // depends on the row itself goes on the element inside it.
+    const CELL_BOX = {
+      sel:       {},
+      entity:    { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 },
+      contact:   { fontWeight: 700, color: 'var(--text-heading)', ...Ellip },
+      status:    { minWidth: 0, ...Ellip },
+      reference: { minWidth: 0, ...Ellip },
+      date:      { color: 'var(--text-body)', ...Ellip },
+      dueDate:   { minWidth: 0, ...Ellip },
+      bankName:  { minWidth: 0, ...Ellip },
+      bankAcct:  { minWidth: 0, fontVariantNumeric: 'tabular-nums', ...Ellip },
+      paid:      { textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' },
+      out:       { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' },
+      files:     { textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 },
+      action:    { textAlign: 'right' }
+    };
+
+    // How each column leaves as CSV. Entity is two cells because a code and a
+    // name are two things to check; Currency rides with Due because an amount
+    // without its currency is not checkable.
+    const EXPORT_CELL = {
+      entity:    { head: ['Entity', 'Entity name'], get: (r, f) => [f.esc(r.entityCode), f.esc(r.entityShort)] },
+      contact:   { head: ['From'],        get: (r, f) => [f.esc(r.contact)] },
+      status:    { head: ['Status'],      get: (r, f) => [f.esc(r.statusLabel)] },
+      reference: { head: ['Reference'],   get: (r, f) => [f.esc(r.reference)] },
+      date:      { head: ['Bill date'],   get: (r, f) => [f.esc(r.dateFmt)] },
+      dueDate:   { head: ['Due date'],    get: (r, f) => [f.esc(r.dueFmt)] },
+      // Exported as what it is, including the word that says it is not usable:
+      // a blank cell in a checking sheet reads as "nothing to check".
+      bankName:  { head: ['Bank name'],   get: (r, f) => [f.esc(
+                     r.bankKind === 'missing' ? 'NOT SET'
+                       : r.bankOk ? r.bankName : r.bankName + ' (not recognised)')] },
+      bankAcct:  { head: ['Bank acc no'], get: (r, f) => [r.bankAccount ? f.asText(r.bankAccount) : f.esc('NOT SET')] },
+      paid:      { head: ['Paid'],        get: (r, f) => [f.esc(r.paidFmt)] },
+      out:       { head: ['Due', 'Currency'], get: (r, f) => [f.esc(r.outFmt), f.esc(r.currency || '')] },
+      files:     { head: ['Files'],       get: (r, f) => [f.esc(r.filesFmt)] }
+    };
+
+    // Which columns to show, the way Xero offers it. Only the data columns are
+    // listed: the tick box and the action button are controls, and a table you
+    // can hide the Mark button from is a bug report.
+    function ColumnPicker({ hidden, onToggle, onReset }) {
+      const [open, setOpen] = useState(false);
+      const ref = useClickOutside(open, () => setOpen(false));
+      const choosable = BILL_COLUMNS.filter(c => !ALWAYS_ON.includes(c.key));
+      const offCount = hidden.length;
+      return <div ref={ref} style={{ position: 'relative' }}>
+        <Button variant="outline" size="sm" onClick={() => setOpen(o => !o)}>
+          Columns{offCount ? ' · ' + offCount + ' hidden' : ''}
+        </Button>
+        {open && <div style={{ position: 'absolute', zIndex: 70, top: 'calc(100% + 6px)', right: 0, width: 250, background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', padding: '4px 8px 8px' }}>Show columns</div>
+          {choosable.map(c => {
+            const on = !hidden.includes(c.key);
+            return <label key={c.key} className="feta-hover" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 13.5, fontWeight: 600, color: 'var(--text-body)' }}>
+              <Checkbox checked={on} onChange={() => onToggle(c.key)} />
+              <span style={{ ...Ellip }}>{c.label}</span>
+            </label>;
+          })}
+          <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 6, paddingTop: 8, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 8px 2px' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1 }}>The export follows these.</span>
+            <button onClick={onReset} style={{ border: 'none', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--text-link)', cursor: 'pointer', padding: 0 }}>Show all</button>
+          </div>
+        </div>}
+      </div>;
+    }
+
     const COLUMN_STORE = 'billhub.bills.columns';
+    const COLUMN_HIDDEN_STORE = 'billhub.bills.hiddenColumns';
+    // The checkbox and the action button are controls, not data, so they are
+    // not offered: a table you can hide the Mark button from is a bug report.
+    const ALWAYS_ON = ['sel', 'action'];
+
+    // What is stored is which columns are HIDDEN, not which are shown. Storing
+    // the shown set would mean a column added later never appears for anybody
+    // who had already saved a choice.
+    function useHiddenColumns() {
+      const [hidden, setHidden] = useState(() => {
+        try {
+          const saved = JSON.parse(localStorage.getItem(COLUMN_HIDDEN_STORE) || '[]');
+          return Array.isArray(saved) ? saved : [];
+        } catch { return []; }
+      });
+      const save = useCallback((next) => {
+        setHidden(next);
+        try { localStorage.setItem(COLUMN_HIDDEN_STORE, JSON.stringify(next)); } catch { /* not worth failing over */ }
+      }, []);
+      const toggle = (key) => save(hidden.includes(key) ? hidden.filter(k => k !== key) : hidden.concat(key));
+      return { hidden, toggle, save };
+    }
     const COLUMN_GAP = 8;       // between columns
     const ROW_PAD_X = 16;       // each side of a row
 
     // Remembered per browser. Storage can throw or come back empty in a private
     // window, so every read and write is guarded and the defaults still work.
-    function useColumnWidths() {
+    // `columns` is the visible set, so the grid template and the cells a row
+    // emits are always built from the same list.
+    function useColumnWidths(columns) {
       const [widths, setWidths] = useState(() => {
         try {
           const saved = JSON.parse(localStorage.getItem(COLUMN_STORE) || '{}');
@@ -521,9 +618,9 @@
         try { localStorage.setItem(COLUMN_STORE, JSON.stringify(next)); } catch { /* not worth failing over */ }
       }, []);
       const widthOf = (c) => Math.round(widths[c.key] || c.width);
-      const template = BILL_COLUMNS.map((c) => widthOf(c) + 'px').join(' ');
-      const totalWidth = BILL_COLUMNS.reduce((n, c) => n + widthOf(c), 0)
-        + COLUMN_GAP * (BILL_COLUMNS.length - 1)
+      const template = columns.map((c) => widthOf(c) + 'px').join(' ');
+      const totalWidth = columns.reduce((n, c) => n + widthOf(c), 0)
+        + COLUMN_GAP * (columns.length - 1)
         + ROW_PAD_X * 2;
       return { widths, save, widthOf, template, totalWidth };
     }
@@ -972,7 +1069,49 @@
       const [pageSize, setPageSize] = useState(100);
       const [sort, setSort] = useState('date');
       const [dir, setDir] = useState('desc');
-      const cols = useColumnWidths();
+      const hiddenCols = useHiddenColumns();
+      const visibleColumns = BILL_COLUMNS.filter(c => !hiddenCols.hidden.includes(c.key));
+      const cols = useColumnWidths(visibleColumns);
+
+      // What goes inside a cell. Keyed by column so the row emits exactly the
+      // columns the header and the grid template were built from — a row that
+      // emits its cells in a fixed order silently shifts every value one
+      // column left the moment anything is hidden.
+      function renderCell(key, r) {
+        switch (key) {
+          case 'sel': return <Checkbox checked={selected.includes(r.id)} onChange={() => toggleRow(r.id)} />;
+          case 'entity': return <React.Fragment><Code>{r.entityCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.entityShort}</span></React.Fragment>;
+          case 'contact': return r.contact;
+          case 'status': return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span>;
+          case 'reference': return <React.Fragment><span style={{ color: 'var(--text-body)' }}>{r.reference}</span><span style={{ color: 'var(--text-subtle)' }}>{r.refNote}</span></React.Fragment>;
+          case 'date': return r.dateFmt;
+          case 'dueDate': return <span style={{ color: r.dueColor, fontWeight: r.dueWeight }}>{r.dueFmt}</span>;
+          // The bank a payment would actually be addressed to, resolved the
+          // way the bank file resolves it. A name that places to no published
+          // bank code is shown in red rather than hidden, because that is a
+          // line the bank will reject and this column exists to catch it
+          // before the file is written.
+          case 'bankName': return r.bankKind === 'missing'
+            ? <span style={{ color: 'var(--text-subtle)' }} title="No bank details held for this supplier.">—</span>
+            : <span style={{ color: r.bankOk ? 'var(--text-body)' : 'var(--color-danger)' }}
+                title={r.bankOk
+                  ? (r.bankHeldHere ? 'Corrected in Bills Hub — a Xero re-sync will not overwrite it.' : 'From Xero.')
+                  : '"' + r.bankName + '" is not a bank Bills Hub can place, so a bank file would have no beneficiary bank code for it.'}>{r.bankName}</span>;
+          case 'bankAcct': return r.bankAccount
+            ? <span style={{ color: 'var(--text-body)' }} title={r.bankHeldHere ? 'Corrected in Bills Hub — a Xero re-sync will not overwrite it.' : 'From Xero.'}>{r.bankAccount}</span>
+            : <span style={{ color: 'var(--color-danger)' }} title="No account number, so this bill cannot go into a bank file.">—</span>;
+          case 'paid': return r.paidFmt;
+          case 'out': return r.outFmt;
+          case 'files': return r.filesFmt;
+          case 'action': return <React.Fragment>
+            {r.hasAction && <button className="feta-hover" disabled={busy}
+              onClick={() => (r.uiStatus === 'payment' ? setPayFor([r]) : runAction(r.uiStatus === 'draft' ? 'submit' : 'approve', [r.id]))}
+              style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: busy ? 'default' : 'pointer', opacity: busy ? .5 : 1 }}>{r.actionLabel}</button>}
+            {r.isPaid && <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{r.paidNote}</span>}
+          </React.Fragment>;
+          default: return null;
+        }
+      }
 
       // Ascending means nothing to a reader. Say what the order actually is,
       // in the vocabulary of the column: dates are old/new, money is small/large.
@@ -1151,13 +1290,22 @@
         return () => { stopped = true; if (timer) clearTimeout(timer); };
       }, []);
 
-      // Exports exactly what is on screen — the current filters, not the whole table.
+      // Exports exactly what is on screen — the current filters AND the current
+      // columns, because the export exists to be checked against the screen.
       function exportCsv() {
-        const head = ['Entity', 'Entity name', 'From', 'Status', 'Reference', 'Bill date', 'Due date', 'Paid', 'Due', 'Currency', 'Files'];
         const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-        const lines = [head.map(esc).join(',')].concat(rows.map(r =>
-          [r.entityCode, r.entityShort, r.contact, r.statusLabel, r.reference, r.dateFmt, r.dueFmt, r.paidFmt, r.outFmt, r.currency || '', r.filesFmt].map(esc).join(',')
-        ));
+        // Excel reads a bare 14-digit account number as a number and shows it
+        // as 1.23457E+13, dropping leading zeros on the way. The one column
+        // this export exists to verify is the one a spreadsheet is most likely
+        // to corrupt, so it goes out as text. Guarded to plain characters so
+        // this can never emit a formula.
+        const asText = (v) => {
+          const t = String(v == null ? '' : v).trim();
+          return t && /^[0-9A-Za-z-]+$/.test(t) ? '="' + t + '"' : esc(t);
+        };
+        const lines = [visibleColumns.filter(c => EXPORT_CELL[c.key]).flatMap(c => EXPORT_CELL[c.key].head).map(esc).join(',')]
+          .concat(rows.map(r => visibleColumns.filter(c => EXPORT_CELL[c.key])
+            .flatMap(c => EXPORT_CELL[c.key].get(r, { esc, asText })).join(',')));
         const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1187,6 +1335,7 @@
           <Button variant="outline" size="sm" onClick={() => runSync(false)} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>
             {syncing ? 'Syncing…' : 'Sync Xero'}
           </Button>
+          <ColumnPicker hidden={hiddenCols.hidden} onToggle={hiddenCols.toggle} onReset={() => hiddenCols.save([])} />
           <Button variant="outline" size="sm" onClick={exportCsv} style={rows.length ? null : { opacity: .5, pointerEvents: 'none' }}>Export</Button>
         </div>
 
@@ -1282,7 +1431,7 @@
                   : <Button variant="primary" size="md" onClick={() => runSync(true)} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>{syncing ? 'Syncing…' : 'Sync from Xero'}</Button>} />
             : <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, overflowX: 'auto', overflowY: 'hidden', opacity: loading ? .55 : 1, transition: 'opacity var(--dur-fast)' }}>
           <div style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: COLUMN_GAP, padding: `11px ${ROW_PAD_X}px`, background: 'var(--neutral-50)', borderBottom: '1px solid var(--border-subtle)', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-            {BILL_COLUMNS.map(c => c.key === 'sel'
+            {visibleColumns.map(c => c.key === 'sel'
               ? <div key="sel"><Checkbox checked={allSelected} onChange={() => setSelected(allSelected ? [] : rows.map(r => r.id))} /></div>
               : <HeaderCell key={c.key} col={c} width={cols.widthOf(c)} sort={sort} dir={dir}
                   onSort={applySort}
@@ -1291,22 +1440,7 @@
           </div>
           {rows.map(r => (
             <div key={r.id} className="feta-hover" style={{ minWidth: cols.totalWidth, display: 'grid', gridTemplateColumns: cols.template, alignItems: 'center', gap: COLUMN_GAP, padding: `13px ${ROW_PAD_X}px`, borderBottom: '1px solid var(--neutral-100)', fontSize: 13, background: selected.includes(r.id) ? 'var(--orange-50)' : 'var(--surface-card)' }}>
-              <div><Checkbox checked={selected.includes(r.id)} onChange={() => toggleRow(r.id)} /></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}><Code>{r.entityCode}</Code><span style={{ color: 'var(--text-body)', ...Ellip }}>{r.entityShort}</span></div>
-              <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }}>{r.contact}</div>
-              <div style={{ minWidth: 0, ...Ellip }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: r.statusBg, color: r.statusFg }}>{r.statusLabel}</span></div>
-              <div style={{ minWidth: 0, ...Ellip }}><span style={{ color: 'var(--text-body)' }}>{r.reference}</span><span style={{ color: 'var(--text-subtle)' }}>{r.refNote}</span></div>
-              <div style={{ color: 'var(--text-body)', ...Ellip }}>{r.dateFmt}</div>
-              <div style={{ color: r.dueColor, fontWeight: r.dueWeight, ...Ellip }}>{r.dueFmt}</div>
-              <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>{r.paidFmt}</div>
-              <div style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' }}>{r.outFmt}</div>
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>{r.filesFmt}</div>
-              <div style={{ textAlign: 'right' }}>
-                {r.hasAction && <button className="feta-hover" disabled={busy}
-                  onClick={() => (r.uiStatus === 'payment' ? setPayFor([r]) : runAction(r.uiStatus === 'draft' ? 'submit' : 'approve', [r.id]))}
-                  style={{ border: '1.5px solid var(--border-default)', background: 'var(--surface-card)', borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: 'var(--color-secondary)', cursor: busy ? 'default' : 'pointer', opacity: busy ? .5 : 1 }}>{r.actionLabel}</button>}
-                {r.isPaid && <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{r.paidNote}</span>}
-              </div>
+              {visibleColumns.map(c => <div key={c.key} style={CELL_BOX[c.key]}>{renderCell(c.key, r)}</div>)}
             </div>
           ))}
           {data && data.page && <Pager
