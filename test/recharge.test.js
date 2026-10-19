@@ -28,6 +28,7 @@ let contactAddresses = {};// contactId -> [{ AddressType, AddressLine1, ... }]
 let accountsFail = null;  // an Error thrown by GET /Accounts
 let attachments = {};     // xeroInvoiceId -> [{ FileName, MimeType, ContentLength }]
 let attachmentsFail = null;// an Error thrown by the Attachments endpoints
+let pdfFail = null;        // an Error thrown when the sales invoice PDF is fetched
 const uploaded = [];      // { tenantId, invoiceId, name, contentType, bytes }
 
 // Contacts Xero holds for an organisation, which is not the same set as the
@@ -82,6 +83,14 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
   // written it onto the bill yet.
   const one = path.match(/^\/Invoices\/([^?]+)$/);
   if (one && (opts.method || 'GET') === 'GET') {
+    // Xero renders a PDF off the same path when asked for one. That is how
+    // the payer's sales invoice reaches the receiving entity's bill, and it
+    // works on a draft — the documented draft restriction is on the online
+    // invoice url, not on the PDF.
+    if (opts.raw && /pdf/i.test((opts.headers || {}).Accept || '')) {
+      if (pdfFail) throw pdfFail;
+      return { buffer: Buffer.from('%PDF-1.4 pretend sales invoice ' + one[1]), contentType: 'application/pdf' };
+    }
     return { Invoices: [{ InvoiceID: one[1], LineItems: lineItems[one[1]] || [] }] };
   }
   if (path === '/TrackingCategories') return { TrackingCategories: [] };
@@ -1406,8 +1415,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     cookie, body: { billId: withFiles, post: true }
   });
   check('the recharge posts', attRun.status === 201 && attRun.body.posted, attRun.body);
-  check('both files reach both documents',
-    uploaded.length === 4, uploaded.map((u) => `${u.name}->${u.invoiceId}`));
+  // Two source files onto two documents, plus the sales invoice PDF onto the
+  // bill: the receiving entity gets the supplier's bill AND the document the
+  // sister company is charging it with.
+  check('both files reach both documents, and the sales invoice joins the bill',
+    uploaded.length === 5, uploaded.map((u) => `${u.name}->${u.invoiceId}`));
   check('and each lands in a different organisation',
     new Set(uploaded.map((u) => u.tenantId)).size === 2,
     uploaded.map((u) => u.tenantId));
@@ -1416,8 +1428,25 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     uploaded.map((u) => `${u.name} ${u.contentType}`));
   check('with the bytes, not an empty file',
     uploaded.every((u) => u.bytes > 0), uploaded.map((u) => u.bytes));
+
+  // The sales invoice goes one way only. It belongs on the bill, which is
+  // the document somebody in the receiving entity has to approve; putting it
+  // back on the invoice it was rendered from would say nothing.
+  const salesPdf = uploaded.filter((u) => /^Sales invoice .+\.pdf$/.test(u.name));
+  const apLine = await db.getOne(
+    'SELECT ar_invoice_number, ap_invoice_id FROM recharge_run_lines WHERE run_id = ?', [attRun.body.id]);
+  check('the payer\'s sales invoice is attached, once',
+    salesPdf.length === 1, salesPdf.map((u) => u.name));
+  check('named for the invoice it is',
+    salesPdf[0].name === `Sales invoice ${apLine.ar_invoice_number}.pdf`,
+    { got: salesPdf[0].name, arNumber: apLine.ar_invoice_number });
+  check('onto the bill in the receiving entity, as a PDF',
+    salesPdf[0].invoiceId === apLine.ap_invoice_id
+    && salesPdf[0].tenantId === kj.tenantId
+    && salesPdf[0].contentType === 'application/pdf', salesPdf[0]);
+
   check('and the run says how many it carried',
-    attRun.body.posted.attachments.copied === 4
+    attRun.body.posted.attachments.copied === 5
     && attRun.body.posted.attachments.available === 2, attRun.body.posted.attachments);
 
   // Something too big to be worth moving is named rather than silently left.
@@ -1435,11 +1464,17 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     cookie, body: { billId: bigBill, post: true }
   });
   check('an oversized attachment is skipped, and said so',
-    bigRun.body.posted.attachments.copied === 0
-    && bigRun.body.posted.attachments.skipped.some((x) => /whole-cabinet\.pdf.*larger/.test(x)),
+    bigRun.body.posted.attachments.skipped.some((x) => /whole-cabinet\.pdf.*larger/.test(x)),
     bigRun.body.posted.attachments);
+  // The sales invoice is rendered by Xero rather than carried from the
+  // source, so a source file too big to move does not hold it back.
+  check('and the sales invoice still reaches the bill',
+    bigRun.body.posted.attachments.copied === 1, bigRun.body.posted.attachments);
   check('and the recharge itself still posted',
-    bigRun.body.posted.failed === 0 && uploaded.length === 0, bigRun.body.posted);
+    bigRun.body.posted.failed === 0, bigRun.body.posted);
+  check('with nothing carried from the source, only the sales invoice',
+    uploaded.length === 1 && /^Sales invoice /.test(uploaded[0].name),
+    uploaded.map((u) => u.name));
 
   // The grant predates the attachments scope. Xero answers 403 and the
   // recharge has to carry on: the documents are the point, the PDF is not.
@@ -1459,6 +1494,22 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and the missing scope is reported rather than swallowed',
     scopeRun.body.posted.attachments.skipped.some((x) => /accounting\.attachments/.test(x)),
     scopeRun.body.posted.attachments);
+
+  // Same rule for the sales invoice PDF. Both documents are in Xero by the
+  // time it is fetched, so failing the run over it would undo nothing and
+  // leave a posted recharge looking broken.
+  const noPdf = await makeBill(abm.tenantId, {
+    ref: 'TNB-NOPDF-0826', supplier: BOTH_SUPPLIER, total: 61.00
+  });
+  await paidNow(noPdf);
+  pdfFail = Object.assign(new Error('Xero could not render this invoice.'), { statusCode: 500 });
+  const pdfRun = await req('POST', '/api/recharge/runs', { cookie, body: { billId: noPdf, post: true } });
+  pdfFail = null;
+  check('a sales invoice Xero will not render does not fail the recharge',
+    pdfRun.body.posted.failed === 0 && pdfRun.body.posted.posted === 1, pdfRun.body.posted);
+  check('and is reported rather than swallowed',
+    pdfRun.body.posted.attachments.skipped.some((x) => /Sales invoice .*could not render/.test(x)),
+    pdfRun.body.posted.attachments);
 
   console.log('\nPaying a bill recharges it, with nobody clicking anything');
   // The button is the same answer every time once the rules are right, so

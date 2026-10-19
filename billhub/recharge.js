@@ -801,6 +801,52 @@ async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
   return { tenantId, copied, skipped };
 }
 
+// The payer's own sales invoice, rendered by Xero as a PDF and hung on the
+// bill it produced.
+//
+// The original supplier bill travels across too (copyAttachments above), but
+// that is the TNB bill — it says what the group was charged, not what this
+// sister company is charging this one. The document the receiving entity is
+// actually being asked to approve is the sales invoice, and until now it was
+// only visible by opening the other organisation.
+//
+// Xero renders the PDF from GET /Invoices/{id} with Accept: application/pdf.
+// The documented DRAFT restriction is on the online invoice URL, not on the
+// PDF, so this works while both documents are still drafts — which is the
+// only moment that matters here, because the bill is created as one.
+//
+// Best effort, always. A recharge that put both documents into Xero has done
+// its job; failing it over an attachment would leave a half-finished run
+// behind and make the next attempt harder than the thing it was protecting.
+async function salesInvoicePdf(accountId, { payerTenantId, arInvoiceId, arNumber, tenantId, invoiceId }) {
+  if (!arInvoiceId) return { tenantId, copied: 0, skipped: [] };
+  // Named for what it is, because it lands beside the supplier bill and the
+  // two are not interchangeable. Slashes would break the attachment path.
+  const name = `Sales invoice ${arNumber || arInvoiceId}.pdf`.replace(/[\\/]/g, '-');
+  try {
+    const got = await xero.api(accountId, payerTenantId, `/Invoices/${arInvoiceId}`, {
+      raw: true,
+      // Last spread wins in lib/xero.js, so this overrides the raw default.
+      headers: { Accept: 'application/pdf' }
+    });
+    // A zero-byte or JSON body is Xero declining in a way that did not throw.
+    // Attaching it would put a broken file on the bill, which is worse than
+    // saying it could not be fetched.
+    if (!got.buffer || !got.buffer.length) throw new Error('Xero returned an empty PDF.');
+    if (!/pdf/i.test(got.contentType || '')) throw new Error(`Xero returned ${got.contentType} rather than a PDF.`);
+    await xero.api(accountId, tenantId, `/Invoices/${invoiceId}/Attachments/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: got.buffer,
+      headers: { 'Content-Type': 'application/pdf' },
+      // Part of the draft it hangs on, so it follows the same rule.
+      draftDocument: true
+    });
+    return { tenantId, copied: 1, skipped: [] };
+  } catch (e) {
+    return { tenantId, copied: 0, skipped: [`${name}: ${e.message}`] };
+  }
+}
+
 // A Xero tenant id in a message, swapped for the organisation it belongs to.
 // Used where a failure is recorded: the allowlist and a few Xero errors name
 // the organisation by GUID, and nobody reading the Recharge tab knows which
@@ -1012,6 +1058,12 @@ async function postRun(accountId, runId) {
         apNumber = inv.InvoiceNumber || null;
         await model.setLinePosted(line.id, { apInvoiceId: apId, apInvoiceNumber: apNumber });
         copied.push(await copyAttachments(accountId, source, {
+          tenantId: line.target_tenant_id, invoiceId: apId
+        }));
+        // And the sales invoice itself, so the receiving entity can read the
+        // document it is being charged by rather than only the one behind it.
+        copied.push(await salesInvoicePdf(accountId, {
+          payerTenantId: run.payer_tenant_id, arInvoiceId: arId, arNumber,
           tenantId: line.target_tenant_id, invoiceId: apId
         }));
       }
