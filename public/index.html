@@ -1017,10 +1017,17 @@
         </span>
         <span style={{ flex: 1 }} />
 
-        <select value={String(pageSize)} onChange={e => onPageSize(Number(e.target.value))}
-          style={{ height: 34, border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '0 8px', fontFamily: 'var(--font-body)', fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', cursor: 'pointer' }}>
-          {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n} per page</option>)}
-        </select>
+        {/* Drawn the same way as Select above, rather than left native: the
+            browser's own arrow sits hard against the border and cannot be
+            moved with padding, so this one looked cramped beside every other
+            control on the page. */}
+        <div style={{ position: 'relative', display: 'inline-flex' }}>
+          <select value={String(pageSize)} onChange={e => onPageSize(Number(e.target.value))}
+            style={{ height: 34, border: '1.5px solid var(--border-default)', borderRadius: 8, padding: '0 30px 0 10px', fontFamily: 'var(--font-body)', fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)', background: 'var(--surface-card)', appearance: 'none', cursor: 'pointer', outline: 'none' }}>
+            {[25, 50, 100, 200, 500].map(n => <option key={n} value={n}>{n} per page</option>)}
+          </select>
+          <span style={{ position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 10, pointerEvents: 'none' }}>▾</span>
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <button onClick={() => go(page - 1)} disabled={page === 1} style={btn(false, page === 1)}>‹</button>
