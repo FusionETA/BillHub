@@ -980,8 +980,13 @@ async function postRun(accountId, runId) {
     // The supplier and the original reference are the reason this document
     // exists, so they go on the face of it. Whoever opens the invoice in six
     // months should not have to come back here to find out what it was for.
+    //
+    // The payer is named as Xero names it, matching the contact the document
+    // is addressed to. Naming it two ways on one document — "Ayu Borneo (MA)
+    // Sdn Bhd" in the From field and "Ayu Borneo (MA)" one line below — reads
+    // as two companies to anybody who does not already know they are one.
     const description = `Recharge: ${run.supplier_name || 'supplier bill'}`
-      + `${run.bill_reference ? ` (${run.bill_reference})` : ''} paid by ${payer.short_name}`
+      + `${run.bill_reference ? ` (${run.bill_reference})` : ''} paid by ${entityContactName(payer)}`
       + `${run.premises_address ? ` — ${run.premises_address}` : ''}`;
 
     try {

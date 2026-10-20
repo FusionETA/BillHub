@@ -990,6 +990,11 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and the sales invoice is addressed to the receiving one',
     madeContacts.includes('Ayu Borneo (KJ) Sdn Bhd'), madeContacts);
 
+  check('and the line on both documents names the payer the same way',
+    [ar[0], ap[0]].every((c) =>
+      /paid by Ayu Borneo Management Sdn Bhd/.test(c.body.Invoices[0].LineItems[0].Description)),
+    [ar[0], ap[0]].map((c) => c.body.Invoices[0].LineItems[0].Description));
+
   check('both sides carry the same amount and reference',
     ar[0].body.Invoices[0].LineItems[0].UnitAmount === ap[0].body.Invoices[0].LineItems[0].UnitAmount
     && ar[0].body.Invoices[0].Reference === ap[0].body.Invoices[0].Reference,
