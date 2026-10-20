@@ -54,13 +54,39 @@ function err(message, statusCode = 400) {
 // pair is looked up once per line, and these never change mid-run.
 const _contactCache = new Map();   // `${tenantId}|${name}` -> ContactID
 
-async function findOrCreateContact(accountId, tenantId, name) {
+// What one organisation is called inside another's ledger. tenant_name is the
+// organisation's own name as Xero holds it — the legal name on its documents.
+// short_name is a label somebody typed into Bills Hub to keep its own lists
+// readable, and it is routinely shortened: "Ayu Borneo (MA)" for an
+// organisation Xero calls "Ayu Borneo (MA) Sdn Bhd".
+function entityContactName(entity) {
+  const e = entity || {};
+  return String(e.tenant_name || e.short_name || e.code || '').trim();
+}
+
+async function findOrCreateContact(accountId, tenantId, name, aliases = []) {
   const key = `${tenantId}|${name}`;
   if (_contactCache.has(key)) return _contactCache.get(key);
 
-  const where = encodeURIComponent(`Name=="${String(name).replace(/"/g, '')}"`);
-  const found = await xero.api(accountId, tenantId, `/Contacts?where=${where}`);
-  let id = found?.Contacts?.[0]?.ContactID || null;
+  const lookup = async (n) => {
+    const where = encodeURIComponent(`Name=="${String(n).replace(/"/g, '')}"`);
+    const found = await xero.api(accountId, tenantId, `/Contacts?where=${where}`);
+    return found?.Contacts?.[0]?.ContactID || null;
+  };
+
+  let id = await lookup(name);
+
+  // Earlier recharges named this contact after the entity's Bills Hub short
+  // name rather than the organisation's own name in Xero. Reuse that contact
+  // where it exists rather than creating a second one beside it: a duplicate
+  // would split the intercompany history in two, and a bookkeeper would have
+  // to merge them by hand. It keeps the old name — renaming somebody's
+  // contact is their decision, not a side effect of posting a recharge.
+  for (const alias of aliases) {
+    if (id) break;
+    if (!alias || alias === name) continue;
+    id = await lookup(alias);
+  }
 
   if (!id) {
     const created = await xero.api(accountId, tenantId, '/Contacts', {
@@ -970,7 +996,12 @@ async function postRun(accountId, runId) {
       //    a receivable that has to be credited to undo rather than simply
       //    deleted.
       if (!arId) {
-        const contactId = await findOrCreateContact(accountId, run.payer_tenant_id, target.short_name);
+        // The organisation's own name in Xero, not the short label Bills Hub
+        // shows in its own lists. This name goes on a document somebody reads
+        // outside Bills Hub, where "Ayu Borneo (MA)" is not who the invoice is
+        // addressed to — "Ayu Borneo (MA) Sdn Bhd" is.
+        const contactId = await findOrCreateContact(accountId, run.payer_tenant_id,
+          entityContactName(target), [target.short_name, target.code]);
         const res = await xero.api(accountId, run.payer_tenant_id, '/Invoices', {
           method: 'POST',
           // A DRAFT in a live organisation is what testing mode is for:
@@ -1024,7 +1055,8 @@ async function postRun(accountId, runId) {
       //    Xero returned no number, rather than inventing one.
       if (!apId) {
         const apDescription = arNumber ? `${description} · against invoice ${arNumber}` : description;
-        const contactId = await findOrCreateContact(accountId, line.target_tenant_id, payer.short_name);
+        const contactId = await findOrCreateContact(accountId, line.target_tenant_id,
+          entityContactName(payer), [payer.short_name, payer.code]);
         const res = await xero.api(accountId, line.target_tenant_id, '/Invoices', {
           method: 'POST',
           // A DRAFT in a live organisation is what testing mode is for:

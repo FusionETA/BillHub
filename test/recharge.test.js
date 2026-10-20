@@ -35,6 +35,8 @@ const uploaded = [];      // { tenantId, invoiceId, name, contentType, bytes }
 // contacts that have billed it — a register row usually names one created
 // for the purpose, with nothing against it yet.
 const xeroContacts = {};
+// tenantId -> { 'Contact Name': contactId }, for the exact-name lookup above.
+const namedContacts = {};
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
@@ -52,6 +54,14 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
     // create path runs.
     const page = /[?&]page=(\d+)/.exec(path);
     if (page) return { Contacts: Number(page[1]) === 1 ? (xeroContacts[opts.tenantIdForTest] || []) : [] };
+    // A lookup by exact name, which is how a recharge finds the organisation
+    // on the other side. Empty unless a test has put one there, so the create
+    // path still runs by default.
+    const byName = /Name=="([^"]+)"/.exec(decodeURIComponent(path));
+    if (byName) {
+      const id = (namedContacts[opts.tenantIdForTest] || {})[byName[1]];
+      return { Contacts: id ? [{ ContactID: id, Name: byName[1] }] : [] };
+    }
     return { Contacts: [] };
   }
   if (path === '/Contacts' && opts.method === 'POST') {
@@ -968,6 +978,18 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and Xero stores it back on the bill',
     postedLine.ap_invoice_number === arNumber, postedLine);
 
+  // The contact is what somebody outside Bills Hub reads on the document.
+  // "Ayu Borneo (KJ)" is a label for Bills Hub's own lists; the organisation
+  // Xero knows, and the one the bill is really from, is "… Sdn Bhd".
+  const madeContacts = calls.filter((c) => c.path === '/Contacts' && c.method === 'POST')
+    .map((c) => c.body.Contacts[0].Name);
+  check('the counterparty is named as Xero names the organisation, not by its short label',
+    madeContacts.length > 0 && madeContacts.every((n) => /Sdn Bhd$/.test(n)), madeContacts);
+  check('the bill is from the paying organisation under that name',
+    madeContacts.includes('Ayu Borneo Management Sdn Bhd'), madeContacts);
+  check('and the sales invoice is addressed to the receiving one',
+    madeContacts.includes('Ayu Borneo (KJ) Sdn Bhd'), madeContacts);
+
   check('both sides carry the same amount and reference',
     ar[0].body.Invoices[0].LineItems[0].UnitAmount === ap[0].body.Invoices[0].LineItems[0].UnitAmount
     && ar[0].body.Invoices[0].Reference === ap[0].body.Invoices[0].Reference,
@@ -1448,6 +1470,35 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   check('and the run says how many it carried',
     attRun.body.posted.attachments.copied === 5
     && attRun.body.posted.attachments.available === 2, attRun.body.posted.attachments);
+
+  // Recharges posted before the contact was named properly left a contact
+  // called "Ayu Borneo Management" in the receiving organisation. Creating a
+  // second one beside it under the full name would split the intercompany
+  // history in two and leave somebody merging them by hand.
+  const legacyBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-LEGACYCONTACT-0826', supplier: BOTH_SUPPLIER, total: 55.00
+  });
+  await paidNow(legacyBill);
+  namedContacts[kj.tenantId] = { 'Ayu Borneo Management': 'legacy-contact-abm' };
+  // The counterparty is cached per process once resolved, so an earlier run in
+  // this same test would answer before any lookup happened.
+  require('../billhub/recharge')._contactCache.clear();
+  calls.length = 0;
+  const legacyRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: legacyBill, post: true }
+  });
+  delete namedContacts[kj.tenantId];
+  const legacyMade = calls.filter((c) => c.path === '/Contacts' && c.method === 'POST')
+    .map((c) => c.body.Contacts[0].Name);
+  const legacyAp = calls.find((c) => c.path === '/Invoices' && c.method === 'POST'
+    && c.body.Invoices[0].Type === 'ACCPAY');
+  check('an existing contact under the old short name is reused',
+    legacyAp.body.Invoices[0].Contact.ContactID === 'legacy-contact-abm',
+    legacyAp.body.Invoices[0].Contact);
+  check('rather than a second one created beside it',
+    !legacyMade.includes('Ayu Borneo Management Sdn Bhd'), legacyMade);
+  check('and the recharge still posts',
+    legacyRun.body.posted && legacyRun.body.posted.failed === 0, legacyRun.body.posted);
 
   // Something too big to be worth moving is named rather than silently left.
   const bigBill = await makeBill(abm.tenantId, {
