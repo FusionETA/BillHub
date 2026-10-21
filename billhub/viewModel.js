@@ -116,6 +116,9 @@ function billRow(b) {
     bankOk: bank.ok,
     bankKind: bank.kind,
     bankAccount: b.payee_account || '',
+    // CIMB's with-advice sheet marks Beneficiary Email Address required, so a
+    // payee without one is a line that bank refuses. Hong Leong's is optional.
+    supplierEmail: b.payee_email || '',
     // A value somebody corrected in Bills Hub, which a re-sync will not undo.
     bankHeldHere: b.payee_source === 'manual',
     filesFmt: b.attachment_count > 0 ? String(b.attachment_count) : (b.has_attachments ? '1' : '—'),

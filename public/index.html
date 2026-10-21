@@ -502,6 +502,7 @@
       // values that must not be wrong, and they are checked as a set.
       { key: 'bankName',  label: 'Bank name', width: 190 },
       { key: 'bankAcct',  label: 'Bank acc no', width: 150 },
+      { key: 'email',     label: 'Supplier email', width: 210 },
       { key: 'paid',      label: 'Paid',      width: 96,  sort: 'paid', align: 'right' },
       { key: 'out',       label: 'Due',       width: 100, sort: 'outstanding', align: 'right' },
       { key: 'files',     label: 'Files',     width: 58,  sort: 'files', align: 'center' },
@@ -520,6 +521,7 @@
       dueDate:   { minWidth: 0, ...Ellip },
       bankName:  { minWidth: 0, ...Ellip },
       bankAcct:  { minWidth: 0, fontVariantNumeric: 'tabular-nums', ...Ellip },
+      email:     { minWidth: 0, ...Ellip },
       paid:      { textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' },
       out:       { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--text-heading)' },
       files:     { textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 },
@@ -542,6 +544,7 @@
                      r.bankKind === 'missing' ? 'NOT SET'
                        : r.bankOk ? r.bankName : r.bankName + ' (not recognised)')] },
       bankAcct:  { head: ['Bank acc no'], get: (r, f) => [r.bankAccount ? f.asText(r.bankAccount) : f.esc('NOT SET')] },
+      email:     { head: ['Supplier email'], get: (r, f) => [f.esc(r.supplierEmail || 'NOT SET')] },
       paid:      { head: ['Paid'],        get: (r, f) => [f.esc(r.paidFmt)] },
       out:       { head: ['Due', 'Currency'], get: (r, f) => [f.esc(r.outFmt), f.esc(r.currency || '')] },
       files:     { head: ['Files'],       get: (r, f) => [f.esc(r.filesFmt)] }
@@ -1107,6 +1110,13 @@
           case 'bankAcct': return r.bankAccount
             ? <span style={{ color: 'var(--text-body)' }} title={r.bankHeldHere ? 'Corrected in Bills Hub — a Xero re-sync will not overwrite it.' : 'From Xero.'}>{r.bankAccount}</span>
             : <span style={{ color: 'var(--color-danger)' }} title="No account number, so this bill cannot go into a bank file.">—</span>;
+          // Not red when missing: unlike an account number it is only fatal
+          // for the one layout that mails an advice, so colouring it as an
+          // error everywhere would cry wolf on the bills it does not affect.
+          case 'email': return r.supplierEmail
+            ? <span style={{ color: 'var(--text-body)' }} title={r.supplierEmail}>{r.supplierEmail}</span>
+            : <span style={{ color: 'var(--text-subtle)' }}
+                title="No email held. CIMB's bulk payment with email advice requires one and would reject this line; Hong Leong's file does not.">—</span>;
           case 'paid': return r.paidFmt;
           case 'out': return r.outFmt;
           case 'files': return r.filesFmt;

@@ -145,7 +145,8 @@ async function list(accountId, wazzocrAccountId, filters = {}, { limit = 100, of
             -- amount on the same screen rather than in Xero, where anybody can
             -- change them between the check and the bank file.
             p.bank_name AS payee_bank, p.bank_account_name AS payee_bank_account_name,
-            p.account_number AS payee_account, p.source AS payee_source
+            p.account_number AS payee_account, p.source AS payee_source,
+            p.email AS payee_email
        FROM bills b
        LEFT JOIN entities e
          ON e.account_id = b.account_id AND e.xero_tenant_id = b.xero_tenant_id
