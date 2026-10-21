@@ -699,6 +699,26 @@ const ADJUSTMENTS = [
       "UPDATE bank_accounts SET biller_format_key = 'hlb-connectpro' WHERE biller_format_key = 'hlb-connectfirst'"
     ]
   },
+  {
+    // DRAFT on both: an existing deployment upgrading into this must behave
+    // exactly as it did before. Anything else would silently start
+    // authorising intercompany documents nobody asked it to.
+    why: 'recharge_settings.ar_status / ap_status — which state each recharge document is created in',
+    // Counts both columns, because the SQL adds both: a guard naming only
+    // the first would call a half-done run finished.
+    check: `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recharge_settings'
+               AND COLUMN_NAME IN ('ar_status', 'ap_status')`,
+    needed: (row) => Number(row.n) < 2,
+    // ensureColumn wraps the definition in a quoted SQL string, so a quote
+    // inside it has to be doubled or it closes the literal early. Used
+    // rather than a plain ALTER so re-running after a half-done attempt
+    // adds only the column that is actually missing.
+    sql: [
+      ensureColumn('recharge_settings', 'ar_status', "VARCHAR(16) NOT NULL DEFAULT ''DRAFT''"),
+      ensureColumn('recharge_settings', 'ap_status', "VARCHAR(16) NOT NULL DEFAULT ''DRAFT''")
+    ]
+  },
 ];
 
 (async () => {

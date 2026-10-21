@@ -39,7 +39,7 @@ const xeroContacts = {};
 const namedContacts = {};
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
-  calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body });
+  calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body, draftDocument: opts.draftDocument });
   opts = { ...opts, tenantIdForTest: tenantId };
 
   // A single contact by id: where the premises lives when somebody puts it
@@ -1504,6 +1504,65 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     !legacyMade.includes('Ayu Borneo Management Sdn Bhd'), legacyMade);
   check('and the recharge still posts',
     legacyRun.body.posted && legacyRun.body.posted.failed === 0, legacyRun.body.posted);
+
+  // The state each document is created in is a setting, because the right
+  // answer depends on a tax regime rather than on software.
+  console.log('\nWhat state the documents are created in');
+  const badState = await req('PATCH', '/api/recharge/settings', { cookie, body: { arStatus: 'PAID' } });
+  check('a state Xero cannot create a document in is refused',
+    badState.status === 400 && /DRAFT, SUBMITTED, AUTHORISED/.test(badState.body.error || ''), badState.body);
+
+  const defaults = await req('GET', '/api/recharge', { cookie });
+  check('both default to draft, which is what the module always did',
+    defaults.body.settings.arStatus === 'DRAFT' && defaults.body.settings.apStatus === 'DRAFT',
+    defaults.body.settings);
+
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { arStatus: 'AUTHORISED', apStatus: 'DRAFT' } });
+  const approvedBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-APPROVED-0826', supplier: BOTH_SUPPLIER, total: 77.00
+  });
+  await paidNow(approvedBill);
+  calls.length = 0;
+  const approvedRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: approvedBill, post: true }
+  });
+  check('the recharge posts', approvedRun.body.posted && approvedRun.body.posted.failed === 0, approvedRun.body.posted);
+  const madeInv = calls.filter((c) => c.path === '/Invoices' && c.method === 'POST');
+  const arDoc = madeInv.find((c) => c.body.Invoices[0].Type === 'ACCREC');
+  const apDoc = madeInv.find((c) => c.body.Invoices[0].Type === 'ACCPAY');
+  check('the sales invoice is raised in the state chosen',
+    arDoc.body.Invoices[0].Status === 'AUTHORISED', arDoc.body.Invoices[0].Status);
+  check('and the bill keeps its own, so the two are set independently',
+    apDoc.body.Invoices[0].Status === 'DRAFT', apDoc.body.Invoices[0].Status);
+  // draftDocument is what exempts a write from XERO_TENANT_ALLOWLIST, and
+  // that exemption is only defensible for something that can be deleted.
+  check('an authorised document no longer claims the draft exemption',
+    arDoc.draftDocument === false && apDoc.draftDocument === true,
+    { ar: arDoc.draftDocument, ap: apDoc.draftDocument });
+
+  // Testing mode overrides both, and that is not configurable: a rehearsal
+  // must never put a real invoice in front of LHDN.
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { arStatus: 'AUTHORISED', apStatus: 'AUTHORISED' } });
+  await testModeLib.set(1, true);
+  const rehearsal = await makeBill(abm.tenantId, {
+    ref: 'TNB-REHEARSAL-0826', supplier: BOTH_SUPPLIER, total: 88.00
+  });
+  await paidNow(rehearsal);
+  // Creating with post:true is answered by not trying while testing mode is
+  // on, so the posting itself is asked for explicitly — that is the path the
+  // sweep takes after a test payment, and the one where the state matters.
+  const rehearsalRun = await req('POST', '/api/recharge/runs', { cookie, body: { billId: rehearsal } });
+  calls.length = 0;
+  await req('POST', `/api/recharge/runs/${rehearsalRun.body.id}/post`, { cookie });
+  const testDocs = calls.filter((c) => c.path === '/Invoices' && c.method === 'POST');
+  check('testing mode creates drafts whatever the setting says',
+    testDocs.length === 2 && testDocs.every((c) => c.body.Invoices[0].Status === 'DRAFT'),
+    testDocs.map((c) => c.body.Invoices[0].Type + ':' + c.body.Invoices[0].Status));
+  check('and they keep the draft exemption, so the allowlist still lets them through',
+    testDocs.every((c) => c.draftDocument === true), testDocs.map((c) => c.draftDocument));
+  await testModeLib.set(1, false);
+  testModeLib.forget(1);
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { arStatus: 'DRAFT', apStatus: 'DRAFT' } });
 
   // Something too big to be worth moving is named rather than silently left.
   const bigBill = await makeBill(abm.tenantId, {

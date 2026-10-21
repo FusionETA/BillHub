@@ -481,6 +481,17 @@ CREATE TABLE IF NOT EXISTS recharge_settings (
   -- both documents are drafts, so nothing is authorised without a person.
   -- Here rather than in an env var so it can be stopped from the UI.
   auto_post        TINYINT(1) NOT NULL DEFAULT 1,
+  -- What state each document is created in: DRAFT, SUBMITTED (awaiting
+  -- approval) or AUTHORISED (awaiting payment).
+  --
+  -- DRAFT on both by default, which is what the module has always done and
+  -- the only state that can be deleted cleanly when a recharge is wrong.
+  -- AUTHORISED exists because Malaysian e-invoicing submits on approval and
+  -- carries a 72-hour deadline: a draft nobody approves is a draft nobody
+  -- submits. Changing these is a deliberate act with consequences the UI
+  -- spells out, which is why they are settings rather than a default.
+  ar_status        VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
+  ap_status        VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_rcs_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

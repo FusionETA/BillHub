@@ -1487,6 +1487,87 @@
 
     /* ---------- Recharge view ---------- */
 
+    // What state each recharge document is created in.
+    //
+    // A setting rather than a default because the right answer depends on a
+    // tax regime rather than on software. Under Malaysian e-invoicing the
+    // submission to LHDN is triggered by approving the invoice in Xero and
+    // carries a 72-hour deadline — so a draft nobody gets round to approving
+    // is a draft nobody submits. Against that, a draft is the only state that
+    // can be deleted cleanly when a recharge is wrong. Whoever carries the
+    // compliance obligation should be the one choosing.
+    const DOC_STATES = [
+      { value: 'DRAFT', label: 'Draft' },
+      { value: 'SUBMITTED', label: 'Awaiting approval' },
+      { value: 'AUTHORISED', label: 'Awaiting payment (approved)' }
+    ];
+
+    function RechargeSettingsDialog({ open, settings, onClose, onSaved, onToast }) {
+      const [ar, setAr] = useState('DRAFT');
+      const [ap, setAp] = useState('DRAFT');
+      const [busy, setBusy] = useState(false);
+      // Re-seeded each time it opens, so cancelling really does discard.
+      useEffect(() => {
+        if (!open || !settings) return;
+        setAr(settings.arStatus || 'DRAFT');
+        setAp(settings.apStatus || 'DRAFT');
+      }, [open, settings]);
+
+      const save = async () => {
+        setBusy(true);
+        try {
+          const r = await api.patch('/api/recharge/settings', { arStatus: ar, apStatus: ap });
+          onToast({ title: 'Recharge settings saved',
+            message: 'New recharges will use these. Documents already in Xero are unchanged.' });
+          onSaved(r.settings);
+          onClose();
+        } catch (e) {
+          onToast({ tone: 'error', title: 'Could not save', message: e.message });
+        } finally { setBusy(false); }
+      };
+
+      const authorising = ar === 'AUTHORISED' || ap === 'AUTHORISED';
+      return <Dialog open={open} title="Recharge settings" size="md" onClose={onClose}
+        description="What state each document is created in when a recharge posts.">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Select label="Sales invoice in the paying entity" value={ar} onChange={setAr} options={DOC_STATES}
+            hint="Raised by the entity that paid the bill, addressed to the entity the cost belongs to." />
+          <Select label="Bill in the receiving entity" value={ap} onChange={setAp} options={DOC_STATES}
+            hint="What the other entity owes. Left as a draft, it approves this through its normal Bills flow." />
+
+          {/* Said where the choice is made. Somebody picking "Awaiting
+              approval" to be cautious is choosing the one state that is
+              neither safe nor submitted, and they should find that out here
+              rather than from a missed deadline. */}
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.65, background: 'var(--surface-sunken)', borderRadius: 10, padding: '12px 14px', marginTop: 8 }}>
+            <strong style={{ color: 'var(--text-body)' }}>Awaiting approval does not submit to LHDN.</strong>{' '}
+            Malaysian e-invoicing submits when an invoice is <em>approved</em> in Xero, so only
+            {' '}<strong style={{ color: 'var(--text-body)' }}>Awaiting payment</strong> reaches it.
+          </div>
+
+          {authorising && <div style={{ fontSize: 13, color: '#6b4d00', lineHeight: 1.65, background: 'var(--amber-100)', borderRadius: 10, padding: '12px 14px', marginTop: 10 }}>
+            <strong>An approved document cannot be deleted.</strong> Correcting one means a void or a
+            credit note, and once it has reached LHDN there is a 72-hour window to cancel it. A draft
+            is deleted in one click.
+          </div>}
+
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 10 }}>
+            Testing mode always creates drafts, whatever is chosen here — so a rehearsal can never
+            put a real invoice in front of LHDN.
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+            <Button variant="outline" size="md" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" size="md" onClick={save}
+              style={busy ? { opacity: .6, pointerEvents: 'none' } : null}>
+              {busy ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>;
+    }
+
+
     // One box over three tabs. Terms are ANDed rather than ORed, because the
     // question somebody actually has is "the TNB one in Kuching", not "every
     // row saying either word" — with hundreds of runs the OR is noise.
@@ -1574,6 +1655,7 @@
       const [textRuleFor, setTextRuleFor] = useState(null); // recharge rule, same convention
       const [addressRules, setAddressRules] = useState(false);
       const [editAddressRule, setEditAddressRule] = useState(null);
+      const [settingsOpen, setSettingsOpen] = useState(false);
       const [q, setQ] = useState('');
       const reload = () => setNonce(n => n + 1);
 
@@ -1751,6 +1833,7 @@
           {/* Kept together: two buttons wrapping independently put one on
               each line and read as two unrelated controls. */}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>Settings</Button>
             <Button variant="outline" size="sm" onClick={() => setAddressRules(true)}>New address rules</Button>
             <Button variant="primary" size="sm" onClick={() => setTextRuleFor({})}>New recharge rule</Button>
           </div>
@@ -2056,6 +2139,9 @@
             </div>
           ))}
         </div>}
+
+        <RechargeSettingsDialog open={settingsOpen} settings={data.settings} onToast={onToast}
+          onClose={() => setSettingsOpen(false)} onSaved={() => reload()} />
 
         <AddressRulesDialog open={addressRules} entities={entities}
           suppliers={data.suppliers}

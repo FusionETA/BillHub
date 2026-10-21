@@ -18,6 +18,22 @@ async function getSettings(accountId) {
   return row;
 }
 
+// The three states a recharge document can be created in. Xero has others —
+// PAID, VOIDED, DELETED — but none of them is a thing you can create a
+// document AS, so offering them would only produce a Xero rejection.
+//
+// Validated here rather than at the route, because this is the chokepoint
+// every caller goes through and the value is written straight into Xero.
+const DOCUMENT_STATUSES = ['DRAFT', 'SUBMITTED', 'AUTHORISED'];
+
+function documentStatus(value, label) {
+  const v = String(value || '').trim().toUpperCase();
+  if (!DOCUMENT_STATUSES.includes(v)) {
+    throw bad(`${label} must be one of ${DOCUMENT_STATUSES.join(', ')}.`);
+  }
+  return v;
+}
+
 async function updateSettings(accountId, fields = {}) {
   await getSettings(accountId);
   const map = {
@@ -32,6 +48,14 @@ async function updateSettings(accountId, fields = {}) {
   // Not in the map above because it is a flag, not a value: '' has to mean
   // off rather than NULL.
   if ('autoPost' in fields) { sets.push('auto_post = ?'); params.push(fields.autoPost ? 1 : 0); }
+  // Likewise not in the map: an unrecognised state has to be refused rather
+  // than stored, because the next recharge would send it to Xero.
+  if ('arStatus' in fields) {
+    sets.push('ar_status = ?'); params.push(documentStatus(fields.arStatus, 'The sales invoice state'));
+  }
+  if ('apStatus' in fields) {
+    sets.push('ap_status = ?'); params.push(documentStatus(fields.apStatus, 'The bill state'));
+  }
   if (!sets.length) return 0;
   params.push(accountId);
   const res = await db.execute(`UPDATE recharge_settings SET ${sets.join(', ')} WHERE account_id = ?`, params);
@@ -662,6 +686,7 @@ async function summary(accountId, { includeTest = false } = {}) {
 }
 
 module.exports = {
+  DOCUMENT_STATUSES,
   getSettings, updateSettings,
   listAddressRules, getAddressRule, createAddressRules, updateAddressRule, deleteAddressRule,
   lookupPremises,

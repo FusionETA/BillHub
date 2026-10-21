@@ -795,7 +795,7 @@ async function sourceAttachments(accountId, { tenantId, invoiceId }) {
 // Every failure here is reported and swallowed. The documents are already in
 // Xero by the time this runs; throwing would mark a line failed that in fact
 // posted, and a retry would then try to create them a second time.
-async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
+async function copyAttachments(accountId, source, { tenantId, invoiceId, isDraft = true }) {
   if (!source.files.length) {
     return { tenantId, copied: 0, skipped: source.skipped ? [source.skipped] : [] };
   }
@@ -816,8 +816,8 @@ async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
           method: 'PUT',
           body: got.buffer,
           headers: { 'Content-Type': file.MimeType || got.contentType },
-          // Part of the draft it hangs on, so it follows the same rule.
-          draftDocument: true
+          // Part of the document it hangs on, so it follows the same rule.
+          draftDocument: isDraft
         });
       copied += 1;
     } catch (e) {
@@ -844,7 +844,7 @@ async function copyAttachments(accountId, source, { tenantId, invoiceId }) {
 // Best effort, always. A recharge that put both documents into Xero has done
 // its job; failing it over an attachment would leave a half-finished run
 // behind and make the next attempt harder than the thing it was protecting.
-async function salesInvoicePdf(accountId, { payerTenantId, arInvoiceId, arNumber, tenantId, invoiceId }) {
+async function salesInvoicePdf(accountId, { payerTenantId, arInvoiceId, arNumber, tenantId, invoiceId, isDraft = true }) {
   if (!arInvoiceId) return { tenantId, copied: 0, skipped: [] };
   // Named for what it is, because it lands beside the supplier bill and the
   // two are not interchangeable. Slashes would break the attachment path.
@@ -864,8 +864,8 @@ async function salesInvoicePdf(accountId, { payerTenantId, arInvoiceId, arNumber
       method: 'PUT',
       body: got.buffer,
       headers: { 'Content-Type': 'application/pdf' },
-      // Part of the draft it hangs on, so it follows the same rule.
-      draftDocument: true
+      // Part of the document it hangs on, so it follows the same rule.
+      draftDocument: isDraft
     });
     return { tenantId, copied: 1, skipped: [] };
   } catch (e) {
@@ -942,6 +942,21 @@ async function postRun(accountId, runId) {
   const due = new Date(Date.now() + Number(settings.due_days || 30) * 86400000).toISOString().slice(0, 10);
   const taxType = settings.tax_type || 'NONE';
 
+  // What state each document is created in.
+  //
+  // Testing mode overrides both to DRAFT, and that is not configurable. A
+  // rehearsal must never produce a document somebody has to unpick: an
+  // authorised invoice cannot be deleted, and where Malaysian e-invoicing
+  // submits on approval it would already be in front of LHDN before anyone
+  // noticed it was a test.
+  //
+  // `draftDocument` follows the state rather than being hardcoded true. It is
+  // what exempts a write from XERO_TENANT_ALLOWLIST, and that exemption is
+  // only defensible for a document that can be deleted again.
+  const testingNow = await testMode.isOn(accountId);
+  const arStatus = testingNow ? 'DRAFT' : (settings.ar_status || 'DRAFT');
+  const apStatus = testingNow ? 'DRAFT' : (settings.ap_status || 'DRAFT');
+
   // Both documents carry the ORIGINAL bill's currency.
   //
   // Left unset, Xero gives each document the currency of the organisation
@@ -1012,7 +1027,7 @@ async function postRun(accountId, runId) {
           // A DRAFT in a live organisation is what testing mode is for:
           // visible, reviewable, and deleted with one click if it is wrong.
           // The payment that would have preceded it is what stays blocked.
-          draftDocument: true,
+          draftDocument: arStatus === 'DRAFT',
           body: {
             Invoices: [{
               Type: 'ACCREC',
@@ -1021,7 +1036,7 @@ async function postRun(accountId, runId) {
               DueDate: due,
               ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
-              Status: 'DRAFT',
+              Status: arStatus,
               LineAmountTypes: 'Exclusive',
               LineItems: [{
                 Description: description,
@@ -1039,7 +1054,7 @@ async function postRun(accountId, runId) {
         arNumber = inv.InvoiceNumber || null;
         await model.setLinePosted(line.id, { arInvoiceId: arId, arInvoiceNumber: arNumber });
         copied.push(await copyAttachments(accountId, source, {
-          tenantId: run.payer_tenant_id, invoiceId: arId
+          tenantId: run.payer_tenant_id, invoiceId: arId, isDraft: arStatus === 'DRAFT'
         }));
       }
 
@@ -1067,7 +1082,7 @@ async function postRun(accountId, runId) {
           // A DRAFT in a live organisation is what testing mode is for:
           // visible, reviewable, and deleted with one click if it is wrong.
           // The payment that would have preceded it is what stays blocked.
-          draftDocument: true,
+          draftDocument: apStatus === 'DRAFT',
           body: {
             Invoices: [{
               Type: 'ACCPAY',
@@ -1077,7 +1092,7 @@ async function postRun(accountId, runId) {
               ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
               ...(arNumber ? { InvoiceNumber: arNumber } : {}),
-              Status: 'DRAFT',
+              Status: apStatus,
               LineAmountTypes: 'Exclusive',
               LineItems: [{
                 Description: apDescription,
@@ -1095,13 +1110,13 @@ async function postRun(accountId, runId) {
         apNumber = inv.InvoiceNumber || null;
         await model.setLinePosted(line.id, { apInvoiceId: apId, apInvoiceNumber: apNumber });
         copied.push(await copyAttachments(accountId, source, {
-          tenantId: line.target_tenant_id, invoiceId: apId
+          tenantId: line.target_tenant_id, invoiceId: apId, isDraft: apStatus === 'DRAFT'
         }));
         // And the sales invoice itself, so the receiving entity can read the
         // document it is being charged by rather than only the one behind it.
         copied.push(await salesInvoicePdf(accountId, {
           payerTenantId: run.payer_tenant_id, arInvoiceId: arId, arNumber,
-          tenantId: line.target_tenant_id, invoiceId: apId
+          tenantId: line.target_tenant_id, invoiceId: apId, isDraft: apStatus === 'DRAFT'
         }));
       }
 

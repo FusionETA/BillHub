@@ -611,7 +611,9 @@ function rechargeSettings(s) {
     taxType: s.tax_type || 'NONE',
     referencePrefix: s.reference_prefix || 'IC-',
     dueDays: Number(s.due_days || 30),
-    autoPost: Boolean(Number(s.auto_post))
+    autoPost: Boolean(Number(s.auto_post)),
+    arStatus: s.ar_status || 'DRAFT',
+    apStatus: s.ap_status || 'DRAFT'
   };
 }
 
