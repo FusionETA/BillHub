@@ -139,24 +139,24 @@ async function findOrCreateContact(accountId, tenantId, name, aliases = []) {
   return id;
 }
 
-// A contact's default tracking, which is where Malaysian e-invoicing keeps
-// the MyInvois classification — and where Ayu Borneo keep the outlet code.
+// A contact's own defaults: the tracking it carries — which is where
+// Malaysian e-invoicing keeps the MyInvois classification, and where Ayu
+// Borneo keep the outlet code — and the payment terms it was given.
 //
-// Xero applies these for a person typing an invoice into the web interface.
-// It does not apply them to an invoice created through the API: its own
-// guidance is that the API uses almost no defaults, and the effect here was
-// an invoice with the classification column empty, which LHDN will not
-// accept. Every recharge went out that way and only the ones somebody edited
-// by hand before submitting carried a code.
+// Xero applies all of these for a person typing an invoice into the web
+// interface. It does not apply them to an invoice created through the API:
+// its own guidance is that the API uses almost no defaults. The effect was an
+// invoice with the classification column empty, which LHDN will not accept,
+// and one falling due in thirty days against a contact set to nought.
 //
 // So a recharge copies them across itself, which is what the interface would
-// have done. Read per contact and cached, because a run with several lines
-// would otherwise ask the same question repeatedly.
-const _trackingCache = new Map();   // `${tenantId}|${contactId}` -> { sales, purchases }
+// have done. One read answers both questions, cached per contact, because a
+// run with several lines would otherwise ask them over and over.
+const _defaultsCache = new Map();  // `${tenantId}|${contactId}` -> { sales, purchases }
 
-async function contactTracking(accountId, tenantId, contactId) {
+async function contactDefaults(accountId, tenantId, contactId) {
   const key = `${tenantId}|${contactId}`;
-  if (_trackingCache.has(key)) return _trackingCache.get(key);
+  if (_defaultsCache.has(key)) return _defaultsCache.get(key);
 
   // Xero caps a line at two tracking categories and omits these fields
   // entirely when nothing is set, so an empty answer is the normal one.
@@ -164,7 +164,7 @@ async function contactTracking(accountId, tenantId, contactId) {
   // A contact spells the pair TrackingCategoryName/TrackingOptionName. A line
   // item spells the same pair Name/Option, and that is the shape a write
   // wants, so the read has to translate rather than pass the object along.
-  const clean = (list) => (Array.isArray(list) ? list : [])
+  const tracking = (list) => (Array.isArray(list) ? list : [])
     .map((t) => ({
       Name: t?.TrackingCategoryName ?? t?.Name,
       Option: t?.TrackingOptionName ?? t?.Option
@@ -172,20 +172,65 @@ async function contactTracking(accountId, tenantId, contactId) {
     .filter((t) => t.Name && t.Option)
     .slice(0, 2);
 
-  let out = { sales: [], purchases: [] };
+  // PaymentTerms.Sales is what this contact is invoiced on; .Bills is what it
+  // bills us on. A Day of nought is an answer — due the same day — so the
+  // test is for a number rather than for truthiness.
+  const terms = (t) => (t && t.Type && Number.isFinite(Number(t.Day))
+    ? { day: Number(t.Day), type: String(t.Type).toUpperCase() }
+    : null);
+
+  let out = {
+    sales: { tracking: [], terms: null },
+    purchases: { tracking: [], terms: null }
+  };
   try {
     // The list endpoint returns a summary without these; a single read does
     // not, which is why this is its own call rather than part of the lookup.
     const res = await xero.api(accountId, tenantId, `/Contacts/${contactId}`);
     const c = res?.Contacts?.[0] || {};
-    out = { sales: clean(c.SalesTrackingCategories), purchases: clean(c.PurchasesTrackingCategories) };
+    out = {
+      sales: {
+        tracking: tracking(c.SalesTrackingCategories),
+        terms: terms(c.PaymentTerms?.Sales)
+      },
+      purchases: {
+        tracking: tracking(c.PurchasesTrackingCategories),
+        terms: terms(c.PaymentTerms?.Bills)
+      }
+    };
   } catch (e) {
     // Never fatal: a recharge without the classification is what happens
     // today, and failing the run would be a worse answer than that.
-    console.warn(`[recharge] could not read tracking defaults for contact ${contactId} in ${tenantId}: ${e.message}`);
+    console.warn(`[recharge] could not read defaults for contact ${contactId} in ${tenantId}: ${e.message}`);
   }
-  _trackingCache.set(key, out);
+  _defaultsCache.set(key, out);
   return out;
+}
+
+// The due date Xero would have worked out for somebody typing the invoice.
+// All four of its term types are relative to the document date, and all four
+// turn up in practice, so none can be dismissed as the exotic one.
+function dueFrom(dateISO, terms, fallbackDays) {
+  const base = new Date(`${dateISO}T00:00:00Z`);
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const fallback = () => iso(base.getTime() + fallbackDays * 86400000);
+  if (!terms) return fallback();
+
+  const y = base.getUTCFullYear();
+  const m = base.getUTCMonth();
+  // Xero's interface will not let anybody pick the 31st of a 30-day month,
+  // but the API will hand one over, and a date that rolls into the following
+  // month is a worse answer than the last day of the month intended.
+  const dayOf = (year, month, day) => Date.UTC(year, month,
+    Math.min(day, new Date(Date.UTC(year, month + 1, 0)).getUTCDate()));
+
+  switch (terms.type) {
+    case 'DAYSAFTERBILLDATE':  return iso(base.getTime() + terms.day * 86400000);
+    case 'DAYSAFTERBILLMONTH': return iso(Date.UTC(y, m + 1, 0) + terms.day * 86400000);
+    case 'OFCURRENTMONTH':     return iso(dayOf(y, m, terms.day));
+    case 'OFFOLLOWINGMONTH':   return iso(dayOf(y, m + 1, terms.day));
+    default:                   return fallback();
+  }
 }
 
 // ── What a bill says about itself ───────────────────────────────────────────
@@ -1024,7 +1069,10 @@ async function postRun(accountId, runId) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const due = new Date(Date.now() + Number(settings.due_days || 30) * 86400000).toISOString().slice(0, 10);
+  // The fallback, for a contact that carries no terms of its own. Not
+  // `|| 30`: nought days is a term somebody chooses, not an unset one, and
+  // two companies in one group commonly settle on the day of the charge.
+  const term = settings.due_days == null ? 30 : Number(settings.due_days);
   const taxType = settings.tax_type || 'NONE';
 
   // What state each document is created in.
@@ -1107,7 +1155,8 @@ async function postRun(accountId, runId) {
         // addressed to — "Ayu Borneo (MA) Sdn Bhd" is.
         const contactId = await findOrCreateContact(accountId, run.payer_tenant_id,
           entityContactName(target), [target.short_name, target.code]);
-        const arTracking = (await contactTracking(accountId, run.payer_tenant_id, contactId)).sales;
+        const arDefaults = (await contactDefaults(accountId, run.payer_tenant_id, contactId)).sales;
+        const arTracking = arDefaults.tracking;
         const res = await xero.api(accountId, run.payer_tenant_id, '/Invoices', {
           method: 'POST',
           // A DRAFT in a live organisation is what testing mode is for:
@@ -1119,7 +1168,7 @@ async function postRun(accountId, runId) {
               Type: 'ACCREC',
               Contact: { ContactID: contactId },
               Date: today,
-              DueDate: due,
+              DueDate: dueFrom(today, arDefaults.terms, term),
               ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
               Status: arStatus,
@@ -1165,7 +1214,8 @@ async function postRun(accountId, runId) {
         const contactId = await findOrCreateContact(accountId, line.target_tenant_id,
           entityContactName(payer), [payer.short_name, payer.code]);
         // Purchases rather than sales: in this ledger the document is a bill.
-        const apTracking = (await contactTracking(accountId, line.target_tenant_id, contactId)).purchases;
+        const apDefaults = (await contactDefaults(accountId, line.target_tenant_id, contactId)).purchases;
+        const apTracking = apDefaults.tracking;
         const res = await xero.api(accountId, line.target_tenant_id, '/Invoices', {
           method: 'POST',
           // A DRAFT in a live organisation is what testing mode is for:
@@ -1177,7 +1227,7 @@ async function postRun(accountId, runId) {
               Type: 'ACCPAY',
               Contact: { ContactID: contactId },
               Date: today,
-              DueDate: due,
+              DueDate: dueFrom(today, apDefaults.terms, term),
               ...(currency ? { CurrencyCode: currency } : {}),
               Reference: line.reference,
               ...(arNumber ? { InvoiceNumber: arNumber } : {}),
@@ -1545,5 +1595,5 @@ module.exports = {
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
   isPaid, OUTCOMES, contactAddress, addressText,
-  _contactCache, _textCache, _contactCache2, _trackingCache
+  _contactCache, _textCache, _contactCache2, _defaultsCache, dueFrom
 };

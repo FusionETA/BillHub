@@ -1505,18 +1505,23 @@
     function RechargeSettingsDialog({ open, settings, onClose, onSaved, onToast }) {
       const [ar, setAr] = useState('DRAFT');
       const [ap, setAp] = useState('DRAFT');
+      const [due, setDue] = useState('30');
       const [busy, setBusy] = useState(false);
       // Re-seeded each time it opens, so cancelling really does discard.
       useEffect(() => {
         if (!open || !settings) return;
         setAr(settings.arStatus || 'DRAFT');
         setAp(settings.apStatus || 'DRAFT');
+        setDue(String(settings.dueDays ?? 30));
       }, [open, settings]);
 
       const save = async () => {
         setBusy(true);
         try {
-          const r = await api.patch('/api/recharge/settings', { arStatus: ar, apStatus: ap });
+          // Sent as typed rather than as a Number: Number('') is 0, and an
+          // emptied box should come back as a question, not as same-day terms.
+          const r = await api.patch('/api/recharge/settings',
+            { arStatus: ar, apStatus: ap, dueDays: due });
           onToast({ title: 'Recharge settings saved',
             message: 'New recharges will use these. Documents already in Xero are unchanged.' });
           onSaved(r.settings);
@@ -1527,13 +1532,23 @@
       };
 
       const authorising = ar === 'AUTHORISED' || ap === 'AUTHORISED';
+      // Spelled out under the box, because "30" on its own does not say
+      // whether it counts from the bill, the payment or the recharge — nor
+      // that a contact with terms of its own never reaches this at all.
+      const days = Number(due);
+      const term = (!due.trim() || !Number.isInteger(days) || days < 0 || days > 365)
+        ? 'A whole number of days, from 0 to 365.'
+        : days === 0 ? 'Such a document falls due on the day it is raised.'
+        : `Such a document falls due ${days} day${days === 1 ? '' : 's'} after it is raised.`;
       return <Dialog open={open} title="Recharge settings" size="md" onClose={onClose}
-        description="What state each document is created in when a recharge posts.">
+        description="What state each document is created in when a recharge posts, and when it falls due.">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <Select label="Sales invoice in the paying entity" value={ar} onChange={setAr} options={DOC_STATES}
             hint="Raised by the entity that paid the bill, addressed to the entity the cost belongs to." />
           <Select label="Bill in the receiving entity" value={ap} onChange={setAp} options={DOC_STATES}
             hint="What the other entity owes. Left as a draft, it approves this through its normal Bills flow." />
+          <Input label="Payment terms, where the contact has none" type="number" value={due} onChange={setDue}
+            hint={`A contact's own payment terms in Xero are used first — the invoice takes its sales terms, the bill its purchase terms. This covers a contact that has neither. ${term}`} />
 
           {/* Said where the choice is made. Somebody picking "Awaiting
               approval" to be cautious is choosing the one state that is

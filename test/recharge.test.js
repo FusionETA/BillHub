@@ -38,7 +38,7 @@ const xeroContacts = {};
 // tenantId -> { 'Contact Name': contactId }, for the exact-name lookup above.
 const namedContacts = {};
 // contactId -> { SalesTrackingCategories, PurchasesTrackingCategories }
-const contactTracking = {};
+const contactDefaults = {};
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body, draftDocument: opts.draftDocument });
@@ -53,7 +53,7 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
     return { Contacts: [{
       ContactID: oneContact[1],
       Addresses: contactAddresses[oneContact[1]] || [],
-      ...(contactTracking[oneContact[1]] || {})
+      ...(contactDefaults[oneContact[1]] || {})
     }] };
   }
   if (path.startsWith('/Contacts') && (opts.method || 'GET') === 'GET') {
@@ -1583,6 +1583,88 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   testModeLib.forget(1);
   await req('PATCH', '/api/recharge/settings', { cookie, body: { arStatus: 'DRAFT', apStatus: 'DRAFT' } });
 
+  // When a recharge falls due. A contact in Xero carries its own payment
+  // terms, and Xero applies them to an invoice somebody types and not to one
+  // an app creates — the same gap that left the classification blank.
+  console.log('\nWhen a recharge falls due');
+  const blankTerms = await req('PATCH', '/api/recharge/settings', { cookie, body: { dueDays: '' } });
+  check('an emptied box is a question, not nought days',
+    blankTerms.status === 400 && /0 to 365/.test(blankTerms.body.error || ''), blankTerms.body);
+  const backTerms = await req('PATCH', '/api/recharge/settings', { cookie, body: { dueDays: -5 } });
+  check('and a negative term is refused, which would fall due before it is raised',
+    backTerms.status === 400, backTerms.body);
+
+  const plus = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000)
+    .toISOString().slice(0, 10);
+
+  // The account setting is the fallback, for a contact that says nothing.
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { dueDays: 20 } });
+  const noTerms = await makeBill(abm.tenantId, {
+    ref: 'TNB-TERMS-0826', supplier: BOTH_SUPPLIER, total: 55.00
+  });
+  await paidNow(noTerms);
+  require('../billhub/recharge')._defaultsCache.clear();
+  calls.length = 0;
+  const fallbackRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: noTerms, post: true }
+  });
+  check('the recharge posts', fallbackRun.body.posted && fallbackRun.body.posted.failed === 0,
+    fallbackRun.body.posted);
+  const fbDocs = calls.filter((c) => c.path === '/Invoices' && c.method === 'POST');
+  check('a contact carrying no terms falls back to the account setting',
+    fbDocs.length === 2 && fbDocs.every((c) => c.body.Invoices[0].DueDate === plus(c.body.Invoices[0].Date, 20)),
+    fbDocs.map((c) => c.body.Invoices[0].Type + ' ' + c.body.Invoices[0].Date + ' due ' + c.body.Invoices[0].DueDate));
+
+  // And a contact that does carry terms wins, each side reading the half
+  // that applies to it: sales for the invoice, bills for the bill.
+  const termsBill = await makeBill(abm.tenantId, {
+    ref: 'TNB-TERMS2-0826', supplier: BOTH_SUPPLIER, total: 56.00
+  });
+  await paidNow(termsBill);
+  namedContacts[abm.tenantId] = { 'Ayu Borneo (KJ) Sdn Bhd': 'contact-kj-terms' };
+  namedContacts[kj.tenantId] = { 'Ayu Borneo Management Sdn Bhd': 'contact-abm-terms' };
+  contactDefaults['contact-kj-terms'] = {
+    PaymentTerms: { Sales: { Day: 0, Type: 'DAYSAFTERBILLDATE' } }
+  };
+  contactDefaults['contact-abm-terms'] = {
+    PaymentTerms: { Bills: { Day: 14, Type: 'DAYSAFTERBILLDATE' } }
+  };
+  require('../billhub/recharge')._contactCache.clear();
+  require('../billhub/recharge')._defaultsCache.clear();
+  calls.length = 0;
+  const ownRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: termsBill, post: true }
+  });
+  delete namedContacts[abm.tenantId]; delete namedContacts[kj.tenantId];
+  check('the recharge posts', ownRun.body.posted && ownRun.body.posted.failed === 0, ownRun.body.posted);
+  const otDocs = calls.filter((c) => c.path === '/Invoices' && c.method === 'POST');
+  const otAr = otDocs.find((c) => c.body.Invoices[0].Type === 'ACCREC');
+  const otAp = otDocs.find((c) => c.body.Invoices[0].Type === 'ACCPAY');
+  check('nought days on the contact puts the due date on the invoice date',
+    otAr.body.Invoices[0].DueDate === otAr.body.Invoices[0].Date,
+    otAr.body.Invoices[0].Date + ' due ' + otAr.body.Invoices[0].DueDate);
+  check('and the bill takes that contact\'s purchases terms, not its sales ones',
+    otAp.body.Invoices[0].DueDate === plus(otAp.body.Invoices[0].Date, 14),
+    otAp.body.Invoices[0].Date + ' due ' + otAp.body.Invoices[0].DueDate);
+
+  // The three term types a date cannot be reached by adding days, checked
+  // directly because they depend on which month the recharge happens to run in.
+  const { dueFrom } = require('../billhub/recharge');
+  check('terms counted from the end of the bill month land in the next one',
+    dueFrom('2026-10-27', { day: 15, type: 'DAYSAFTERBILLMONTH' }, 30) === '2026-11-15',
+    dueFrom('2026-10-27', { day: 15, type: 'DAYSAFTERBILLMONTH' }, 30));
+  check('a day of the following month is that day of it',
+    dueFrom('2026-10-27', { day: 5, type: 'OFFOLLOWINGMONTH' }, 30) === '2026-11-05',
+    dueFrom('2026-10-27', { day: 5, type: 'OFFOLLOWINGMONTH' }, 30));
+  check('and the 31st of a 30-day month is its last day, not the 1st of the next',
+    dueFrom('2026-11-03', { day: 31, type: 'OFCURRENTMONTH' }, 30) === '2026-11-30',
+    dueFrom('2026-11-03', { day: 31, type: 'OFCURRENTMONTH' }, 30));
+
+  const termsBack = await req('GET', '/api/recharge', { cookie });
+  check('and the screen reads the fallback term back as it was saved',
+    termsBack.body.settings.dueDays === 20, termsBack.body.settings.dueDays);
+  await req('PATCH', '/api/recharge/settings', { cookie, body: { dueDays: 30 } });
+
   // The ledger writes the same company its own way. Xero's Name== is exact,
   // so none of the lookups above find "AYU BORNEO MANAGEMENT SDN BHD" when
   // we ask for "Ayu Borneo Management Sdn Bhd". Creating a second contact
@@ -1627,19 +1709,19 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   namedContacts[kj.tenantId] = { 'Ayu Borneo Management Sdn Bhd': 'contact-abm-in-kj' };
   // Spelled the way Xero spells it on a contact, which is not the way it
   // spells the same pair on a line item.
-  contactTracking['contact-kj-in-abm'] = {
+  contactDefaults['contact-kj-in-abm'] = {
     SalesTrackingCategories: [
       { TrackingCategoryName: 'MyInvois Classification', TrackingOptionName: '022 - Others' },
       { TrackingCategoryName: 'Outlet', TrackingOptionName: 'ABKW' }
     ]
   };
-  contactTracking['contact-abm-in-kj'] = {
+  contactDefaults['contact-abm-in-kj'] = {
     PurchasesTrackingCategories: [
       { TrackingCategoryName: 'Outlet', TrackingOptionName: 'ABKJ' }
     ]
   };
   require('../billhub/recharge')._contactCache.clear();
-  require('../billhub/recharge')._trackingCache.clear();
+  require('../billhub/recharge')._defaultsCache.clear();
   calls.length = 0;
   const classifiedRun = await req('POST', '/api/recharge/runs', {
     cookie, body: { billId: classified, post: true }
@@ -1666,7 +1748,7 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   });
   await paidNow(untracked);
   require('../billhub/recharge')._contactCache.clear();
-  require('../billhub/recharge')._trackingCache.clear();
+  require('../billhub/recharge')._defaultsCache.clear();
   calls.length = 0;
   await req('POST', '/api/recharge/runs', { cookie, body: { billId: untracked, post: true } });
   const untrackedAr = calls.find((c) => c.path === '/Invoices' && c.method === 'POST'

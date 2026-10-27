@@ -34,11 +34,23 @@ function documentStatus(value, label) {
   return v;
 }
 
+// Days from the day a recharge is raised to the day it falls due. Zero is an
+// answer rather than an absence — two companies in one group commonly settle
+// on the day the charge is made — so the floor is 0 and a blank is the error.
+function dueDays(value) {
+  const raw = String(value ?? '').trim();
+  const n = Number(raw);
+  if (!raw || !Number.isInteger(n) || n < 0 || n > 365) {
+    throw bad('Payment terms must be a whole number of days from 0 to 365.');
+  }
+  return n;
+}
+
 async function updateSettings(accountId, fields = {}) {
   await getSettings(accountId);
   const map = {
     arAccountCode: 'ar_account_code', apAccountCode: 'ap_account_code',
-    taxType: 'tax_type', referencePrefix: 'reference_prefix', dueDays: 'due_days'
+    taxType: 'tax_type', referencePrefix: 'reference_prefix'
   };
   const sets = [];
   const params = [];
@@ -55,6 +67,12 @@ async function updateSettings(accountId, fields = {}) {
   }
   if ('apStatus' in fields) {
     sets.push('ap_status = ?'); params.push(documentStatus(fields.apStatus, 'The bill state'));
+  }
+  // Out of the map for a quieter reason: Number('') is 0, so an emptied box
+  // would pass through it and silently make every recharge due the day it is
+  // raised, which is a real setting somebody might have chosen on purpose.
+  if ('dueDays' in fields) {
+    sets.push('due_days = ?'); params.push(dueDays(fields.dueDays));
   }
   if (!sets.length) return 0;
   params.push(accountId);

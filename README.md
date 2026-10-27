@@ -1122,7 +1122,7 @@ All endpoints are cookie-authenticated and scoped to the signed-in user's accoun
 | `GET` | `/api/recharge/suggestions` | Paid bills a rule covers, not yet recharged |
 | `GET` | `/api/recharge/bills/:id/decide` | What would happen to one bill, and why |
 | `POST` | `/api/recharge/decide` | The same for a selection, before it is paid |
-| `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, due days |
+| `PATCH` | `/api/recharge/settings` | Reference prefix, tax type, document states, fallback payment terms |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/recharge/text-rules[/:id]` | Recharge rules |
 | `POST` | `/api/recharge/text-rules/preview` | What a rule would act on, before saving it |
 | `GET` | `/api/activity` | Who did what — super admin only |

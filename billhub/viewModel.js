@@ -610,7 +610,9 @@ function rechargeSettings(s) {
     apAccountCode: s.ap_account_code || null,
     taxType: s.tax_type || 'NONE',
     referencePrefix: s.reference_prefix || 'IC-',
-    dueDays: Number(s.due_days || 30),
+    // `|| 30` here would show thirty to somebody who had chosen nought, and
+    // then save thirty back the next time the dialog was opened.
+    dueDays: s.due_days == null ? 30 : Number(s.due_days),
     autoPost: Boolean(Number(s.auto_post)),
     arStatus: s.ar_status || 'DRAFT',
     apStatus: s.ap_status || 'DRAFT'
