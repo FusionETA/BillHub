@@ -160,8 +160,15 @@ async function contactTracking(accountId, tenantId, contactId) {
 
   // Xero caps a line at two tracking categories and omits these fields
   // entirely when nothing is set, so an empty answer is the normal one.
+  //
+  // A contact spells the pair TrackingCategoryName/TrackingOptionName. A line
+  // item spells the same pair Name/Option, and that is the shape a write
+  // wants, so the read has to translate rather than pass the object along.
   const clean = (list) => (Array.isArray(list) ? list : [])
-    .map((t) => ({ Name: t?.Name, Option: t?.Option ?? t?.TrackingOptionName }))
+    .map((t) => ({
+      Name: t?.TrackingCategoryName ?? t?.Name,
+      Option: t?.TrackingOptionName ?? t?.Option
+    }))
     .filter((t) => t.Name && t.Option)
     .slice(0, 2);
 

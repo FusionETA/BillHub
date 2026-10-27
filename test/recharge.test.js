@@ -1625,14 +1625,18 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   await paidNow(classified);
   namedContacts[abm.tenantId] = { 'Ayu Borneo (KJ) Sdn Bhd': 'contact-kj-in-abm' };
   namedContacts[kj.tenantId] = { 'Ayu Borneo Management Sdn Bhd': 'contact-abm-in-kj' };
+  // Spelled the way Xero spells it on a contact, which is not the way it
+  // spells the same pair on a line item.
   contactTracking['contact-kj-in-abm'] = {
     SalesTrackingCategories: [
-      { Name: 'MyInvois Classification', Option: '022 - Others' },
-      { Name: 'Outlet', Option: 'ABKW' }
+      { TrackingCategoryName: 'MyInvois Classification', TrackingOptionName: '022 - Others' },
+      { TrackingCategoryName: 'Outlet', TrackingOptionName: 'ABKW' }
     ]
   };
   contactTracking['contact-abm-in-kj'] = {
-    PurchasesTrackingCategories: [{ Name: 'Outlet', Option: 'ABKJ' }]
+    PurchasesTrackingCategories: [
+      { TrackingCategoryName: 'Outlet', TrackingOptionName: 'ABKJ' }
+    ]
   };
   require('../billhub/recharge')._contactCache.clear();
   require('../billhub/recharge')._trackingCache.clear();
