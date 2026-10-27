@@ -88,7 +88,43 @@ async function findOrCreateContact(accountId, tenantId, name, aliases = []) {
     id = await lookup(alias);
   }
 
+  // Xero's Name== is exact, so it misses a contact that is the same company
+  // written differently: "Ayu Borneo (KW) Sdn. Bhd." against the
+  // "AYU BORNEO (KW) SDN BHD" already in the ledger. Creating a second
+  // contact there is worse than it sounds — the real one carries the Sales
+  // defaults, including the MyInvois classification an e-invoice needs, so
+  // the duplicate produces invoices LHDN will not take.
+  //
+  // So before creating anything, ask Xero for candidates and compare on the
+  // same normalised key the premises register uses: case, spacing and
+  // punctuation removed. Searched on the shortest name we have, because that
+  // is the fragment most likely to appear inside however the ledger spells
+  // the rest of it.
   if (!id) {
+    const wanted = new Set([name, ...aliases].filter(Boolean).map(premisesLib.normalise));
+    const term = [...aliases, name].find(Boolean) || name;
+    try {
+      const res = await xero.api(accountId, tenantId,
+        `/Contacts?searchTerm=${encodeURIComponent(term)}`);
+      const hit = (res?.Contacts || []).find((c) => wanted.has(premisesLib.normalise(c.Name)));
+      if (hit?.ContactID) {
+        id = hit.ContactID;
+        console.log(`[recharge] matched existing contact "${hit.Name}" in ${tenantId} for "${name}"`);
+      }
+    } catch (e) {
+      // A search that fails must not stop a recharge; the worst case is the
+      // create below, which is what used to happen every time.
+      console.warn(`[recharge] contact search for "${term}" failed: ${e.message}`);
+    }
+  }
+
+  if (!id) {
+    // Worth saying out loud. A new counterparty contact is normal the first
+    // time two organisations trade and a mistake every time after, and the
+    // only way anybody noticed the last one was a missing tax code weeks
+    // later.
+    console.warn(`[recharge] creating a NEW contact "${name}" in ${tenantId} — `
+      + 'nothing in that ledger matched it, by name or normalised.');
     const created = await xero.api(accountId, tenantId, '/Contacts', {
       method: 'POST',
       body: { Contacts: [{ Name: name }] },

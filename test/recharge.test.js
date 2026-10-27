@@ -62,6 +62,17 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
       const id = (namedContacts[opts.tenantIdForTest] || {})[byName[1]];
       return { Contacts: id ? [{ ContactID: id, Name: byName[1] }] : [] };
     }
+    // searchTerm is Xero's contains-style search, which is how a recharge
+    // finds a contact the ledger spells differently.
+    const search = /[?&]searchTerm=([^&]+)/.exec(path);
+    if (search) {
+      const needle = decodeURIComponent(search[1]).toLowerCase();
+      const all = namedContacts[opts.tenantIdForTest] || {};
+      const hits = Object.entries(all)
+        .filter(([n]) => n.toLowerCase().includes(needle))
+        .map(([n, cid]) => ({ ContactID: cid, Name: n }));
+      return { Contacts: hits };
+    }
     return { Contacts: [] };
   }
   if (path === '/Contacts' && opts.method === 'POST') {
@@ -1563,6 +1574,38 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
   await testModeLib.set(1, false);
   testModeLib.forget(1);
   await req('PATCH', '/api/recharge/settings', { cookie, body: { arStatus: 'DRAFT', apStatus: 'DRAFT' } });
+
+  // The ledger writes the same company its own way. Xero's Name== is exact,
+  // so none of the lookups above find "AYU BORNEO MANAGEMENT SDN BHD" when
+  // we ask for "Ayu Borneo Management Sdn Bhd". Creating a second contact
+  // there is what produced invoices LHDN would not take: the real contact
+  // carries the sales defaults, the duplicate carries nothing.
+  const spelled = await makeBill(abm.tenantId, {
+    ref: 'TNB-SPELLING-0826', supplier: BOTH_SUPPLIER, total: 64.00
+  });
+  await paidNow(spelled);
+  namedContacts[kj.tenantId] = { 'AYU BORNEO MANAGEMENT SDN. BHD.': 'contact-existing-abm' };
+  require('../billhub/recharge')._contactCache.clear();
+  calls.length = 0;
+  const spelledRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: spelled, post: true }
+  });
+  delete namedContacts[kj.tenantId];
+  const spelledMade = calls.filter((c) => c.path === '/Contacts' && c.method === 'POST');
+  const spelledAp = calls.find((c) => c.path === '/Invoices' && c.method === 'POST'
+    && c.body.Invoices[0].Type === 'ACCPAY');
+  check('a contact the ledger spells differently is matched, not duplicated',
+    spelledAp.body.Invoices[0].Contact.ContactID === 'contact-existing-abm',
+    spelledAp.body.Invoices[0].Contact);
+  // Scoped to the one that already exists: the sales invoice still needs a
+  // contact for the receiving entity in the payer's own ledger, and nothing
+  // was seeded there, so creating that one is correct.
+  const dupes = spelledMade.filter((c) =>
+    /^ayuborneomanagement/.test(require('../lib/premises').normalise(c.body.Contacts[0].Name)));
+  check('so no second contact is created beside it',
+    dupes.length === 0, spelledMade.map((c) => c.body.Contacts[0].Name));
+  check('and the recharge still posts',
+    spelledRun.body.posted && spelledRun.body.posted.failed === 0, spelledRun.body.posted);
 
   // Something too big to be worth moving is named rather than silently left.
   const bigBill = await makeBill(abm.tenantId, {
