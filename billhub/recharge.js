@@ -139,6 +139,48 @@ async function findOrCreateContact(accountId, tenantId, name, aliases = []) {
   return id;
 }
 
+// A contact's default tracking, which is where Malaysian e-invoicing keeps
+// the MyInvois classification — and where Ayu Borneo keep the outlet code.
+//
+// Xero applies these for a person typing an invoice into the web interface.
+// It does not apply them to an invoice created through the API: its own
+// guidance is that the API uses almost no defaults, and the effect here was
+// an invoice with the classification column empty, which LHDN will not
+// accept. Every recharge went out that way and only the ones somebody edited
+// by hand before submitting carried a code.
+//
+// So a recharge copies them across itself, which is what the interface would
+// have done. Read per contact and cached, because a run with several lines
+// would otherwise ask the same question repeatedly.
+const _trackingCache = new Map();   // `${tenantId}|${contactId}` -> { sales, purchases }
+
+async function contactTracking(accountId, tenantId, contactId) {
+  const key = `${tenantId}|${contactId}`;
+  if (_trackingCache.has(key)) return _trackingCache.get(key);
+
+  // Xero caps a line at two tracking categories and omits these fields
+  // entirely when nothing is set, so an empty answer is the normal one.
+  const clean = (list) => (Array.isArray(list) ? list : [])
+    .map((t) => ({ Name: t?.Name, Option: t?.Option ?? t?.TrackingOptionName }))
+    .filter((t) => t.Name && t.Option)
+    .slice(0, 2);
+
+  let out = { sales: [], purchases: [] };
+  try {
+    // The list endpoint returns a summary without these; a single read does
+    // not, which is why this is its own call rather than part of the lookup.
+    const res = await xero.api(accountId, tenantId, `/Contacts/${contactId}`);
+    const c = res?.Contacts?.[0] || {};
+    out = { sales: clean(c.SalesTrackingCategories), purchases: clean(c.PurchasesTrackingCategories) };
+  } catch (e) {
+    // Never fatal: a recharge without the classification is what happens
+    // today, and failing the run would be a worse answer than that.
+    console.warn(`[recharge] could not read tracking defaults for contact ${contactId} in ${tenantId}: ${e.message}`);
+  }
+  _trackingCache.set(key, out);
+  return out;
+}
+
 // ── What a bill says about itself ───────────────────────────────────────────
 
 // A Xero ACCPAY bill carries no premises address. What it does carry:
@@ -1058,6 +1100,7 @@ async function postRun(accountId, runId) {
         // addressed to — "Ayu Borneo (MA) Sdn Bhd" is.
         const contactId = await findOrCreateContact(accountId, run.payer_tenant_id,
           entityContactName(target), [target.short_name, target.code]);
+        const arTracking = (await contactTracking(accountId, run.payer_tenant_id, contactId)).sales;
         const res = await xero.api(accountId, run.payer_tenant_id, '/Invoices', {
           method: 'POST',
           // A DRAFT in a live organisation is what testing mode is for:
@@ -1079,7 +1122,8 @@ async function postRun(accountId, runId) {
                 Quantity: 1,
                 UnitAmount: Number(line.amount),
                 AccountCode: arCode,
-                TaxType: taxType
+                TaxType: taxType,
+                ...(arTracking.length ? { Tracking: arTracking } : {})
               }]
             }]
           }
@@ -1113,6 +1157,8 @@ async function postRun(accountId, runId) {
         const apDescription = arNumber ? `${description} · against invoice ${arNumber}` : description;
         const contactId = await findOrCreateContact(accountId, line.target_tenant_id,
           entityContactName(payer), [payer.short_name, payer.code]);
+        // Purchases rather than sales: in this ledger the document is a bill.
+        const apTracking = (await contactTracking(accountId, line.target_tenant_id, contactId)).purchases;
         const res = await xero.api(accountId, line.target_tenant_id, '/Invoices', {
           method: 'POST',
           // A DRAFT in a live organisation is what testing mode is for:
@@ -1135,7 +1181,8 @@ async function postRun(accountId, runId) {
                 Quantity: 1,
                 UnitAmount: Number(line.amount),
                 AccountCode: apCode,
-                TaxType: taxType
+                TaxType: taxType,
+                ...(apTracking.length ? { Tracking: apTracking } : {})
               }]
             }]
           }
@@ -1491,5 +1538,5 @@ module.exports = {
   waitingFor, waitingCounts, runTextRule, candidateBills,
   conditionsMatch, testCondition, withinStart, findOrCreateContact,
   isPaid, OUTCOMES, contactAddress, addressText,
-  _contactCache, _textCache, _contactCache2
+  _contactCache, _textCache, _contactCache2, _trackingCache
 };

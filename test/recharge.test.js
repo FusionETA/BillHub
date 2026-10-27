@@ -37,6 +37,8 @@ const uploaded = [];      // { tenantId, invoiceId, name, contentType, bytes }
 const xeroContacts = {};
 // tenantId -> { 'Contact Name': contactId }, for the exact-name lookup above.
 const namedContacts = {};
+// contactId -> { SalesTrackingCategories, PurchasesTrackingCategories }
+const contactTracking = {};
 
 xero.api = async (accountId, tenantId, path, opts = {}) => {
   calls.push({ tenantId, path, method: opts.method || 'GET', body: opts.body, draftDocument: opts.draftDocument });
@@ -46,7 +48,13 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
   // on the supplier in Xero rather than on the bill.
   const oneContact = path.match(/^\/Contacts\/([^?]+)$/);
   if (oneContact && (opts.method || 'GET') === 'GET') {
-    return { Contacts: [{ ContactID: oneContact[1], Addresses: contactAddresses[oneContact[1]] || [] }] };
+    // Xero omits these fields entirely when a contact has no defaults, which
+    // is why the recharge treats an absent one as "nothing set".
+    return { Contacts: [{
+      ContactID: oneContact[1],
+      Addresses: contactAddresses[oneContact[1]] || [],
+      ...(contactTracking[oneContact[1]] || {})
+    }] };
   }
   if (path.startsWith('/Contacts') && (opts.method || 'GET') === 'GET') {
     // A page of the organisation's contacts, when the register dialog asks.
@@ -1606,6 +1614,62 @@ async function makeBill(tenant, { ref, supplier, total, address = null, paid = t
     dupes.length === 0, spelledMade.map((c) => c.body.Contacts[0].Name));
   check('and the recharge still posts',
     spelledRun.body.posted && spelledRun.body.posted.failed === 0, spelledRun.body.posted);
+
+  // Malaysian e-invoicing keeps the MyInvois classification as a tracking
+  // default on the contact. Xero fills it in for somebody typing an invoice
+  // and does not for one created through the API, so every recharge went out
+  // with the column empty and LHDN would not take it.
+  const classified = await makeBill(abm.tenantId, {
+    ref: 'TNB-CLASSIFY-0826', supplier: BOTH_SUPPLIER, total: 91.00
+  });
+  await paidNow(classified);
+  namedContacts[abm.tenantId] = { 'Ayu Borneo (KJ) Sdn Bhd': 'contact-kj-in-abm' };
+  namedContacts[kj.tenantId] = { 'Ayu Borneo Management Sdn Bhd': 'contact-abm-in-kj' };
+  contactTracking['contact-kj-in-abm'] = {
+    SalesTrackingCategories: [
+      { Name: 'MyInvois Classification', Option: '022 - Others' },
+      { Name: 'Outlet', Option: 'ABKW' }
+    ]
+  };
+  contactTracking['contact-abm-in-kj'] = {
+    PurchasesTrackingCategories: [{ Name: 'Outlet', Option: 'ABKJ' }]
+  };
+  require('../billhub/recharge')._contactCache.clear();
+  require('../billhub/recharge')._trackingCache.clear();
+  calls.length = 0;
+  const classifiedRun = await req('POST', '/api/recharge/runs', {
+    cookie, body: { billId: classified, post: true }
+  });
+  delete namedContacts[abm.tenantId]; delete namedContacts[kj.tenantId];
+  const clsInv = calls.filter((c) => c.path === '/Invoices' && c.method === 'POST');
+  const clsAr = clsInv.find((c) => c.body.Invoices[0].Type === 'ACCREC');
+  const clsAp = clsInv.find((c) => c.body.Invoices[0].Type === 'ACCPAY');
+  check('the recharge posts', classifiedRun.body.posted && classifiedRun.body.posted.failed === 0,
+    classifiedRun.body.posted);
+  check('the sales invoice carries the contact\'s MyInvois classification',
+    JSON.stringify(clsAr.body.Invoices[0].LineItems[0].Tracking)
+      === JSON.stringify([{ Name: 'MyInvois Classification', Option: '022 - Others' }, { Name: 'Outlet', Option: 'ABKW' }]),
+    clsAr.body.Invoices[0].LineItems[0].Tracking);
+  // A bill takes the purchases defaults, not the sales ones.
+  check('and the bill takes the purchases defaults instead',
+    JSON.stringify(clsAp.body.Invoices[0].LineItems[0].Tracking)
+      === JSON.stringify([{ Name: 'Outlet', Option: 'ABKJ' }]),
+    clsAp.body.Invoices[0].LineItems[0].Tracking);
+
+  // A contact with nothing set must not produce an empty Tracking element.
+  const untracked = await makeBill(abm.tenantId, {
+    ref: 'TNB-NOTRACK-0826', supplier: BOTH_SUPPLIER, total: 33.00
+  });
+  await paidNow(untracked);
+  require('../billhub/recharge')._contactCache.clear();
+  require('../billhub/recharge')._trackingCache.clear();
+  calls.length = 0;
+  await req('POST', '/api/recharge/runs', { cookie, body: { billId: untracked, post: true } });
+  const untrackedAr = calls.find((c) => c.path === '/Invoices' && c.method === 'POST'
+    && c.body.Invoices[0].Type === 'ACCREC');
+  check('a contact with no defaults sends no tracking at all',
+    !('Tracking' in untrackedAr.body.Invoices[0].LineItems[0]),
+    untrackedAr.body.Invoices[0].LineItems[0].Tracking);
 
   // Something too big to be worth moving is named rather than silently left.
   const bigBill = await makeBill(abm.tenantId, {
