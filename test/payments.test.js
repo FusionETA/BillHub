@@ -334,6 +334,23 @@ function check(name, ok, detail) {
     fixed.body.payee && fixed.body.payee.accountNumber === '7788-9900-1122', fixed.body.payee);
   check('a corrected payee is marked manual', fixed.body.payee.source === 'manual', fixed.body.payee.source);
 
+  // Xero's field is free text, and what people put in it is a number with a
+  // label around it. The label comes off; the number does not get edited —
+  // Ranhill SAJ print theirs with a letter in the middle, and an earlier rule
+  // that kept only digits and dashes deleted it without saying so.
+  const { cleanAccountNumber } = require('../models/payees');
+  const READ = [
+    ['86179235-N8074193', '86179235-N8074193', 'a letter inside the number survives'],
+    ['CIMB 8899-0011-2233', '8899-0011-2233', 'a bank name in front comes off'],
+    ['A/C 8899-0011', '8899-0011', 'and so does a label that is not a bank'],
+    ['Public Bank Berhad 1234 5678', '12345678', 'several words of bank name, and the gaps closed up'],
+    ['  5566778899  ', '5566778899', 'surrounding space is nothing'],
+    ['Maybank', null, 'a bank name and no number at all is no account number']
+  ];
+  for (const [raw, want, said] of READ) {
+    check(said, cleanAccountNumber(raw) === want, { raw, got: cleanAccountNumber(raw), want });
+  }
+
   console.log('\nSync from Xero');
   const synced = await req('POST', '/api/payments/sync', { cookie });
   check('bank accounts and payees sync per organisation',

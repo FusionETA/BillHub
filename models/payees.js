@@ -92,12 +92,27 @@ async function setManual(accountId, tenantId, contactId, f = {}) {
   return res.affectedRows;
 }
 
-// Xero's field is free text: "Maybank 5142-3312-9987" or "  551234567  ".
-// Keep digits and dashes, drop the rest; the file layout decides whether to
-// strip the dashes as well.
+// Xero's field is free text: "Maybank 5142-3312-9987", "  551234567  ",
+// "A/C 8899-0011".
+//
+// It used to keep digits and dashes and drop everything else, which salvaged
+// the number out of all of those — and silently deleted the N from Ranhill
+// SAJ's "86179235-N8074193", leaving fifteen digits that look like an account
+// number and are not one. A character removed from an account number is the
+// one kind of damage this field can do.
+//
+// So the rule is about position rather than about character class: the label
+// somebody types around the number — a bank name, "A/C", "No." — is a word
+// with no digit in it, and those come off either end. Whatever is left is the
+// number as written, spaces closed up, letters and all. The file layout still
+// decides whether to strip the dashes for a particular bank.
 function cleanAccountNumber(value) {
   if (!value) return null;
-  const cleaned = String(value).replace(/[^0-9-]/g, '').replace(/^-+|-+$/g, '');
+  const words = String(value).trim().split(/\s+/).filter(Boolean);
+  const label = (w) => !/\d/.test(w);
+  while (words.length && label(words[0])) words.shift();
+  while (words.length && label(words[words.length - 1])) words.pop();
+  const cleaned = words.join('').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+|-+$/g, '');
   return cleaned || null;
 }
 
