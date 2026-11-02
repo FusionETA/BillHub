@@ -168,6 +168,49 @@ one off stops it being synced and hides it everywhere — the same thing
 `accounts.base_currency` remains only as a fallback for a group with nothing
 synced yet.
 
+### When accounts & payees last synced
+
+The Bank files screen shows **Last synced** under its button, read from
+`payee_sync_state` — a row per organisation, written as each one finishes.
+A run that failed is recorded as a failure and named beside the time
+(`· 2 organisations failed`), so a stale organisation cannot hide behind a
+timestamp the others moved.
+
+It is recorded rather than inferred from `payees.synced_at`, which looks like
+it would do the job and does not: MySQL skips an `UPDATE` that changes nothing,
+so re-syncing an organisation nobody has edited leaves every `synced_at` where
+it was — and the timestamp would stop moving for exactly the organisations
+syncing cleanly.
+
+### Contact groups
+
+The Bills list has a **Contact group** filter, fed from Xero's own contact
+groups. Ayu Borneo keep about a hundred landlords in a `Landlord` group and
+track who has been paid in a spreadsheet; this is what lets that question be
+asked of the bills instead.
+
+Membership is mirrored by **Bank files → Sync accounts & payees**, at no extra
+cost in Xero calls: `ContactGroups` is part of the full contact record, which
+that sync already asks for because bank details are not in the summary view.
+
+Two things follow from how Xero models this, and both are visible to whoever
+is setting the groups up:
+
+- **A group belongs to one organisation.** `Landlord` in forty companies is
+  forty separate groups, so the filter matches on the **name**. Spelled
+  differently in one organisation, that organisation drops out of the filter
+  silently — there is nothing else for it to match on.
+- **Only contacts Xero marks as suppliers are mirrored**, because the sync asks
+  for `IsSupplier==true`. A contact with no bill yet is not one, which is the
+  right answer for a filter over bills.
+
+Membership is **replaced** per organisation on each sync rather than merged: a
+contact taken out of a group in Xero has to leave here too, or the filter goes
+on offering a bill somebody has already dealt with. The rows are collected
+across every page and written at the end, so a sync that fails halfway leaves
+the previous membership alone instead of emptying a group and putting nothing
+back.
+
 ### Scopes
 
 Bills Hub requests one granular scope per endpoint it calls:

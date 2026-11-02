@@ -15,6 +15,7 @@ const grantSource = require('../lib/grantSource');
 const router = express.Router();
 
 const bills = require('../models/bills');
+const contactGroups = require('../models/contactGroups');
 const entities = require('../models/entities');
 const syncState = require('../models/syncState');
 const vm = require('./viewModel');
@@ -57,6 +58,10 @@ function filtersFrom(query) {
     // not, and "A TO Z CARPET & FURNISHINGS, SDN BHD" would split in two. So
     // contacts arrive as repeated ?contact= parameters instead.
     contact: [].concat(query.contact || []).map(String).filter(Boolean),
+    // One Xero contact group, by name. Single rather than several: the
+    // question is "show me the landlords", and two groups at once is an
+    // intersection or a union with no way to say which was meant.
+    group: query.group || null,
     search: query.q || null,
     amountFrom: query.amountFrom || null,
     amountTo: query.amountTo || null,
@@ -180,6 +185,22 @@ router.get('/entities', async (req, res) => {
         ? `${process.env.WAZZOCR_URL.replace(/\/$/, '')}/account.html`
         : null
     });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+// The Xero contact groups in scope, for the Bills list's Group filter.
+//
+// Counts are contacts, not bills: somebody replacing a spreadsheet of a
+// hundred landlords wants to see that a hundred of them are in the group
+// before they trust the filter.
+router.get('/groups', async (req, res) => {
+  const accountId = needAccount(req, res); if (!accountId) return;
+  try {
+    const tenantIds = String(req.query.entities || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const rows = await contactGroups.names(accountId, tenantIds);
+    res.json({ groups: rows.map((r) => ({ name: r.name, count: Number(r.n) })) });
   } catch (err) {
     fail(res, err);
   }

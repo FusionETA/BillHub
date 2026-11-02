@@ -80,6 +80,22 @@ function buildWhere(accountId, f = {}) {
       params.push(...names);
     }
   }
+  // A Xero contact group, matched by name across whichever organisations are
+  // in scope. By name because a group belongs to one organisation: "Landlord"
+  // in forty companies is forty groups, and the only thing they share is what
+  // they are called.
+  //
+  // EXISTS rather than a join: a contact in three groups would otherwise
+  // multiply its bills by three, and every total on the page with it.
+  if (f.group) {
+    where.push(`EXISTS (
+      SELECT 1 FROM contact_groups g
+       WHERE g.account_id = b.account_id
+         AND g.xero_tenant_id = b.xero_tenant_id
+         AND g.contact_id = b.contact_id
+         AND g.group_name = ?)`);
+    params.push(String(f.group));
+  }
   // Free-text box: matches a reference, an invoice number, a supplier, or an
   // exact amount, because the UI offers one field for all four.
   if (f.search) {

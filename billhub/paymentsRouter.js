@@ -22,6 +22,7 @@ const batches = require('../models/batches');
 const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
+const syncState = require('../models/syncState');
 const entities = require('../models/entities');
 const grantSource = require('../lib/grantSource');
 const vm = require('./viewModel');
@@ -67,11 +68,13 @@ router.get('/', async (req, res) => {
     // files anyone has to act on, and sitting in the same list as the real
     // ones is exactly how someone ends up uploading nothing to the bank.
     const includeTest = await testMode.isOn(accountId);
-    const [batchRows, stats, bankSummary, payeeSummary] = await Promise.all([
+    const [batchRows, stats, bankSummary, payeeSummary, lastSynced, syncFailures] = await Promise.all([
       batches.list(accountId, { status: req.query.status || null, limit: 100, includeTest }),
       batches.summary(accountId, { includeTest }),
       bankAccounts.summary(accountId),
-      payees.summary(accountId)
+      payees.summary(accountId),
+      syncState.payeesLastSyncedAt(accountId),
+      syncState.payeesFailing(accountId)
     ]);
 
     const cards = [];
@@ -86,6 +89,11 @@ router.get('/', async (req, res) => {
         ? `${payeeSummary.missing} supplier${payeeSummary.missing === 1 ? ' has' : 's have'} no bank account number.`
         : null,
       unconfiguredFormats: bankSummary.unconfigured,
+      // When the suppliers and bank accounts on this screen were last read
+      // from Xero. A contact created in Xero since then is not here yet, which
+      // is the first thing to know when one cannot be found.
+      lastSyncedAt: lastSynced,
+      syncFailures,
       testMode: includeTest,
       currency
     });

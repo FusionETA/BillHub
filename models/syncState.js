@@ -89,4 +89,58 @@ async function minutesSinceSync(accountId) {
   return row && row.mins != null ? Number(row.mins) : null;
 }
 
-module.exports = { get, listByAccount, markRunning, markOk, markError, markContactsCursor, lastSyncedAt, minutesSinceSync };
+// ── Accounts & payees ───────────────────────────────────────────────────────
+//
+// The other sync: "Sync accounts & payees" on the Bank files screen, which
+// pulls bank accounts, supplier details and contact-group membership. Kept in
+// its own table — see payee_sync_state in db/schema.sql for why.
+
+async function markPayeesOk(accountId, tenantId, { banks = 0, suppliers = 0 } = {}) {
+  await db.execute(
+    `INSERT INTO payee_sync_state (account_id, xero_tenant_id, last_run_at, last_status, last_error, banks, suppliers)
+     VALUES (?,?, NOW(), 'ok', NULL, ?, ?)
+     ON DUPLICATE KEY UPDATE last_run_at = NOW(), last_status = 'ok', last_error = NULL,
+                             banks = VALUES(banks), suppliers = VALUES(suppliers)`,
+    [accountId, tenantId, Number(banks) || 0, Number(suppliers) || 0]
+  );
+}
+
+// The counts are left as they were. They describe the last run that actually
+// read something, and overwriting them with zero would turn a failed call into
+// "this organisation has no suppliers".
+async function markPayeesError(accountId, tenantId, message) {
+  const text = String(message || '').slice(0, 512);
+  await db.execute(
+    `INSERT INTO payee_sync_state (account_id, xero_tenant_id, last_run_at, last_status, last_error)
+     VALUES (?,?, NOW(), 'error', ?)
+     ON DUPLICATE KEY UPDATE last_run_at = NOW(), last_status = 'error', last_error = VALUES(last_error)`,
+    [accountId, tenantId, text]
+  );
+}
+
+// The most recent organisation that synced cleanly. MAX over the successes
+// rather than over every row, for the same reason the bills one does it: a
+// timestamp that moves when the sync failed is worse than no timestamp.
+async function payeesLastSyncedAt(accountId) {
+  const row = await db.getOne(
+    "SELECT MAX(last_run_at) AS at FROM payee_sync_state WHERE account_id = ? AND last_status = 'ok'",
+    [accountId]
+  );
+  return row?.at || null;
+}
+
+// How many organisations last came back with an error, so the screen can say
+// "synced, but not all of it" rather than implying the whole group is current.
+async function payeesFailing(accountId) {
+  const row = await db.getOne(
+    "SELECT COUNT(*) AS n FROM payee_sync_state WHERE account_id = ? AND last_status = 'error'",
+    [accountId]
+  );
+  return Number(row?.n || 0);
+}
+
+module.exports = {
+  get, listByAccount, markRunning, markOk, markError, markContactsCursor,
+  lastSyncedAt, minutesSinceSync,
+  markPayeesOk, markPayeesError, payeesLastSyncedAt, payeesFailing
+};

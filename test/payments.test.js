@@ -23,6 +23,11 @@ let paymentCounter = 0;
 const attachments = [];
 let failNextAttachment = null;
 let failPaymentForInvoice = null;   // fail the single payment for this invoice
+// Extra contacts, with their ContactGroups, returned for one organisation.
+// Empty until the contact-group cases fill it, so the supplier counts the
+// earlier sync case asserts are left alone.
+const groupFixture = {};
+let failContactsFor = null;
 
 // Kept so the testing-mode case can exercise the REAL guard rather than this
 // stub, which by definition has no guard in it.
@@ -84,7 +89,9 @@ xero.api = async (accountId, tenantId, path, opts = {}) => {
     return { Accounts: [{ AccountID: 'acct-synced-1', Code: '092', Name: 'HSBC Collections 2201', BankAccountNumber: '220199887766', CurrencyCode: 'MYR', Status: 'ACTIVE', BankAccountType: 'BANK' }] };
   }
   if (path.startsWith('/Contacts')) {
-    return { Contacts: [{ ContactID: 'contact-synced-1', Name: 'Newly Synced Supplier', BankAccountDetails: 'CIMB 8899-0011-2233' }] };
+    if (failContactsFor === tenantId) throw new Error('Xero said no');
+    return { Contacts: [{ ContactID: 'contact-synced-1', Name: 'Newly Synced Supplier', BankAccountDetails: 'CIMB 8899-0011-2233' }]
+      .concat(groupFixture[tenantId] || []) };
   }
   return {};
 };
@@ -1386,6 +1393,125 @@ function check(name, ok, detail) {
     check('rewritten parts are not empty',
       inflate(out.find((e) => e.name === '[Content_Types].xml')).length > 0
       && inflate(out.find((e) => e.name === 'xl/_rels/workbook.xml.rels')).length > 0);
+  }
+
+  // ── When accounts & payees last synced ────────────────────────────────────
+  // The button said nothing about when it had last run, so "I have clicked it
+  // ten times" and "the contact still is not there" could not be told apart.
+  console.log('\nWhen accounts & payees last synced');
+  {
+    const before = await req('GET', '/api/payments', { cookie });
+    check('the bank files view carries a last-synced time',
+      Boolean(before.body.lastSyncedAt), before.body.lastSyncedAt);
+
+    await db.execute("UPDATE payee_sync_state SET last_run_at = '2026-01-01 00:00:00' WHERE account_id = 1");
+    const stale = await req('GET', '/api/payments', { cookie });
+    check('it is read from the record, not invented',
+      new Date(stale.body.lastSyncedAt).getFullYear() === 2026
+      && new Date(stale.body.lastSyncedAt).getMonth() === 0, stale.body.lastSyncedAt);
+
+    const run = await req('POST', '/api/payments/sync', { cookie });
+    check('a sync moves it on', new Date(run.body.lastSyncedAt) > new Date(stale.body.lastSyncedAt),
+      { was: stale.body.lastSyncedAt, now: run.body.lastSyncedAt });
+
+    // An organisation that fails must not count as synced, or the timestamp
+    // says the whole group is current when one of them has not been read for
+    // a week.
+    failContactsFor = 'tenant-abm';
+    const partial = await req('POST', '/api/payments/sync', { cookie });
+    failContactsFor = null;
+    const failedRow = await db.getOne(
+      "SELECT last_status, last_error FROM payee_sync_state WHERE account_id = 1 AND xero_tenant_id = 'tenant-abm'");
+    check('an organisation that failed is recorded as failing',
+      failedRow && failedRow.last_status === 'error', failedRow);
+    check('and the view says how many', partial.body.failed === 1, partial.body.failed);
+    const after = await req('GET', '/api/payments', { cookie });
+    check('the screen can show the failure beside the time',
+      after.body.syncFailures === 1 && Boolean(after.body.lastSyncedAt),
+      { failures: after.body.syncFailures, at: after.body.lastSyncedAt });
+
+    // Putting it right clears the mark, or the warning outlives the problem.
+    await req('POST', '/api/payments/sync', { cookie });
+    const healed = await req('GET', '/api/payments', { cookie });
+    check('a clean run clears the failure', healed.body.syncFailures === 0, healed.body.syncFailures);
+  }
+
+  // ── Xero contact groups ───────────────────────────────────────────────────
+  // Ayu Borneo keep about a hundred landlords in a Xero contact group and
+  // track who has been paid in a spreadsheet. The group has to reach the
+  // bills list for that spreadsheet to go away.
+  console.log('\nContact groups');
+  {
+    const TEN = 'tenant-abm';
+    const two = await db.query(
+      `SELECT id, contact_id, contact_name FROM bills
+        WHERE account_id = 1 AND xero_tenant_id = ? ORDER BY id LIMIT 2`, [TEN]);
+    // Both bills to one contact, so "in two groups" can be told apart from
+    // "counted twice" — a join instead of EXISTS returns four rows here.
+    await db.execute('UPDATE bills SET contact_id = ?, contact_name = ? WHERE id = ?',
+      [two[0].contact_id, two[0].contact_name, two[1].id]);
+
+    const landlord = {
+      ContactID: two[0].contact_id,
+      Name: two[0].contact_name,
+      ContactGroups: [
+        { ContactGroupID: 'g-landlord', Name: 'Landlord', Status: 'ACTIVE' },
+        { ContactGroupID: 'g-monthly', Name: 'Monthly Payment Run', Status: 'ACTIVE' }
+      ]
+    };
+    groupFixture[TEN] = [landlord];
+    await req('POST', '/api/payments/sync', { cookie });
+
+    const rows = await db.query(
+      'SELECT group_name FROM contact_groups WHERE account_id = 1 AND contact_id = ? ORDER BY group_name',
+      [two[0].contact_id]);
+    check('the sync mirrors a contact\u2019s groups',
+      rows.length === 2 && rows[0].group_name === 'Landlord', rows);
+
+    const listed = await req('GET', '/api/bills/groups', { cookie });
+    const found = (listed.body.groups || []).find((g) => g.name === 'Landlord');
+    check('the groups endpoint offers it, counted by contact', found && found.count === 1, listed.body.groups);
+
+    const filtered = await req('GET', '/api/bills?group=Landlord&limit=100', { cookie });
+    check('filtering the bills by group returns that contact\u2019s bills',
+      filtered.status === 200 && filtered.body.rows.length === 2, filtered.body.rows.length);
+    check('and a contact in two groups is not counted twice',
+      filtered.body.page.total === 2, filtered.body.page);
+
+    const other = await req('GET', '/api/bills?group=Monthly%20Payment%20Run&limit=100', { cookie });
+    check('its other group finds the same bills', other.body.rows.length === 2, other.body.rows.length);
+
+    const none = await req('GET', '/api/bills?group=Nobody&limit=100', { cookie });
+    check('a group nothing is in returns nothing', none.body.rows.length === 0, none.body.rows.length);
+
+    // A group Xero has deleted still comes back on the contacts that were in
+    // it, and offering it would be offering a filter that can only shrink.
+    groupFixture[TEN] = [{ ...landlord, ContactGroups: landlord.ContactGroups
+      .concat([{ ContactGroupID: 'g-gone', Name: 'Scrapped', Status: 'DELETED' }]) }];
+    await req('POST', '/api/payments/sync', { cookie });
+    const afterDeleted = await req('GET', '/api/bills/groups', { cookie });
+    check('a deleted group is not offered',
+      !(afterDeleted.body.groups || []).some((g) => g.name === 'Scrapped'), afterDeleted.body.groups);
+
+    // The reason membership is replaced rather than merged: taking a landlord
+    // off the list in Xero has to take them off here, or the filter goes on
+    // showing a bill somebody has already dealt with.
+    groupFixture[TEN] = [{ ...landlord, ContactGroups: [landlord.ContactGroups[1]] }];
+    await req('POST', '/api/payments/sync', { cookie });
+    const dropped = await req('GET', '/api/bills?group=Landlord&limit=100', { cookie });
+    check('a contact taken out of a group in Xero leaves it here',
+      dropped.body.rows.length === 0, dropped.body.rows.length);
+    const stillThere = await req('GET', '/api/bills?group=Monthly%20Payment%20Run&limit=100', { cookie });
+    check('and its other group is untouched', stillThere.body.rows.length === 2, stillThere.body.rows.length);
+
+    // Collected across every page and written at the end, so a Xero call that
+    // fails cannot empty a group and put nothing back.
+    failContactsFor = TEN;
+    await req('POST', '/api/payments/sync', { cookie });
+    failContactsFor = null;
+    const survived = await req('GET', '/api/bills?group=Monthly%20Payment%20Run&limit=100', { cookie });
+    check('a sync that fails leaves the previous membership alone',
+      survived.body.rows.length === 2, survived.body.rows.length);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

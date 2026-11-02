@@ -21,7 +21,9 @@ const payeeCodes = require('../lib/payeeCodes');
 const bankAccounts = require('../models/bankAccounts');
 const bankFormats = require('../models/bankFormats');
 const payees = require('../models/payees');
+const contactGroups = require('../models/contactGroups');
 const entities = require('../models/entities');
+const syncState = require('../models/syncState');
 const banks = require('../lib/malaysianBanks');
 const accounts = require('../models/accounts');
 const { render } = require('../lib/bankFile');
@@ -47,11 +49,21 @@ async function syncBankAccounts(accountId, tenantId) {
   return list.length;
 }
 
-// Supplier bank details. Only contacts that are actually suppliers matter, so
-// the list is filtered to those with payable activity.
+// Supplier bank details, and which Xero contact groups each one is in. Only
+// contacts that are actually suppliers matter, so the list is filtered to
+// those with payable activity.
+//
+// Group membership costs nothing extra: ContactGroups is part of the full
+// contact record, which this already asks for because bank details are not in
+// the summary view. The one thing it inherits from IsSupplier==true is that a
+// contact Xero has not yet seen a bill for is not here — which is the right
+// answer for a list whose whole purpose is filtering bills.
 async function syncPayees(accountId, tenantId) {
   let page = 1;
   let seen = 0;
+  // Collected across every page and written once at the end. Writing per page
+  // would mean each page deleting what the one before it had just put in.
+  const groups = [];
   for (; page <= 50; page += 1) {
     const qs = new URLSearchParams({
       where: 'IsSupplier==true',
@@ -62,10 +74,20 @@ async function syncPayees(accountId, tenantId) {
     const payload = await xero.api(accountId, tenantId, `/Contacts?${qs}`);
     const list = payload?.Contacts || [];
     if (!list.length) break;
-    for (const c of list) await payees.upsertFromXero(accountId, tenantId, c);
+    for (const c of list) {
+      await payees.upsertFromXero(accountId, tenantId, c);
+      for (const g of c.ContactGroups || []) {
+        // A deleted group still comes back on the contacts that were in it.
+        if (g?.Name && g.Status !== 'DELETED') {
+          groups.push({ contactId: c.ContactID, groupId: g.ContactGroupID || null, name: g.Name });
+        }
+      }
+    }
     seen += list.length;
     if (list.length < 100) break;
   }
+  // Past the loop, so a page that threw leaves the previous membership intact.
+  await contactGroups.replaceForTenant(accountId, tenantId, groups);
   return seen;
 }
 
@@ -82,9 +104,14 @@ async function syncAll(accountId, { tenantIds = null } = {}) {
     try {
       const banks = await syncBankAccounts(accountId, t.xero_tenant_id);
       const suppliers = await syncPayees(accountId, t.xero_tenant_id);
+      await syncState.markPayeesOk(accountId, t.xero_tenant_id, { banks, suppliers });
       results.push({ tenantId: t.xero_tenant_id, name: t.short_name || t.tenant_name, banks, suppliers, ok: true });
     } catch (e) {
       console.error(`[payments] sync ${t.tenant_name || t.xero_tenant_id}: ${e.message}`);
+      // Recorded, not just logged. An organisation whose token has expired
+      // fails every time and silently, and the screen's "last synced" would
+      // otherwise read as if it covered that organisation too.
+      await syncState.markPayeesError(accountId, t.xero_tenant_id, e.message);
       results.push({ tenantId: t.xero_tenant_id, name: t.short_name || t.tenant_name, ok: false, error: e.message });
     }
   }
@@ -93,6 +120,7 @@ async function syncAll(accountId, { tenantIds = null } = {}) {
     banks: results.reduce((n, r) => n + (r.banks || 0), 0),
     suppliers: results.reduce((n, r) => n + (r.suppliers || 0), 0),
     failed: results.filter((r) => !r.ok).length,
+    lastSyncedAt: await syncState.payeesLastSyncedAt(accountId),
     results
   };
 }

@@ -721,3 +721,62 @@ CREATE TABLE IF NOT EXISTS activity_log (
   INDEX idx_activity_user (user_id, created_at),
   INDEX idx_activity_action (action, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Xero contact groups, mirrored so the Bills list can be filtered to one.
+--
+-- Ayu Borneo keep a "Landlord" group of about a hundred contacts and track
+-- whether each has been paid in a spreadsheet. This is what lets that question
+-- be asked of the bills instead.
+--
+-- A group belongs to one organisation, so "Landlord" in two organisations is
+-- two groups that happen to share a name, and the filter matches on the name.
+-- That is the only thing that can work across forty-odd companies, and it is
+-- also why a group spelled differently in one of them silently drops out.
+--
+-- Rewritten wholesale per organisation on each payee sync rather than merged:
+-- membership carries no UpdatedDateUTC to read incrementally, and a contact
+-- taken out of a group in Xero has to leave here too, which an upsert cannot
+-- do. The rows are collected across every page first and written at the end,
+-- so a sync that fails halfway leaves the previous membership alone rather
+-- than deleting it and putting nothing back.
+CREATE TABLE IF NOT EXISTS contact_groups (
+  id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id     BIGINT UNSIGNED NOT NULL,
+  xero_tenant_id VARCHAR(64) NOT NULL,
+  contact_id     CHAR(36) NOT NULL,
+  -- Xero's ContactGroupID. Kept for a link back and to tell two groups apart
+  -- when somebody renames one; the filter itself matches on the name.
+  group_id       CHAR(36) NULL,
+  group_name     VARCHAR(255) NOT NULL,
+  synced_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_contact_group (account_id, xero_tenant_id, contact_id, group_name),
+  INDEX idx_cg_name (account_id, group_name),
+  INDEX idx_cg_contact (account_id, xero_tenant_id, contact_id),
+  CONSTRAINT fk_cg_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- When "Sync accounts & payees" last pulled an organisation, and how it went.
+--
+-- Its own table rather than columns on bill_sync_state: that one carries the
+-- invoice and contact cursors, which this sync has no equivalent of — it reads
+-- every supplier every time, because a contact's bank details carry nothing to
+-- page incrementally against.
+--
+-- Recorded rather than inferred from payees.synced_at, which looks like it
+-- would do and does not: MySQL skips an UPDATE that changes nothing, so a
+-- re-sync of an organisation nobody has edited leaves every synced_at where it
+-- was. The timestamp would then stop moving for exactly the organisations that
+-- are syncing cleanly.
+CREATE TABLE IF NOT EXISTS payee_sync_state (
+  id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  account_id     BIGINT UNSIGNED NOT NULL,
+  xero_tenant_id VARCHAR(64) NOT NULL,
+  last_run_at    DATETIME NULL,
+  last_status    ENUM('ok','error') DEFAULT 'ok',
+  last_error     VARCHAR(512),
+  -- What the run found, so "synced" can be told apart from "synced nothing".
+  banks          INT DEFAULT 0,
+  suppliers      INT DEFAULT 0,
+  UNIQUE KEY uq_payee_sync_tenant (account_id, xero_tenant_id),
+  CONSTRAINT fk_payee_sync_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
