@@ -810,7 +810,11 @@ so no code path can write into WazzOCR's tables by accident.
 
 Every request that **changed** something, plus every sign-in and every
 attempt that failed, lands in `activity_log` and is readable on an
-**Activity** tab that only a super admin sees. `auth/activity.js` is mounted
+**Activity** tab that only a super admin sees. The page is **not** narrowed
+to the reader's own account: the permission is held by whoever runs the
+deployment rather than by a customer's administrator, so it reads across
+every account, each row saying which one it happened in, with an account
+filter to narrow. `auth/activity.js` is mounted
 once above every API router, so an endpoint written tomorrow is logged
 tomorrow rather than whenever somebody remembers — the handlers that get
 forgotten are exactly the ones worth having.

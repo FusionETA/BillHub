@@ -57,46 +57,81 @@ async function record({
   }
 }
 
+// Which rows the reader may see. A number narrows to one account, keeping
+// the rows that belong to no account — a failed sign-in happens before
+// anybody knows whose it was, and those are worth seeing.
+//
+// `null` means every account. Only the activity log is ever called that way:
+// the permission that opens this page is held by whoever runs the
+// deployment, not by a customer's administrator, and a question like "who
+// changed that" does not arrive already sorted by company.
+const scope = (accountId, where, params) => {
+  if (accountId == null) return;
+  where.push('(l.account_id = ? OR l.account_id IS NULL)');
+  params.push(Number(accountId));
+};
+
+// Joined so a row can say which account it happened in, which is the only
+// way a cross-account page reads as anything but a jumble.
+const FROM = 'activity_log l LEFT JOIN accounts a ON a.id = l.account_id';
+
 // Newest first, with the filters the page offers. `before` is an id rather
 // than a timestamp: two rows can share a second, and paging by time would
 // drop or repeat them.
 async function list(accountId, {
   limit = 100, before = null, userId = null, action = null, q = null, days = null
 } = {}) {
-  const where = ['(account_id = ? OR account_id IS NULL)'];
-  const params = [accountId];
-  if (before) { where.push('id < ?'); params.push(Number(before)); }
-  if (userId) { where.push('user_id = ?'); params.push(Number(userId)); }
+  const where = [];
+  const params = [];
+  scope(accountId, where, params);
+  if (before) { where.push('l.id < ?'); params.push(Number(before)); }
+  if (userId) { where.push('l.user_id = ?'); params.push(Number(userId)); }
   // A prefix, so "recharge" picks up every recharge action without the page
   // having to know what they are called.
-  if (action) { where.push('action LIKE ?'); params.push(`${action}%`); }
-  if (days) { where.push('created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)'); params.push(Number(days)); }
+  if (action) { where.push('l.action LIKE ?'); params.push(`${action}%`); }
+  if (days) { where.push('l.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)'); params.push(Number(days)); }
   if (q) {
-    where.push('(user_email LIKE ? OR user_name LIKE ? OR summary LIKE ? OR path LIKE ?)');
+    where.push('(l.user_email LIKE ? OR l.user_name LIKE ? OR l.summary LIKE ? OR l.path LIKE ?)');
     const like = `%${q}%`;
     params.push(like, like, like, like);
   }
   params.push(Math.min(Number(limit) || 100, 500));
   return db.query(
-    `SELECT * FROM activity_log WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`, params);
+    `SELECT l.*, a.name AS account_name FROM ${FROM}
+      WHERE ${where.join(' AND ') || '1'} ORDER BY l.id DESC LIMIT ?`, params);
 }
 
 // Everyone who appears in the log, for the filter. From the log itself and
 // not from `users`, so somebody since removed is still selectable — which is
 // often exactly who is being looked for.
 async function actors(accountId) {
+  const where = ['l.user_id IS NOT NULL'];
+  const params = [];
+  scope(accountId, where, params);
   return db.query(
-    `SELECT user_id, MAX(user_email) AS email, MAX(user_name) AS name, COUNT(*) AS events
-       FROM activity_log
-      WHERE (account_id = ? OR account_id IS NULL) AND user_id IS NOT NULL
-      GROUP BY user_id ORDER BY MAX(id) DESC LIMIT 100`, [accountId]);
+    `SELECT l.user_id, MAX(l.user_email) AS email, MAX(l.user_name) AS name, COUNT(*) AS events
+       FROM ${FROM} WHERE ${where.join(' AND ')}
+      GROUP BY l.user_id ORDER BY MAX(l.id) DESC LIMIT 100`, params);
 }
 
 async function kinds(accountId) {
+  const where = [];
+  const params = [];
+  scope(accountId, where, params);
   return db.query(
-    `SELECT action, COUNT(*) AS events FROM activity_log
-      WHERE (account_id = ? OR account_id IS NULL)
-      GROUP BY action ORDER BY action`, [accountId]);
+    `SELECT l.action, COUNT(*) AS events FROM ${FROM}
+      WHERE ${where.join(' AND ') || '1'}
+      GROUP BY l.action ORDER BY l.action`, params);
+}
+
+// The accounts that actually appear in the log, for the account filter.
+// Named from `accounts` but counted from the log, so one that has never done
+// anything is not offered as something to look at.
+async function accounts() {
+  return db.query(
+    `SELECT l.account_id, MAX(a.name) AS name, COUNT(*) AS events
+       FROM ${FROM} WHERE l.account_id IS NOT NULL
+      GROUP BY l.account_id ORDER BY MAX(a.name)`);
 }
 
 // The log grows for ever otherwise. Kept long enough to answer a question
@@ -113,4 +148,4 @@ async function prune({ days = Number(process.env.ACTIVITY_RETENTION_DAYS || 400)
   }
 }
 
-module.exports = { record, list, actors, kinds, prune, scrub };
+module.exports = { record, list, actors, kinds, accounts, prune, scrub };

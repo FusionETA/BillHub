@@ -2884,7 +2884,8 @@
     function ActivityView({ onToast, refreshKey = 0 }) {
       const [events, setEvents] = useState([]);
       const [more, setMore] = useState(false);
-      const [filters, setFilters] = useState({ actors: [], kinds: [] });
+      const [filters, setFilters] = useState({ actors: [], kinds: [], accounts: [] });
+      const [acct, setAcct] = useState('');
       const [who, setWho] = useState('');
       const [kind, setKind] = useState('');
       const [days, setDays] = useState('30');
@@ -2895,6 +2896,7 @@
 
       const query = (extra = {}) => {
         const p = new URLSearchParams();
+        if (acct) p.set('account', acct);
         if (who) p.set('userId', who);
         if (kind) p.set('action', kind);
         if (days) p.set('days', days);
@@ -2908,7 +2910,7 @@
         try {
           const [d, f] = await Promise.all([
             request('/api/activity?' + query()),
-            request('/api/activity/filters')
+            request('/api/activity/filters?' + query())
           ]);
           setEvents(d.events || []);
           setMore(Boolean(d.more));
@@ -2916,7 +2918,7 @@
           setError(null);
         } catch (e) { setError(e.message); }
         finally { setLoading(false); }
-      }, [who, kind, days, q, refreshKey]);
+      }, [acct, who, kind, days, q, refreshKey]);
 
       useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load]);
 
@@ -2940,11 +2942,14 @@
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}><a href="#">Bills Hub</a> <span style={{ color: 'var(--text-subtle)' }}>/</span> <span>Activity</span></div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text-heading)' }}>Activity</h1>
           <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-muted)', maxWidth: '78ch' }}>
-            Every sign-in, every attempt that failed, and every action that changed something — who did it, when, and what it did. Only an administrator can open this.
+            Every sign-in, every attempt that failed, and every action that changed something — who did it, when, and what it did. Across every account, because the question is rarely about only one. Only an administrator can open this.
           </p>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, marginBottom: 16 }}>
+          <Select label="Account" value={acct} onChange={setAcct}
+            options={[{ label: 'Every account', value: '' }].concat(
+              (filters.accounts || []).map(a => ({ label: `${a.label} (${a.events})`, value: String(a.accountId) })))} />
           <Select label="Person" value={who} onChange={setWho}
             options={[{ label: 'Everyone', value: '' }].concat(
               (filters.actors || []).map(a => ({ label: `${a.label} (${a.events})`, value: String(a.userId) })))} />
@@ -2973,9 +2978,14 @@
                       <div style={{ fontWeight: 700, color: 'var(--text-heading)', ...Ellip }} title={e.email || ''}>{e.who}</div>
                       {e.ip && <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{e.ip}</div>}
                     </div>
-                    <div style={{ minWidth: 0, color: e.failed ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }} title={e.summary}>
-                      {e.summary}
-                      {e.failed && <span style={{ fontSize: 11.5, fontWeight: 700, marginLeft: 8 }}>failed · {e.statusCode}</span>}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: e.failed ? 'var(--color-danger)' : 'var(--text-body)', ...Ellip }} title={e.summary}>
+                        {e.summary}
+                        {e.failed && <span style={{ fontSize: 11.5, fontWeight: 700, marginLeft: 8 }}>failed · {e.statusCode}</span>}
+                      </div>
+                      {/* Only when more than one account is in view: naming it
+                          on every row of a single-account list is noise. */}
+                      {!acct && e.account && <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', ...Ellip }}>{e.account}</div>}
                     </div>
                     <div><Code>{e.action}</Code></div>
                     <div style={{ textAlign: 'right' }}>

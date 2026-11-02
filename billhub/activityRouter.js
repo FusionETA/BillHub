@@ -25,6 +25,10 @@ function row(r) {
     email: r.user_email || null,
     userId: r.user_id || null,
     action: r.action,
+    // Which account it happened in. Null for the handful of rows recorded
+    // before anybody's account was known, such as a sign-in that failed.
+    account: r.account_name || null,
+    accountId: r.account_id || null,
     summary: r.summary || `${r.method || ''} ${r.path || ''}`.trim(),
     method: r.method || null,
     path: r.path || null,
@@ -39,8 +43,17 @@ function row(r) {
   };
 }
 
+// Everything that reaches this router has already passed requireSuperAdmin,
+// so the reader is whoever runs the deployment rather than one company's
+// administrator. The log is therefore not narrowed to their own account:
+// scoping it there made the page empty for an admin who belongs to no
+// account, and silently hid every other account from one who does.
+//
+// `?account=` narrows it when the question is about one of them.
+const asked = (req) => (req.query.account ? Number(req.query.account) : null);
+
 router.get('/', async (req, res) => {
-  const accountId = req.account?.id || req.user?.account_id || null;
+  const accountId = asked(req);
   try {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const rows = await activity.list(accountId, {
@@ -62,14 +75,19 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/filters', async (req, res) => {
-  const accountId = req.account?.id || req.user?.account_id || null;
+  const accountId = asked(req);
   try {
-    const [actors, kinds] = await Promise.all([
-      activity.actors(accountId), activity.kinds(accountId)
+    const [actors, kinds, accounts] = await Promise.all([
+      activity.actors(accountId), activity.kinds(accountId), activity.accounts()
     ]);
     res.json({
       actors: actors.map((a) => ({
         userId: a.user_id, label: a.name || a.email || `User ${a.user_id}`, events: Number(a.events)
+      })),
+      // Always every account, whichever one is being looked at, or choosing
+      // one would be a door that locks behind you.
+      accounts: accounts.map((a) => ({
+        accountId: a.account_id, label: a.name || `Account ${a.account_id}`, events: Number(a.events)
       })),
       // Grouped to the part before the first dot, so the filter offers
       // "recharge" rather than nine separate recharge actions.

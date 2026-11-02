@@ -130,6 +130,38 @@ const settle = () => new Promise((r) => setTimeout(r, 250));
   check('the filters offer the kinds that are actually in the log',
     filters.body.kinds.some((k) => k.value === 'recharge'), filters.body.kinds);
 
+  // The page belongs to whoever runs the deployment, not to one company's
+  // administrator, so it is not narrowed to the reader's own account —
+  // which used to leave an admin belonging to no account staring at an
+  // empty table while the log was filling up.
+  console.log('\nAcross every account');
+  const mine = await db.getOne('SELECT id FROM accounts ORDER BY id LIMIT 1');
+  const other = await db.insert(
+    "INSERT INTO accounts (name, status) VALUES ('Somebody Else Sdn Bhd', 'active')");
+  await activity.record({
+    accountId: other, user: { id: 9901, email: 'them@example.com', name: 'Them' },
+    action: 'bill.pay', summary: 'Paid 2 bills', method: 'POST', path: '/api/payments/batches',
+    statusCode: 200
+  });
+  const all = await req('GET', '/api/activity?days=1');
+  check('a row from another account is in the page',
+    all.body.events.some((e) => e.accountId === other), all.body.events.map((e) => e.accountId));
+  check('and it says which account it happened in',
+    all.body.events.find((e) => e.accountId === other)?.account === 'Somebody Else Sdn Bhd',
+    all.body.events.find((e) => e.accountId === other));
+  check('rows from this account are still there beside it',
+    all.body.events.some((e) => e.accountId === mine.id), all.body.events.map((e) => e.accountId));
+
+  const narrowed = await req('GET', `/api/activity?days=1&account=${other}`);
+  check('choosing one account narrows to it',
+    narrowed.body.events.length > 0 && narrowed.body.events.every((e) => e.accountId === other || e.accountId === null),
+    narrowed.body.events.map((e) => e.accountId));
+  const accountFilter = await req('GET', '/api/activity/filters?account=' + other);
+  check('and every account is still offered, so the choice can be undone',
+    accountFilter.body.accounts.some((a) => a.accountId === mine.id)
+      && accountFilter.body.accounts.some((a) => a.accountId === other),
+    accountFilter.body.accounts);
+
   console.log('\nWho may read it');
   // This suite runs with AUTH_DISABLED, which waves the guard through — the
   // same bargain the rest of the app makes, and the banner says so. So the
