@@ -117,6 +117,52 @@ function inBorrowedMode(snippet, env = {}) {
   check('and it will not delete one either', Number(after.n) === Number(before.n),
     { before: before.n, after: after.n });
 
+  // ── What the sign-in page is told ─────────────────────────────────────────
+  // The page cannot work out which deployment it is on, and showing a password
+  // box to somebody who has no password here is worse than useless: the server
+  // refuses every attempt, so they retype the WazzOCR password they know is
+  // right and are told again that it is wrong.
+  console.log('\nWhat the sign-in page is told');
+
+  const modeIn = (env) => JSON.parse(execFileSync(process.execPath, ['-e', `
+    const express = require('express');
+    const app = express();
+    app.use('/api/auth', require('./auth/router'));
+    const s = app.listen(0, () => {
+      const http = require('http');
+      http.get({ port: s.address().port, path: '/api/auth/mode' }, (r) => {
+        let out = ''; r.on('data', (c) => { out += c; });
+        r.on('end', () => { console.log(out); s.close(); });
+      });
+    });
+  `], { cwd: path.join(__dirname, '..'), encoding: 'utf8',
+        env: { ...process.env, WAZZOCR_DB_NAME: WZ, AUTH_DISABLED: 'false', ...env } }).trim());
+
+  const ownMode = modeIn({ AUTH_SOURCE: '' });
+  check('its own sign-in says so, and names nowhere else',
+    ownMode.borrowed === false && ownMode.mode === 'own' && ownMode.signInAt === null, ownMode);
+
+  const borrowedMode = modeIn({ AUTH_SOURCE: 'wazzocr', WAZZOCR_URL: 'https://wazzocr.example.com' });
+  check('a borrowed one says there is no sign-in here',
+    borrowedMode.borrowed === true && borrowedMode.mode === 'wazzocr', borrowedMode);
+  check('and says where the real one is',
+    borrowedMode.signInAt === 'https://wazzocr.example.com', borrowedMode);
+
+  // Nowhere to send them is a real deployment state — the page says to ask an
+  // administrator rather than offering a link to nothing.
+  const noUrl = modeIn({ AUTH_SOURCE: 'wazzocr', WAZZOCR_URL: '' });
+  check('with no WazzOCR address configured it offers none',
+    noUrl.borrowed === true && noUrl.signInAt === null, noUrl);
+
+  // The page is a static file, so what it does with that answer is only
+  // checkable by reading it.
+  const page = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'login.html'), 'utf8');
+  check('the page asks before it shows either', page.includes('/api/auth/mode'), null);
+  check('and keeps the form hidden until it knows',
+    /\.card>\.body\s*\{\s*display:\s*none/.test(page), null);
+  check('it refuses a sign-in link that is not http',
+    page.includes('^https?:\\/\\//i') || /\^https\?/.test(page), null);
+
   await db.execute('UPDATE accounts SET wazzocr_account_id = ? WHERE id = ?',
     [account.wazzocr_account_id, account.id]);
   await db.execute(`DROP DATABASE IF EXISTS \`${WZ}\``);

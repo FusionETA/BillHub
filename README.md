@@ -182,6 +182,24 @@ so re-syncing an organisation nobody has edited leaves every `synced_at` where
 it was — and the timestamp would stop moving for exactly the organisations
 syncing cleanly.
 
+### The sign-in page
+
+`AUTH_SOURCE=wazzocr` means Bills Hub has no sign-in of its own, so
+`public/login.html` asks `GET /api/auth/mode` before it shows anything and
+puts up a link to WazzOCR instead of a password box.
+
+Worth doing because the form was not merely useless there, it was misleading:
+the server refuses every password, so somebody types the WazzOCR one they know
+is right, is told it is wrong, and tries it again. The usual way to arrive at
+this page is a WazzOCR session that has expired — so the person reading it is
+already signed out of the only place that can help them.
+
+`/api/auth/mode` is unauthenticated by necessity: it is what somebody with no
+session is told. It carries no secret, only whether this deployment signs
+people in itself and, when it does not, the `WAZZOCR_URL` to send them to.
+With no `WAZZOCR_URL` set the page says to ask an administrator rather than
+offering a dead link.
+
 ### Contact groups
 
 The Bills list has a **Contact group** filter, fed from Xero's own contact

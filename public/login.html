@@ -150,23 +150,91 @@
     .error.on {
       display: block
     }
+
+    /* Which of the two this deployment is cannot be known until the server
+       says, and showing a password form to somebody who has no password here
+       — even for a moment — is the thing this page exists to stop. So the
+       card starts empty and one of the two is revealed. */
+    .card>.body {
+      display: none
+    }
+
+    .card.ready>.body.on {
+      display: block
+    }
+
+    .waiting {
+      height: 132px
+    }
+
+    .card.ready .waiting {
+      display: none
+    }
+
+    a.cta {
+      display: block;
+      width: 100%;
+      text-align: center;
+      text-decoration: none;
+      background: var(--brand-orange);
+      color: #fff;
+      border-radius: 10px;
+      padding: 13px 16px;
+      font-family: var(--font-body);
+      font-size: 15px;
+      font-weight: 700;
+      margin-top: 4px
+    }
+
+    a.cta:hover {
+      background: var(--orange-600)
+    }
+
+    .note {
+      font-size: 13.5px;
+      line-height: 1.65;
+      color: var(--neutral-500);
+      margin-bottom: 18px
+    }
+
+    .note strong {
+      color: var(--neutral-700)
+    }
   </style>
 </head>
 
 <body>
-  <form class="card" id="form">
+  <div class="card" id="card">
     <div class="brand">Fusion<span>ETA</span></div>
     <h1>Bills Hub</h1>
-    <div class="sub">Sign in to manage bills across your Xero entities.</div>
-    <div class="error" id="error" role="alert"></div>
-    <label for="email">Email</label>
-    <input id="email" name="email" type="email" autocomplete="username" required autofocus>
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit" id="submit">Sign in</button>
-  </form>
+    <div class="sub" id="sub">Sign in to manage bills across your Xero entities.</div>
+
+    <div class="waiting"></div>
+
+    <!-- This deployment signs people in itself. -->
+    <form class="body" id="form">
+      <div class="error" id="error" role="alert"></div>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit" id="submit">Sign in</button>
+    </form>
+
+    <!-- This deployment borrows WazzOCR's. There is no password here to type,
+         so there is no box to type one into. -->
+    <div class="body" id="borrowed">
+      <div class="note">
+        Bills Hub uses your <strong>WazzOCR</strong> sign-in. Sign in there and
+        open Bills Hub from the menu — whoever is signed into WazzOCR is signed
+        in here.
+      </div>
+      <a class="cta" id="goto" href="#">Go to WazzOCR</a>
+    </div>
+  </div>
 
   <script>
+    const card = document.getElementById('card');
     const form = document.getElementById('form');
     const errorBox = document.getElementById('error');
     const submit = document.getElementById('submit');
@@ -177,6 +245,49 @@
       const next = new URLSearchParams(location.search).get('next') || '/';
       return /^\/(?!\/)/.test(next) ? next : '/';
     }
+
+    // Ask which sign-in this deployment has before showing either.
+    //
+    // In borrowed mode the form is not merely useless, it is misleading: the
+    // server refuses every password, so somebody types the WazzOCR one they
+    // know is right, is told it is wrong, and tries it again. The usual way to
+    // land here is a WazzOCR session that has expired, so the person reading
+    // this is already signed out of the only place that can help.
+    //
+    // Only same-origin or an http(s) link is followed, and the link is set
+    // from the server's answer rather than from anything in the address bar.
+    (async () => {
+      let mode = null;
+      try {
+        const res = await fetch('/api/auth/mode', { credentials: 'same-origin' });
+        mode = res.ok ? await res.json() : null;
+      } catch { /* offline, or the server is down: fall through to the form */ }
+
+      if (mode && mode.borrowed) {
+        document.getElementById('sub').textContent =
+          'Bills Hub does not have its own sign-in.';
+        const link = document.getElementById('goto');
+        const url = String(mode.signInAt || '');
+        if (/^https?:\/\//i.test(url)) {
+          link.href = url;
+        } else {
+          // Nowhere to send them. Better to say so than to offer a dead link.
+          link.replaceWith(Object.assign(document.createElement('div'), {
+            className: 'note',
+            textContent: 'Ask your administrator for the WazzOCR address.'
+          }));
+        }
+        document.getElementById('borrowed').classList.add('on');
+        card.classList.add('ready');
+      } else {
+        form.classList.add('on');
+        // After `ready`, not before: until the card has it the form is still
+        // display:none, and focusing something that is not displayed does
+        // nothing at all.
+        card.classList.add('ready');
+        document.getElementById('email').focus();
+      }
+    })();
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();

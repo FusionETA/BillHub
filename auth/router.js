@@ -18,6 +18,22 @@ const { attachUser, requireAuth, setSessionCookie, clearSessionCookie, AUTH_DISA
 // user to attribute it to.
 const seen = (req) => ({ ip: req.ip, userAgent: req.headers['user-agent'] });
 
+// How to sign in, for the sign-in page itself. Unauthenticated by necessity:
+// it is what somebody with no session is told, and it is also the one thing
+// the page cannot work out for itself.
+//
+// Nothing here is a secret. It says whether this deployment has a sign-in of
+// its own and, when it does not, where the real one is — which is exactly
+// what the page must put in front of somebody who is locked out.
+router.get('/mode', (req, res) => {
+  res.json({
+    mode: authSource.MODE,
+    borrowed: authSource.BORROWED,
+    disabled: AUTH_DISABLED,
+    signInAt: authSource.BORROWED ? (process.env.WAZZOCR_URL || null) : null
+  });
+});
+
 router.post('/login', async (req, res) => {
   // Signing in while sign-in is switched off would hand back a session the app
   // ignores; say so rather than appearing to work.
