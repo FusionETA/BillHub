@@ -148,6 +148,47 @@
       transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard)
     }
 
+    /* The bills filter bar: eight controls that belong on one line.
+       Wrapping flexbox cannot be trusted with eight: the three that stretch
+       grow into whatever is spare, and whether the last one clears the edge
+       then comes down to a sub-pixel — the Filters button sat alone on a
+       second line while the eight together measured one pixel narrower than
+       the row holding them.
+       So on a wide window the columns are stated outright and the question
+       does not arise. minmax(0, …fr) lets the stretchy three shrink instead
+       of overflowing; the fixed tracks match the widths the controls carry,
+       which is what the flex fallback below uses. */
+    .feta-filterbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 12px
+    }
+
+    /* Entity, Contact and the search box: the three that stretch. The other
+       five carry their own width, which the grid's fixed tracks match. */
+    .feta-filterbar > :nth-child(1) { flex: 1 1 190px; min-width: 172px }
+    .feta-filterbar > :nth-child(2) { flex: 1 1 172px; min-width: 156px }
+    .feta-filterbar > :nth-child(4) { flex: 1 1 170px; min-width: 152px }
+
+    @media (min-width: 1300px) {
+      .feta-filterbar {
+        display: grid;
+        align-items: end;
+        grid-template-columns:
+          minmax(0, 1.15fr) minmax(0, 1.05fr) 160px minmax(0, 1.05fr) 146px 146px 130px max-content
+      }
+
+      /* The track decides, so the flex sizing above must not also apply —
+         a min-width left on one of these overflows its own column. */
+      .feta-filterbar > :nth-child(1),
+      .feta-filterbar > :nth-child(2),
+      .feta-filterbar > :nth-child(4) {
+        flex: initial;
+        min-width: 0
+      }
+    }
+
     ::-webkit-scrollbar {
       width: 10px;
       height: 10px
@@ -1412,22 +1453,29 @@
         </div>
 
         <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 16, padding: '16px 18px', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 240px', minWidth: 220 }}>
+          <div className="feta-filterbar">
+            {/* Eight controls on one line, at 1440 — the widest this page goes.
+                The row is 1346px there and the eight together had to come down
+                to fit: adding the group picker put Date type and Filters on a
+                second line, which reads as two unrelated bars rather than one
+                filter. The three that take typing keep a little give and the
+                rest are fixed, so what gives way as the window narrows is
+                never a date box that then cannot show dd/mm/yyyy. */}
+            <div>
               <EntityPicker entities={entities} selected={f.entities} onChange={v => set({ entities: v })} />
             </div>
-            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+            <div>
               <ContactPicker contacts={contacts} selected={f.contacts} onChange={v => set({ contacts: v })} />
             </div>
-            <div style={{ width: 190 }}>
+            <div style={{ width: 160 }}>
               <Select label="Contact group" options={groupOptions} value={f.group} onChange={v => set({ group: v })} />
             </div>
-            <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+            <div>
               <Input label="Amount or reference" placeholder="e.g. 246.15 or MYIN26" value={f.q} onChange={v => set({ q: v })} />
             </div>
-            <div style={{ width: 160 }}><Input label="Start date" type="date" value={f.dateFrom} onChange={v => set({ dateFrom: v })} /></div>
-            <div style={{ width: 160 }}><Input label="End date" type="date" value={f.dateTo} onChange={v => set({ dateTo: v })} /></div>
-            <div style={{ width: 150 }}><Select label="Date type" options={DATE_TYPES} value={f.dateType} onChange={v => set({ dateType: v })} /></div>
+            <div style={{ width: 146 }}><Input label="Start date" type="date" value={f.dateFrom} onChange={v => set({ dateFrom: v })} /></div>
+            <div style={{ width: 146 }}><Input label="End date" type="date" value={f.dateTo} onChange={v => set({ dateTo: v })} /></div>
+            <div style={{ width: 130 }}><Select label="Date type" options={DATE_TYPES} value={f.dateType} onChange={v => set({ dateType: v })} /></div>
             <Button variant="outline" size="md" onClick={() => setFiltersOpen(o => !o)}>Filters</Button>
           </div>
           {filtersOpen && <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-subtle)' }}>
@@ -2776,25 +2824,32 @@
             </p>
           </div>
           <span style={{ flex: 1 }} />
-          <button onClick={() => onToggleTesting && onToggleTesting(!testing)}
-            title={testing
-              ? 'Testing mode is ON — Bills Hub reads from Xero but writes nothing to it. Click to turn off.'
-              : 'Turn on testing mode: read from Xero and generate bank files, but change nothing in Xero.'}
-            className="feta-hover"
-            style={{ display: 'flex', alignItems: 'center', gap: 9, height: 36, padding: '0 14px', borderRadius: 10, whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: testing ? 'var(--amber-500)' : 'var(--surface-card)', color: testing ? '#3d2c00' : 'var(--color-secondary)', border: testing ? '1.5px solid #c99a00' : '1.5px solid var(--border-default)' }}>
-            <span style={{ width: 28, height: 16, borderRadius: 999, background: testing ? '#3d2c00' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', transition: 'background var(--dur-fast)' }}>
-              <span style={{ position: 'absolute', top: 2, left: testing ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left var(--dur-fast)' }} />
-            </span>
-            <span>Testing mode</span>
-          </button>
-          {/* The button and when it last ran, stacked. A contact created in
-              Xero since that time is simply not here yet, which is the first
-              thing worth knowing when somebody cannot find one — and the
-              question this screen earned by not answering it. */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
-            <Button variant="outline" size="sm" onClick={runSync} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>
-              {syncing ? 'Syncing…' : 'Sync accounts & payees'}
-            </Button>
+          {/* The two controls on one line, with when the sync last ran beneath
+              them both. The timestamp hangs under the pair rather than under
+              the button alone: this row bottom-aligns its children, so a
+              taller column beside the toggle drops the toggle by the height of
+              the line and the two controls stop sharing a baseline.
+
+              A contact created in Xero since that time is simply not here yet,
+              which is the first thing worth knowing when somebody cannot find
+              one — and the question this screen earned by not answering it. */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button onClick={() => onToggleTesting && onToggleTesting(!testing)}
+                title={testing
+                  ? 'Testing mode is ON — Bills Hub reads from Xero but writes nothing to it. Click to turn off.'
+                  : 'Turn on testing mode: read from Xero and generate bank files, but change nothing in Xero.'}
+                className="feta-hover"
+                style={{ display: 'flex', alignItems: 'center', gap: 9, height: 36, padding: '0 14px', borderRadius: 10, whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: testing ? 'var(--amber-500)' : 'var(--surface-card)', color: testing ? '#3d2c00' : 'var(--color-secondary)', border: testing ? '1.5px solid #c99a00' : '1.5px solid var(--border-default)' }}>
+                <span style={{ width: 28, height: 16, borderRadius: 999, background: testing ? '#3d2c00' : 'var(--neutral-300)', position: 'relative', flex: '0 0 auto', transition: 'background var(--dur-fast)' }}>
+                  <span style={{ position: 'absolute', top: 2, left: testing ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left var(--dur-fast)' }} />
+                </span>
+                <span>Testing mode</span>
+              </button>
+              <Button variant="outline" size="sm" onClick={runSync} style={syncing ? { opacity: .6, pointerEvents: 'none' } : null}>
+                {syncing ? 'Syncing…' : 'Sync accounts & payees'}
+              </Button>
+            </div>
             <span style={{ fontSize: 12, color: syncFailed ? 'var(--color-danger)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
               {lastSynced ? `Last synced ${lastSynced}` : 'Not synced yet'}
               {syncFailed ? ` · ${syncFailed} organisation${syncFailed === 1 ? '' : 's'} failed` : ''}
